@@ -106,7 +106,7 @@ void test_accept_requested_ammo_and_banned_validation() {
     Rig r;
     CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
             r.inventory_valid, kit_of("WPN_M4AUTO", 3), 8,
-            /*validate_banned=*/true));
+            /*validate_banned=*/true, LoadoutApplySelect::HeldWeapon));
     CHECK(r.inventory_valid);
     const WeaponTableEntry *def =
             r.world.tables.weapons.by_index(static_cast<uint8_t>(r.m4));
@@ -118,12 +118,12 @@ void test_accept_requested_ammo_and_banned_validation() {
             {{"WPN_M4AUTO", 0}});
     CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
             r.inventory_valid, kit_of("WPN_M4AUTO", 3), 8,
-            /*validate_banned=*/true));
+            /*validate_banned=*/true, LoadoutApplySelect::HeldWeapon));
     CHECK(r.loadout.spawn_kit().empty());
     // The S2C 0x5A grant apply skips the validation and keeps it.
     CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
             r.inventory_valid, kit_of("WPN_M4AUTO", 3), 8,
-            /*validate_banned=*/false));
+            /*validate_banned=*/false, LoadoutApplySelect::HeldWeapon));
     CHECK(r.loadout.spawn_kit().size() == 1);
 }
 
@@ -265,10 +265,10 @@ void test_armor_carry_bit_follows_accepted_loadout() {
     Entity *player = r.world.registry.get(r.world.cached.local_player);
     r.world.tables.weapons.entries[r.m4].flags |= weapon_flag::kArmor;
     CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
-            r.inventory_valid, kit_of("WPN_M4AUTO"), 8, false));
+            r.inventory_valid, kit_of("WPN_M4AUTO"), 8, false, LoadoutApplySelect::HeldWeapon));
     CHECK((player->carry_flags & 8) != 0);
     CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
-            r.inventory_valid, kit_of("WPN_KNIFE"), 8, false));
+            r.inventory_valid, kit_of("WPN_KNIFE"), 8, false, LoadoutApplySelect::HeldWeapon));
     CHECK((player->carry_flags & 8) == 0);
 }
 
@@ -283,14 +283,47 @@ void test_a_windup_survives_the_applies_and_the_spawn_walk_clears_it() {
     r.world.cached.local_player = r.world.registry.spawn(0, Entity{});
     r.weapon.power_throw_start_tick = 7;
     CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
-            r.inventory_valid, kit_of("WPN_M4AUTO"), 8, /*validate_banned=*/true));
+            r.inventory_valid, kit_of("WPN_M4AUTO"), 8, /*validate_banned=*/true,
+            LoadoutApplySelect::HeldWeapon));
     CHECK(r.weapon.power_throw_start_tick == 7); // the armory ACCEPT runs no walk
     CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
-            r.inventory_valid, kit_of("WPN_M4AUTO"), 8, /*validate_banned=*/false));
+            r.inventory_valid, kit_of("WPN_M4AUTO"), 8, /*validate_banned=*/false,
+            LoadoutApplySelect::HeldWeapon));
     CHECK(r.weapon.power_throw_start_tick == 7); // nor the S2C 0x5A apply
     local_loadout_rebuild(r.world, r.loadout, r.weapon, r.inventory,
             r.inventory_valid, /*select_spawn_default=*/true);
     CHECK(r.weapon.power_throw_start_tick == 0); // Player_InitPlayer's walk clears it
+}
+
+// The apply's select (LoadoutApplySelect): the held weapon's combo, or under a protocol whose
+// S2C 0x5A apply takes the kit's last primary row (DFX2-35) that row's, whatever the body holds,
+// and AdmDef 0's (the "null" def, combo 0) when the kit lists no primary.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x4296BC..0x4296D4]
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 (dfx2.exe) - @0x42B0AB..0x42B0BD,
+//  @0x42B4F3..0x42B50B]
+void test_the_apply_selects_the_held_weapon_or_the_last_primary_row() {
+    Rig r;
+    const int m24 = add_entry(r.world.tables.weapons, "WPN_M24", 4, 0, 5, 30, "AMMO_762", 1);
+    r.world.registry.configure_pool(0, 1);
+    r.world.cached.local_player = r.world.registry.spawn(0, Entity{});
+    r.world.registry.get(r.world.cached.local_player)->equipped_adm_index =
+            static_cast<uint8_t>(m24);
+    const std::vector<WeaponKitEntry> kit = {WeaponKitEntry{"WPN_M24", -1, -1, -1},
+            WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}, WeaponKitEntry{"WPN_KNIFE", -1, -1, -1}};
+    const int32_t m24_combo = 4 * weapon_combo::kRanksPerCategory;
+    const int32_t m4_combo = 3 * weapon_combo::kRanksPerCategory;
+    CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, kit, 8, /*validate_banned=*/false,
+            LoadoutApplySelect::HeldWeapon));
+    CHECK(r.inventory.current_slot == m24_combo && r.inventory.selected_combo == m24_combo);
+    CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, kit, 8, /*validate_banned=*/false,
+            LoadoutApplySelect::LastPrimaryRow));
+    CHECK(r.inventory.current_slot == m4_combo && r.inventory.selected_combo == m4_combo);
+    CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
+            r.inventory_valid, kit_of("WPN_KNIFE"), 8, /*validate_banned=*/false,
+            LoadoutApplySelect::LastPrimaryRow));
+    CHECK(r.inventory.current_slot == 0);
 }
 
 } // namespace
@@ -377,7 +410,8 @@ void test_accept_sub_variant_index_wraps() {
     const int edge = add_entry(t, "WPN_EDGE", 3, 0, 30, 210, "AMMO_556", 1, 3);
     CHECK(edge == 254);
     CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
-            r.inventory_valid, kit_of("WPN_EDGE", 3, 5), 8, /*validate_banned=*/false));
+            r.inventory_valid, kit_of("WPN_EDGE", 3, 5), 8, /*validate_banned=*/false,
+            LoadoutApplySelect::HeldWeapon));
     const WeaponTableEntry &gl = t.entries[static_cast<size_t>(sub)];
     CHECK(r.inventory.pools[static_cast<size_t>(gl.ammo_class_id)] == 5);
 }
@@ -393,6 +427,7 @@ int main() {
     test_rebuild_and_mount_carry_the_slot_zoom();
     test_a_mount_reads_the_defs_own_slot();
     test_a_windup_survives_the_applies_and_the_spawn_walk_clears_it();
+    test_the_apply_selects_the_held_weapon_or_the_last_primary_row();
     test_armory_class_policy();
     test_player_info_menu_policy();
     if (failures == 0) std::printf("player_loadout_test: all passed\n");

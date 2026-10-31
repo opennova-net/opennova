@@ -52,20 +52,27 @@ std::vector<const RemoteProject *> empty_projects(const SessionView &view) {
 	return out;
 }
 
-// A project's words in a list: its title, then its key.
-std::string project_words(const RemoteProject &project) {
-	return project.title.empty() || project.title == project.key ? project.key : project.title + " (" + project.key + ")";
-}
-
-// A base game's words by its key: its name, as the games or the projects list it, then its key.
+// A base game's words by its key: its name, as the games or the projects list it.
 std::string base_words(const NovaWorldView &novaworld, const std::string &key) {
 	for (const RemoteGame &game : novaworld.games)
-		if (game.key == key) return game.title.empty() || game.title == key ? key : game.title + " (" + key + ")";
+		if (game.key == key) return game.title.empty() ? key : game.title;
 	const RemoteProject *project = listed(novaworld, key);
-	return project ? project_words(*project) : key;
+	return project ? novaworld_project_words(novaworld, *project) : key;
 }
 
 } // namespace
+
+std::string novaworld_project_words(const NovaWorldView &novaworld, const RemoteProject &project) {
+	const std::string name = project.title.empty() ? project.key : project.title;
+	size_t named = 0, owned = 0;
+	for (const RemoteProject &other : novaworld.projects)
+		if ((other.title.empty() ? other.key : other.title) == name) {
+			++named;
+			owned += other.owner == project.owner ? 1 : 0;
+		}
+	if (named < 2) return name;
+	return owned < 2 && !project.owner.empty() ? name + ", " + project.owner + "'s" : name + " (" + project.key + ")";
+}
 
 std::string novaworld_key_for(const std::string &title, bool player) {
 	const size_t most = player ? kPlayerKeyMost : 16;
@@ -95,6 +102,13 @@ void NovaWorldPutDialog::fill(const SessionView &view) {
 	// The likeliest empty project, of those the project may be put on (novaworld_put_mismatch: a game or a mod as
 	// it is, of its game, a mod by its short name): its key or its name the project's, else the first. None of
 	// another kind, game or short name is chosen.
+	if (!new_here_.empty()) {
+		copy_text(key_, sizeof(key_), new_here_);
+		key_typed_ = true;
+		empty_.clear();
+		create_ = true;
+		return;
+	}
 	const std::string expansion = view.project.document ? view.project.document->expansion.name : std::string();
 	const std::vector<const RemoteProject *> matching = empty_projects(view);
 	const RemoteProject *likely = nullptr;
@@ -119,14 +133,15 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 	}
 	if (!ImGui::BeginPopupModal(kTitle, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
 	// The project it was for closed, or put there now (its key written: this put's, or another client's).
-	if (!v.project.open || !c.key.empty()) {
+	if (!v.project.open || (new_here_.empty() ? !c.key.empty() : c.key != new_here_ || c.remote_known)) {
 		ImGui::CloseCurrentPopup();
 		ImGui::EndPopup();
 		return;
 	}
 	ImGui::Dummy(ImVec2(ImGui::GetFontSize() * 30.0f, 0.0f)); // as wide as its lines need, whatever is offered
 	const bool player = !(c.signed_in && c.role == "admin");
-	const std::vector<const RemoteProject *> empty = empty_projects(v);
+	const std::vector<const RemoteProject *> empty =
+			new_here_.empty() ? empty_projects(v) : std::vector<const RemoteProject *>();
 	// An empty project to take only where one the project may be put on is listed.
 	if (!empty.empty()) {
 		if (ImGui::RadioButton("A new project of yours", create_)) create_ = true;
@@ -145,11 +160,14 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 		if (ImGui::InputText("Name", title_, sizeof(title_)) && !key_typed_)
 			copy_text(key_, sizeof(key_), novaworld_key_for(title_, player));
 		ui_kit::tooltip("The project's name on NovaWorld.");
-		ImGui::SetNextItemWidth(width);
-		if (ImGui::InputText("Key", key_, sizeof(key_), ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank))
-			key_typed_ = true;
 		const char *key_rule = player ? "Up to 11 of A-Z, 0-9 and _, without \"QQ\"." : "Up to 16 of A-Z, 0-9 and _.";
-		ui_kit::tooltip(std::string("How NovaWorld and every copy of the project name it. ") + key_rule);
+		if (new_here_.empty() && ImGui::TreeNodeEx("Details", ImGuiTreeNodeFlags_NoAutoOpenOnLog)) {
+			ImGui::SetNextItemWidth(width);
+			if (ImGui::InputText("Key", key_, sizeof(key_), ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank))
+				key_typed_ = true;
+			ui_kit::tooltip(std::string("How NovaWorld and every copy of the project name it, made from its name. ") + key_rule);
+			ImGui::TreePop();
+		}
 		// Who gets it, as the website asks it: public first.
 		ui_kit::quiet_text("Who gets it");
 		if (ImGui::RadioButton("Public", public_)) public_ = true;
@@ -219,14 +237,18 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 			if (why.empty()) why = c.put.refusal;
 		}
 		if (why.empty() && !title_[0]) why = "Name it first.";
+		if (why.empty() && !key_[0]) why = "Name it with letters or digits.";
 		if (why.empty() && !(player ? novaworld_player_key(key_) : is_novaworld_key(key_)))
-			why = std::string("Its key: ") + key_rule;
+			why = std::string("Its key, under Details: ") + key_rule;
 	} else {
 		ImGui::SetNextItemWidth(width);
 		const RemoteProject *chosen = listed(c, empty_);
-		if (ImGui::BeginCombo("Project", chosen ? project_words(*chosen).c_str() : "Choose one")) {
-			for (const RemoteProject *project : empty)
-				if (ImGui::Selectable(project_words(*project).c_str(), project->key == empty_)) empty_ = project->key;
+		if (ImGui::BeginCombo("Project", chosen ? novaworld_project_words(c, *chosen).c_str() : "Choose one")) {
+			for (const RemoteProject *project : empty) {
+				ImGui::PushID(project->key.c_str());
+				if (ImGui::Selectable(novaworld_project_words(c, *project).c_str(), project->key == empty_)) empty_ = project->key;
+				ImGui::PopID();
+			}
 			ImGui::EndCombo();
 		}
 		ui_kit::tooltip("A project on NovaWorld with nothing pushed yet that this project is (a game or a mod, of its "
@@ -258,7 +280,10 @@ void NovaWorldPutDialog::draw(Workspace &workspace) {
 		asked_ = true;
 	}
 	ImGui::SameLine();
+	// Nothing can call back a put once asked: its answer is awaited, and says itself.
+	ImGui::BeginDisabled(asking);
 	if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+	ImGui::EndDisabled();
 	ImGui::EndPopup();
 }
 

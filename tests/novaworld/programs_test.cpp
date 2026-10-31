@@ -3,20 +3,19 @@
 // (program_process.h) on an empty database of its own, which its shared boot
 // migrates:
 //
-//   - gate: a gate missing ONNET_WEB_HOST, or ONNET_PUBLIC_HOST in its
-//     environment (the default would announce loopback), or with an
-//     ONNET_LOBBY_ENDPOINT that is no <host>:<port>, does not boot: a FATAL line
-//     and exit 1 before the database is touched, after its boot line. Booted:
-//     the gate alone (no NW UDP, no HTTP, no job pool, no election), GET /livez
-//     on its health port; with no lobby instance it hands out its fallback
-//     lobby, and with no fallback either it answers no probe (and says so);
+//   - gate: a gate with an ONNET_LOBBY_ENDPOINT that is no <host>:<port> does
+//     not boot: a FATAL line and exit 1 before the database is touched, after
+//     its boot line. Booted (with no ONNET_WEB_HOST, which no reply names): the
+//     gate alone (no NW UDP, no HTTP, no job pool, no election), GET /livez on
+//     its health port; with no lobby instance it hands out its fallback lobby,
+//     and with no fallback either it answers no probe (and says so);
 //   - lobby: one missing ONNET_WEB_HOST or ONNET_LOBBY_ENDPOINT, or with an
 //     ONNET_LOBBY_ENDPOINT that is no <host>:<port>, does not boot. Booted: the
 //     NW UDP listener alone, its instance registered at the configured
-//     endpoint, GET /livez; a gate started beside it hands that endpoint and
-//     the web endpoint its config names (ONNET_WEB_HOST and ONNET_HTTP_PORT),
-//     never a port bound beside it, and so does the lobby's 0x82 SessionInit
-//     (its web domain);
+//     endpoint, GET /livez; a gate started beside it hands that endpoint, never
+//     a port bound beside it, and the lobby's 0x82 SessionInit names the web
+//     endpoint its config names (ONNET_WEB_HOST and ONNET_HTTP_PORT: its web
+//     domain), which the gate's startupurl leaves to it ([domainname]);
 //   - two lobbies sharing one lobby address (a deployment's load balancer's),
 //     each its own instance: both register under ids of their own, the
 //     second's start reaps an instance unseen past the stale window with its
@@ -65,10 +64,6 @@ using namespace program_process;
 namespace {
 
 const opennova::Protocol &kJo = *opennova::title_protocol("jo");
-// The JO demo's tag answers in JO's lobby with the reply that names the gate's POST pair and the
-// web endpoint (its live reply is unrecorded; JO's own answers in the live shape, D-NET-721).
-const opennova::Protocol &kJoDemo =
-		*opennova::title_protocol("jodemo");
 
 constexpr const char *kWebHost = "web.example.test";
 
@@ -194,27 +189,10 @@ int session_web_domain(uint16_t port, std::string &web_domain) {
 
 int exercise_gate(const Binaries &bin, const test_temp::TempDir &temp,
 		const test_db::TestDatabase &database, const std::string &log_path) {
-	const std::string web = std::string("ONNET_WEB_HOST=") + kWebHost;
-	{
-		ProgramProcess process;
-		if (refused(process, "gate", bin.gate, env_of(temp, database.conninfo(), {}), temp,
-					log_path, "[boot] FATAL: the gate needs ONNET_WEB_HOST") != 0)
-			return 1;
-	}
-	{
-		ProgramProcess process;
-		std::vector<std::string> no_public_host;
-		for (const std::string &e : env_of(temp, database.conninfo(), { web }))
-			if (e.rfind("ONNET_PUBLIC_HOST=", 0) != 0)
-				no_public_host.push_back(e);
-		if (refused(process, "gate", bin.gate, no_public_host, temp, log_path,
-					"[boot] FATAL: the gate needs ONNET_PUBLIC_HOST") != 0)
-			return 1;
-	}
 	{
 		ProgramProcess process;
 		if (refused(process, "gate", bin.gate,
-					env_of(temp, database.conninfo(), { web, "ONNET_LOBBY_ENDPOINT=nowhere" }),
+					env_of(temp, database.conninfo(), { "ONNET_LOBBY_ENDPOINT=nowhere" }),
 					temp, log_path, "[boot] FATAL: ONNET_LOBBY_ENDPOINT is no <host>:<port>") != 0)
 			return 1;
 	}
@@ -223,8 +201,7 @@ int exercise_gate(const Binaries &bin, const test_temp::TempDir &temp,
 		ProgramProcess process;
 		if (!boot(process, bin.gate,
 					env_of(temp, database.conninfo(),
-							{ web, "ONNET_GATE_UDP_PORT=0", "ONNET_HTTP_PORT=8123",
-									"ONNET_LOBBY_ENDPOINT=127.0.0.9:64206" }),
+							{ "ONNET_GATE_UDP_PORT=0", "ONNET_LOBBY_ENDPOINT=127.0.0.9:64206" }),
 					temp.root(), log_path))
 			return 1;
 		const std::string log = read_text(log_path);
@@ -237,8 +214,7 @@ int exercise_gate(const Binaries &bin, const test_temp::TempDir &temp,
 		if (livez_ok(process, log_path) != 0)
 			return 1;
 		opennova::GateResponse reply;
-		TEST_EXPECT(probe_gate(gate_port, reply, 3000, kJoDemo.gate_tag));
-		TEST_EXPECT(reply.post_port == gate_port);
+		TEST_EXPECT(probe_gate(gate_port, reply));
 		TEST_EXPECT(reply.udp_novaworld == std::vector<std::string>{ "127.0.0.9:64206" });
 		if (stop_cleanly(process, "gate", database, log_path) != 0)
 			return 1;
@@ -249,7 +225,7 @@ int exercise_gate(const Binaries &bin, const test_temp::TempDir &temp,
 	{
 		ProgramProcess process;
 		if (!boot(process, bin.gate,
-					env_of(temp, database.conninfo(), { web, "ONNET_GATE_UDP_PORT=0" }),
+					env_of(temp, database.conninfo(), { "ONNET_GATE_UDP_PORT=0" }),
 					temp.root(), log_path))
 			return 1;
 		const uint16_t gate_port = logged_port(read_text(log_path), kGateLine);
@@ -320,20 +296,19 @@ int exercise_lobby(const Binaries &bin, const test_temp::TempDir &temp,
 		return 1;
 	TEST_EXPECT(web_domain == std::string(kWebHost) + ":8123");
 
-	// A gate beside it, no fallback: it hands out the lobby's instance.
+	// A gate beside it, no fallback: it hands out the lobby's instance, and leaves the web
+	// endpoint to the lobby's SessionInit ([domainname]).
 	{
 		const std::string gate_log = temp.file("gate.log");
 		ProgramProcess gate;
-		if (!boot(gate, bin.gate,
-					env_of(temp, database.conninfo(),
-							{ web, "ONNET_GATE_UDP_PORT=0", "ONNET_HTTP_PORT=8123" }),
+		if (!boot(gate, bin.gate, env_of(temp, database.conninfo(), { "ONNET_GATE_UDP_PORT=0" }),
 					temp.root(), gate_log))
 			return 1;
 		const uint16_t gate_port = logged_port(read_text(gate_log), kGateLine);
 		opennova::GateResponse reply;
-		TEST_EXPECT(probe_gate(gate_port, reply, 3000, kJoDemo.gate_tag));
+		TEST_EXPECT(probe_gate(gate_port, reply));
 		TEST_EXPECT(reply.udp_novaworld == std::vector<std::string>{ lobby });
-		const std::string startup = std::string("http://") + kWebHost + ":8123/nwprepare.dll?";
+		const std::string startup = "http://[domainname]/nwprepare.dll?";
 		if (reply.startup_url.compare(0, startup.size(), startup) != 0)
 			std::fprintf(stderr, "  STARTUPURL %s\n", reply.startup_url.c_str());
 		TEST_EXPECT(reply.startup_url.compare(0, startup.size(), startup) == 0);
@@ -344,8 +319,8 @@ int exercise_lobby(const Binaries &bin, const test_temp::TempDir &temp,
 		return 1;
 	TEST_EXPECT(logged_in_order(
 			read_text(log_path), { "[shutdown] stopping listeners", "[nwudp] loop exiting" }));
-	std::printf("  lobby: alone at %s; a gate beside it hands it out and %s:8123\n", lobby.c_str(),
-			kWebHost);
+	std::printf("  lobby: alone at %s, its web domain %s:8123; a gate beside it hands it out\n",
+			lobby.c_str(), kWebHost);
 	return 0;
 }
 

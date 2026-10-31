@@ -1,15 +1,18 @@
-// THE KEY-TOGGLED OVERLAY WINDOWS: the I briefing panel, the F1 key-binding
-// help screen and the F12 map legend, the tail HUD_DrawGameplayOverlays draws
-// after the big map [orig: HUD_DrawGameplayOverlays @0x5BDE60 — the briefing
+// THE KEY-TOGGLED OVERLAY WINDOWS: the I briefing panel (the end-game screen in
+// a session), the F1 key-binding help screen and the F12 map legend, the tail
+// HUD_DrawGameplayOverlays draws after the big map [orig: HUD_DrawGameplayOverlays
+// @0x5BDE60 — the briefing
 // @0x5be133..0x5be145, HUD_DrawWinConditions @0x5be163, HelpScreen_Draw
 // @0x5be179], plus the block wrapper the briefing lays its text out with
 // [orig: HUD_DrawWrappedText @0x580C00].
 // The overlay-panel pass's voice-macro menus and the SP pause text live here
 // too (HUD_DrawOverlayPanels @0x5c0060).
 
+#include <base/title/title.h> // Title::hud_lone_gunner_panel, hud_map_legend, hud_end_game_footer_corners
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_medic_cross.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -55,7 +58,7 @@ uint32_t legend_icon_color(const char *name, uint32_t color, int frame_counter) 
 
 int wrapped_text_layout(const GameFont &font, float scale_x, float scale_y,
 		const std::string &text, int x_start, int y_start, int x_end, int y_limit,
-		int skip_lines, std::vector<HudWrappedLine> &out) {
+		int skip_lines, std::vector<HudWrappedLine> &out, int tab_width) {
 	out.clear();
 	if (font.font() == nullptr || scale_x == 0.0f) return 0;
 	const int budget = ftol(static_cast<float>(x_end - x_start) / scale_x);
@@ -76,7 +79,9 @@ int wrapped_text_layout(const GameFont &font, float scale_x, float scale_y,
 		if (c != '\0') {
 			int h = 0;
 			const std::string run = text.substr(line_start, i + 1 - line_start);
-			font.measure(run.c_str(), 1.0f, 1.0f, &width, &h);
+			GameFontState tabs;
+			tabs.tab_width = tab_width;
+			font.measure(run.c_str(), 1.0f, 1.0f, &width, &h, tab_width != 0 ? &tabs : nullptr);
 		}
 		size_t line_end = i;
 		if (width <= budget) {
@@ -248,7 +253,22 @@ void HudFrameCompiler::element_objectives(const HudFrameState &state, float w, f
 		line(bx + 16.0f, row_y, bx + 16.0f, row_y + 16.0f, box_c);
 		line(bx + 16.0f, row_y + 16.0f, bx, row_y + 16.0f, box_c);
 		line(bx, row_y + 16.0f, bx, row_y, box_c);
-		if (row.done) {
+		if (row.done && state.title != nullptr && state.title->hud_objective_done_fill) {
+			// dfx2.exe's done mark is a green square inside the box: a device clear of the rect
+			// (x + 2, y + 2)..(x + 15, y + 15), each corner through the integer design scaling,
+			// opaque whatever the panel alpha, as a clear writes its colour (DFX2-93)
+			// [orig: sub_5B9890 @0x5B9890 - Render_FillViewportRect(ctx, x + 2, y + 2, x + 15, y +
+			//  15, 0xFF00C000) @0x5B9AFC..0x5B9B12; Render_FillViewportRect @0x5D38C0 -
+			//  CD3DDevice_GetViewportRect @0x5D38D0, the corners @0x5D38D9..0x5D3968,
+			//  CGfxDevice_SetClearColor @0x5D3972, CGfxDevice_Clear(rect, 1) @0x5D3988 (dfx2.exe)].
+			const int32_t cx = static_cast<int32_t>(bx);
+			const int32_t cy = static_cast<int32_t>(row_y);
+			const int32_t surface_h = static_cast<int32_t>(h);
+			emit_rect(static_cast<float>(design_to_screen_x(cx + 2, surface_w)),
+					static_cast<float>(design_to_screen_y(cy + 2, surface_h)),
+					static_cast<float>(design_to_screen_x(cx + 15, surface_w)),
+					static_cast<float>(design_to_screen_y(cy + 15, surface_h)), 0xFF00C000u, true);
+		} else if (row.done) {
 			// The done mark is a RED X — both diagonals, each tripled with
 			// one-pixel offsets [orig: the six calls @0x5babc1..0x5bac5b,
 			// colour 0xFFFF0000].
@@ -270,18 +290,18 @@ void HudFrameCompiler::element_objectives(const HudFrameState &state, float w, f
 	++draw_list_.elements_drawn;
 }
 
-void HudFrameCompiler::element_briefing(const HudFrameState &state, float w, float h) {
+void HudFrameCompiler::element_briefing(const HudBriefingState &briefing, float w, float h) {
 	// [orig: HUD_DrawBriefingPanel @0x5bad00 — HUD_DrawLabelBox(ctx, 200, 40, 824, 728, null, -1)
 	//  @0x5bad4a; the text rect (235, 75)..(789, 693) through
 	//  Viewport_ScaleToVirtualCoords @0x5bad73/@0x5bad87; HUD_DrawWrappedText
 	//  in the bold slot, alignment 0, colour -1, skipping the page's start
 	//  lines @0x5bade7; an overflow writes the next page's start @0x5badfa]
-	if (!state.briefing.shown) return;
+	if (!briefing.shown) return;
 	emit_label_box(200.0f, 40.0f, 824.0f, 728.0f, std::string(), 0xFFFFFFFFu, w, h);
 	const bool have_bold = label_font_bold_.font() != nullptr;
 	const GameFont &bf = have_bold ? label_font_bold_ : font_;
 	const float bscale = have_bold ? label_scale_ : 1.0f;
-	if (bf.font() == nullptr || state.briefing.text.empty()) return;
+	if (bf.font() == nullptr || briefing.text.empty()) return;
 	const int x0 = ftol(sx(235.0f, w));
 	const int y0 = ftol(sy(75.0f, h));
 	const int x1 = ftol(sx(789.0f, w));
@@ -289,8 +309,10 @@ void HudFrameCompiler::element_briefing(const HudFrameState &state, float w, flo
 	HudBriefingPages &pages = briefing_pages_;
 	if (pages.page < 0 || pages.page >= HudBriefingPages::kPages) pages.page = 0;
 	std::vector<HudWrappedLine> lines;
-	const int next = wrapped_text_layout(bf, bscale, bscale, state.briefing.text, x0, y0, x1,
-			y1, pages.starts[pages.page], lines);
+	// The how-to draws from its first line and keeps no page (DFX2-96).
+	const bool how_to = briefing.how_to;
+	const int next = wrapped_text_layout(bf, bscale, bscale, briefing.text, x0, y0, x1,
+			y1, how_to ? 0 : pages.starts[pages.page], lines);
 	// The wrapper halves the colour keeping its alpha [orig: @0x580c99..0x580ca8].
 	const uint32_t color = half_bright_keep_alpha(0xFFFFFFFFu);
 	// The wrapper threads one five-dword state block through every line: the
@@ -306,14 +328,93 @@ void HudFrameCompiler::element_briefing(const HudFrameState &state, float w, flo
 	GameFontState block;
 	block.tags_inert = true;
 	for (const HudWrappedLine &line : lines) {
-		const std::string run = state.briefing.text.substr(line.begin, line.end - line.begin);
+		const std::string run = briefing.text.substr(line.begin, line.end - line.begin);
 		const GameFontRun laid = bf.layout(run.c_str(), static_cast<float>(x0),
 				static_cast<float>(line.y), bscale, bscale, 0u, color, &block);
 		draw_list_.glyphs.insert(draw_list_.glyphs.end(), laid.quads.begin(), laid.quads.end());
 		draw_list_.underlines.insert(draw_list_.underlines.end(), laid.underlines.begin(),
 				laid.underlines.end());
 	}
-	if (next != 0 && pages.page + 1 < HudBriefingPages::kPages) pages.starts[pages.page + 1] = next;
+	if (!how_to && next != 0 && pages.page + 1 < HudBriefingPages::kPages)
+		pages.starts[pages.page + 1] = next;
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_end_game_screen(const HudFrameState &state, float w, float h) {
+	// THE END-GAME SCREEN, the I window in a session [orig: HUD_DrawEndGameScreen @0x5bd070 —
+	//  HUD_DrawLabelBox(ctx, 170, 76, 854, 692, NULL, -1) @0x5bd089..0x5bd0c8; the text rect,
+	//  the box inset 42 / 38 / 42 / 48, (212, 114)..(812, 644), each corner through
+	//  Viewport_ScaleToVirtualCoords @0x5bd0cd..0x5bd107; the rest only while the status
+	//  record is valid @0x5bd10f..0x5bd115]
+	const HudEndGameScreenState &eg = state.end_game;
+	if (!eg.shown) return;
+	emit_label_box(170.0f, 76.0f, 854.0f, 692.0f, std::string(), 0xFFFFFFFFu, w, h);
+	const int32_t sw = static_cast<int32_t>(w);
+	const int32_t sh = static_cast<int32_t>(h);
+	const int32_t x1 = design_to_screen_x(212, sw);
+	const int32_t y1 = design_to_screen_y(114, sh);
+	const int32_t x2 = design_to_screen_x(812, sw);
+	const int32_t y2 = design_to_screen_y(644, sh);
+	if (!eg.valid) {
+		++draw_list_.elements_drawn;
+		return;
+	}
+	const bool have_bold = label_font_bold_.font() != nullptr;
+	const GameFont &bf = have_bold ? label_font_bold_ : font_;
+	const float bscale = have_bold ? label_scale_ : 1.0f;
+	// The bold slot's tab stop, 240 scaled (GText_SetTabWidth clamps below 0 to 0), which the
+	// wrapper's measure and its state block read [orig: @0x5bd12d..0x5bd14a; HUD_DrawWrappedText
+	// @0x580cc6..0x580cce]. Retail's write stays on the font after the screen.
+	const int tab = std::max(0, design_to_screen_x(240, sw));
+	// The page's text, wrapped from its first line in the bold slot, alignment 0, colour -1,
+	// the overflow line written as the next page's start [orig: HUD_DrawWrappedText(text,
+	// g_HUDLabelFontBold, x1, y1, x2, y2, 0, -1, 0) @0x5bdd0f..0x5bdd36; dword_28E3D74[page]
+	// @0x5bdd44..0x5bdd4b].
+	std::vector<HudWrappedLine> lines;
+	const int next =
+			wrapped_text_layout(bf, bscale, bscale, eg.text, x1, y1, x2, y2, 0, lines, tab);
+	const uint32_t color = half_bright_keep_alpha(0xFFFFFFFFu);
+	GameFontState block;
+	block.tags_inert = !eg.tags_live;
+	block.tab_width = tab;
+	for (const HudWrappedLine &line : lines) {
+		const std::string run = eg.text.substr(line.begin, line.end - line.begin);
+		const GameFontRun laid = bf.layout(run.c_str(), static_cast<float>(x1),
+				static_cast<float>(line.y), bscale, bscale, 0u, color, &block);
+		draw_list_.glyphs.insert(draw_list_.glyphs.end(), laid.quads.begin(), laid.quads.end());
+		draw_list_.underlines.insert(draw_list_.underlines.end(), laid.underlines.begin(),
+				laid.underlines.end());
+	}
+	HudBriefingPages &pages = briefing_pages_;
+	if (next != 0 && eg.page >= 0 && eg.page + 1 < HudBriefingPages::kPages)
+		pages.starts[eg.page + 1] = next;
+	// The footer, bold, half-bright white [orig: KeyHelp Text/PAGE and Text/CHANGE_SCREEN].
+	const uint32_t footer_color = half_bright_argb(0xFFFFFFFFu);
+	if (state.title != nullptr && state.title->hud_end_game_footer_corners) {
+		// DFX2-95: "Page n of 4" right-aligned at the box's right edge and the hint left-aligned
+		// at its left, both at its bottom plus the safe top; the corners already scaled are
+		// scaled again, and the bottom once from 644 [orig: HUD_DrawEndGameScreen @0x5BBF20 - the
+		// unscaled bottom var_1288 @0x5BBF8F..0x5BBF9A; HUD_DrawTextRightAligned_HalfBright(bold,
+		// x, y, text, -1, 1) @0x5BCC3D..0x5BCC84; HUD_DrawTextLeft_HalfBright(bold, x, y, text, -1,
+		// 1) @0x5BCCAE..0x5BCCF0; the flags 1 select nothing, HUD_DrawTextRightAligned_HalfBright
+		// @0x57ECD0 testing 0x100 and 2 (dfx2.exe)].
+		const float y = static_cast<float>(design_to_screen_y(644, sh)) + kSafeTop;
+		emit_slot_text(label_font_bold_, label_scale_, eg.page_line.c_str(),
+				static_cast<float>(design_to_screen_x(x2, sw)), y, footer_color, kFontAlignRight);
+		emit_slot_text(label_font_bold_, label_scale_, eg.footer.c_str(),
+				static_cast<float>(design_to_screen_x(x1, sw)), y, footer_color, 0u);
+	} else {
+		// Both centred on the screen, at design (512, 700) and (512, 720) plus the safe top
+		// [orig: HUD_DrawTextCentered_HalfBright @0x5bdd7d..0x5bddc4 / @0x5bddee..0x5bde31;
+		//  HUD_DrawTextCentered_HalfBright @0x580680 (flags 1: draw flags 1)].
+		const float x = static_cast<float>(design_to_screen_x(512, sw));
+		emit_slot_text(label_font_bold_, label_scale_, eg.page_line.c_str(), x,
+				static_cast<float>(design_to_screen_y(700, sh)) + kSafeTop, footer_color,
+				kFontAlignCenter);
+		emit_slot_text(label_font_bold_, label_scale_, eg.footer.c_str(), x,
+				static_cast<float>(design_to_screen_y(720, sh)) + kSafeTop, footer_color,
+				kFontAlignCenter);
+	}
 	++draw_list_.elements_drawn;
 }
 
@@ -360,19 +461,25 @@ void HudFrameCompiler::element_help_screen(const HudFrameState &state, float w, 
 void HudFrameCompiler::element_map_legend(const HudFrameState &state, float w, float h) {
 	// [orig: HUD_DrawHelpScreenIcons @0x497480 — HUD_DrawLabelBox(ctx, 128,
 	//  96, 896, 672, Hud/hud_map_legend, -1) @0x4974bd; the label offset
-	//  (32, 8), column x 192 / 512, first row y 144 and the 40 row step, each
-	//  through Viewport_ScaleToVirtualCoords @0x4974e1/@0x49750d/@0x49752f]
+	//  (32, 8), column x 192 / 512, first row y 144 and the row step, each
+	//  through Viewport_ScaleToVirtualCoords @0x4974e1/@0x49750d/@0x49752f].
+	// The table and the step are the title's (Title::hud_map_legend, DFX2-89):
+	// Jointops.exe's 40 [orig: @0x497524], dfx2.exe's 52 over its own table
+	// [orig: HUD_DrawHelpScreenIcons @0x497490 - @0x497534 (dfx2.exe)].
 	const HudMapLegendState &ml = state.map_legend;
 	emit_label_box(128.0f, 96.0f, 896.0f, 672.0f, ml.title, 0xFFFFFFFFu, w, h);
+	const TitleHudMapLegend *legend =
+			state.title != nullptr ? state.title->hud_map_legend : nullptr;
+	const int icon_count = legend != nullptr ? legend->count : 0;
 	const float label_dx = sx(32.0f, w);
 	const float label_dy = sy(8.0f, h);
 	const float col0_x = sx(192.0f, w);
 	const float col1_x = sx(512.0f, w);
-	const float row_step = sy(40.0f, h);
+	const float row_step = legend != nullptr ? sy(static_cast<float>(legend->row_step), h) : 0.0f;
 	float y = sy(144.0f, h);
 	const uint32_t label_color = half_bright_argb(active_color(state));
-	for (int i = 0; i < kHudMapLegendIconCount; ++i) {
-		const HudMapLegendIcon &icon = kHudMapLegendIcons[i];
+	for (int i = 0; i < icon_count; ++i) {
+		const TitleHudMapLegendIcon &icon = legend->icons[i];
 		// The icon's half extents: the size factor times 16, scaled per axis
 		// [orig: `fmul flt_7C4870` (16.0) @0x49754a; Viewport_ScaleToVirtualCoords
 		//  @0x49756c]. The pair walk: even entries in the left column, odd in
@@ -487,6 +594,33 @@ void HudFrameCompiler::element_paused_text(const HudFrameState &state, float w, 
 	const float ls = (have_impact || have_large) ? label_large_scale_ : label_scale_;
 	emit_text_at_virtual_pos(lf.font() != nullptr ? lf : font_, lf.font() != nullptr ? ls : 1.0f,
 			state.paused_text.c_str(), x, y, w, h, active_color(state), 1);
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_lone_gunner_panel(const HudFrameState &state, float w, float h) {
+	// DFX2-91: dfx2.exe's lone-gunner panel, the HUD side of DFX2-37. In the overlay panels' pass,
+	// after the input line and ahead of the kill banner, while the local player is a lone gunner:
+	// the titleless stdbox (320, 500)..(704, 600), then its two-line string centred on design
+	// (512, 528) in the large slot, in palette entry 4 half-bright. The pass tests no HUD level and
+	// no death screen around it. The string is the executable's own literal, no gametext key.
+	// Jointops.exe carries the same drawer and string with no caller.
+	// [orig: sub_5BEEA0 @0x5BEEA0 (dfx2.exe) - the gate @0x5BEFBA..0x5BEFE9, sub_5B8050 called
+	//  @0x5BEFEC between sub_5B7FE0 @0x5BEFB2 and HUD_DrawKillAnnounceBanner @0x5BEFFE;
+	//  sub_5B8050 @0x5B8050 (dfx2.exe) - palette entry 4 g_HUDColors.palette[4] @0x5B8055,
+	//  HUD_DrawLabelBox(ctx, 320, 500, 704, 600, NULL, -1) @0x5B805B..0x5B8074,
+	//  HUD_DrawTextCenteredScaled(&g_HUDLabelFontLarge, 512, 528, text, entry 4, 1)
+	//  @0x5B8079..0x5B8090, the string @0x7DA540; HUD_DrawTextCenteredScaled @0x57F000 -
+	//  Viewport_ScaleToVirtualCoords @0x57F00F, HUD_DrawTextCentered_HalfBright @0x57F032
+	//  (dfx2.exe)]
+	// [orig: @0x5B9100..0x5B9149 (no function, no xref), the string @0x7DB408]
+	if (state.title == nullptr || !state.title->hud_lone_gunner_panel || !state.lone_gunner)
+		return;
+	emit_label_box(320.0f, 500.0f, 704.0f, 600.0f, std::string(), 0xFFFFFFFFu, w, h);
+	const int32_t x = design_to_screen_x(512, static_cast<int32_t>(w));
+	const int32_t y = design_to_screen_y(528, static_cast<int32_t>(h));
+	emit_slot_text(label_font_large_, label_large_scale_,
+			"The tank requires another player\nin order to use the cannon", static_cast<float>(x),
+			static_cast<float>(y), half_bright_argb(hud_palette(4)), kFontAlignCenter);
 	++draw_list_.elements_drawn;
 }
 

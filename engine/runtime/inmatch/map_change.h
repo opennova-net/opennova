@@ -70,8 +70,10 @@
 //  @0x5259EC (an own client's), @0x525A5C, @0x525AC5]
 
 #include <runtime/mission/mission_catalog.h>
+#include <runtime/world/weather_state.h> // world::TodClock
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace opennova::gamecfg {
@@ -94,6 +96,15 @@ struct HostMapChange {
 	// The teardown ran on the current kernel: its entities are gone and its
 	// PostMission pass ran, so the role's close skips both.
 	bool torn_down = false;
+	// The mission clock an in-session authority's teardown keeps for the next mission, whose
+	// start runs on it when the session runs on time-of-day continuity (GameConfig::
+	// time_of_day_continuity; host_boot.h kept_mission_clock). Set at every map change's
+	// teardown, whatever the continuity word; empty from each host start (HostRole::reset_session).
+	// [orig: Game_TeardownMission @0x522350 - the latch dword_24D5A0C = 1 @0x52252A, the clock
+	//  @0x522539, its advance @0x522543; UI_HandleHostSessionStart @0x556D00 - the latch
+	//  cleared @0x556DD1] [orig: Game_TeardownMission @0x51F520 - @0x51F6FA / @0x51F709 /
+	//  @0x51F713; UI_HandleHostSessionStart @0x554EB0 - @0x554F8F (dfx2.exe)]
+	std::optional<world::TodClock> kept_clock;
 };
 
 enum class MapChangeStep : uint8_t {

@@ -6,8 +6,9 @@
 // (the logic clock advances once per frame, the 0x0A fan folds into the local
 // ClientState, the viewport seam reaches the ctx), the local C2S gameplay
 // drain (reload, mounted-slot, medic and squad requests reach the server
-// dispatcher while movement stays queued for Server_TickUpdate), and the dedicated
-// bring-up (no loopback client, no local player, no local fold).
+// dispatcher while movement stays queued for Server_TickUpdate; the own deploy pick
+// reads the session's protocol), and the dedicated bring-up (no loopback client, no
+// local player, no local fold).
 #include <runtime/inmatch/host_role.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/local_role.h>
@@ -290,6 +291,65 @@ void check_listen_host_deploy_convert(std::map<std::string, std::string> &files)
 	}
 }
 
+// The listen host's own deploy pick (C2S 0x0E) reaches the server's handler with the host
+// context, as a joiner's does, so its deploy writes the state byte of the protocol the session
+// speaks: a DFX2 host's sets the pre-round loadout latch at every deploy (DFX2-11), a JO host's
+// only while the pre-round timer runs.
+// [orig: Input_HandleActionBinding case 12 -> CNapiNetwork_QueueReliableMessage(0x0E)
+//  @0x49b17b; Server_ProcessClientRequestRespawn @0x519AF0; Server_DeployPlayer
+//  @0x517803/@0x517812] [orig: Server_DeployPlayer @0x514a55 (dfx2.exe)]
+void check_listen_host_own_deploy_reads_its_protocol(std::map<std::string, std::string> &files) {
+	for (const char *code : {"jo", "dfx2"}) {
+		const Protocol *protocol = title_protocol(code);
+		const bool is_dfx2 = std::string(code) == "dfx2";
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		auto &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		auto &role = *role_storage;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "own_deploy", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = true;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.protocol = protocol;
+			cfg.config.server_name = "own_deploy";
+			cfg.config.max_players = 4;
+			cfg.config.game_type = options.game_type;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.serve_and_play = true;
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(host.client_runtime != nullptr && kernel.local.has_local_player());
+		CHECK(host.host_owner.ctx.np_protocol.identity == protocol);
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		for (int i = 0; i < 4; ++i) role.run_tick(tick_input(0));
+		inmatch::NapiNPConnection *own = nullptr;
+		for (inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+			if (conn.link.owned_entity == kernel.world.cached.local_player) own = &conn;
+		CHECK(own != nullptr && own->burst.spawned);
+		if (own == nullptr) continue;
+		// The slot waits on its pick with no pre-round timer running, so only the protocol's
+		// fixed state byte sets the latch.
+		kernel.world.preround_delay_seconds = 0;
+		own->link.respawn_pending = true;
+		own->link.respawn_delay_seconds = 0;
+		own->link.preround_loadout_latch = false;
+		CHECK(role.request_deployment_pick(0xFFFFu));
+		host.client_runtime->Client_ProcessNetworkFrame(); // the client frame sends the pick
+		role.drain_host_client_gameplay_requests();        // the server's handler, own slot
+		CHECK(!own->link.respawn_pending);
+		CHECK(own->link.preround_loadout_latch == is_dfx2);
+	}
+}
+
 // V-L2-s8 (D-NET-710 iii): on the authority the head's 0x400 operand is the own client's
 // pre-round copy (g_ClientPreRoundTimer, written only by the client's 0x0A handler), not the
 // server's countdown: the seat row (17, code 182, 0x0C000C01) passes while only the server's
@@ -458,7 +518,7 @@ void check_single_player_console_line_rides_the_loopback(
 	role.drain_input_events(nullptr, 0);
 	CHECK(events.empty() && kernel.world.rules.ai_rules_skip_local_player);
 	// The name line: no local arm takes it, so nothing is queued until the echo.
-	const int32_t respawn = controls::action_code(68);
+	const int32_t respawn = 55;
 	CHECK(respawn == 55);
 	CHECK(host.client_runtime->console_command("respawn"));
 	CHECK(events.empty());
@@ -1336,10 +1396,10 @@ int main() {
 		// bit-0 row (dotsize, 38, 0x0C000C01) drops by the operand.
 		// [orig: Input_HandleActionBinding @0x49AD40 - the 2 @0x49AD52..0x49AD74; bit 0
 		//  with the operand @0x49AD95..0x49ADA0]
-		CHECK(role.action_head_admits(controls::action_code(106)));
-		CHECK(role.action_head_admits(controls::action_code(84)));
-		CHECK(role.action_head_admits(controls::action_code(63)));
-		CHECK(!role.action_head_admits(controls::action_code(38)));
+		CHECK(role.action_head_admits(8));
+		CHECK(role.action_head_admits(119));
+		CHECK(role.action_head_admits(102));
+		CHECK(!role.action_head_admits(216));
 	}
 
     // The shared deployment transaction resets local view state immediately,
@@ -1384,7 +1444,8 @@ int main() {
         lp.player()->health = 0;
         lp.player()->flags |= w::kEntityFlagDead;
         const auto replies = inmatch::Server_ReleasePlayerDeployment(
-                owner.ctx.config, conn, kernel.world, {}, 0xFFFF);
+                owner.ctx.config, conn, kernel.world, {}, 0xFFFF, nullptr,
+                owner.ctx.np_protocol.identity);
         CHECK(!replies.empty());
         CHECK(lp.player()->alive && lp.player()->health > 0);
         CHECK(lp.round_reset_revision == revision + 1);
@@ -1417,7 +1478,8 @@ int main() {
         remote.link.owned_entity = w::EntityHandle::make(0, 0);
         CHECK(remote.link.owned_entity != kernel.world.cached.local_player);
         lp.hud_map_control.mode = 2;
-        inmatch::Server_ReleasePlayerDeployment(owner.ctx.config, remote, kernel.world, {}, 0xFFFF);
+        inmatch::Server_ReleasePlayerDeployment(owner.ctx.config, remote, kernel.world, {}, 0xFFFF,
+                nullptr, owner.ctx.np_protocol.identity);
         CHECK(lp.hud_map_control.mode == 2 && lp.round_reset_revision == revision + 1);
     }
 
@@ -1666,6 +1728,7 @@ int main() {
 	}
 
 	check_listen_host_deploy_convert(files);
+	check_listen_host_own_deploy_reads_its_protocol(files);
 	check_head_preround_reads_the_own_clients_copy(files);
 	check_listen_host_console_punts_only_through_server(files, "PUNT ALL", /*punts=*/false);
 	check_listen_host_console_punts_only_through_server(files, "SERVER PUNT ALL", /*punts=*/true);
@@ -1795,10 +1858,12 @@ int main() {
 	// With spawn zones, the host's own player joins RESPAWN-PENDING and hidden
 	// like any joiner: its own client folds the per-frame 0x0A overlay bit, the
 	// frame loop's DEATH trigger reads it, and its Default Spawn pick rides its
-	// loopback as the C2S 0x0E the server's respawn handler releases. Out of a
-	// session the single player is never held. (D-NET-339)
+	// loopback as the C2S 0x0E the server's respawn handler releases. The single
+	// player holds the same way: the tick's tail slot walk writes its own 0x0A
+	// out of a session too. (D-NET-339)
 	// [orig: Game_StartMission @0x52624B (C2S 0x0B) -> Server_OnPlayerJoin
-	//  @0x51a6f2; Input_HandleActionBinding case 12 @0x49b17b;
+	//  @0x51a6f2; Server_TickUpdate @0x51E385..0x51E46D (the tail walk, outside
+	//  the session blocks); Input_HandleActionBinding case 12 @0x49b17b;
 	//  Render_ProcessMainSceneFrame @0x5CAC81]
 	for (const bool mp_session : {true, false}) {
 		auto kernel_storage = std::make_unique<ms::MissionKernel>();
@@ -1866,59 +1931,11 @@ int main() {
 			body->flags = flags;
 			return triggered;
 		};
-		if (!mp_session) {
-			// The round init's body leaves the mission start hidden; the own C2S 0x0B's join
-			// in the first frame's receive pump clears the bit and holds nothing out of a
-			// session (D-NET-1233) [orig: Entity_SpawnFromAnimSlotProperty @0x43C508;
-			//  Game_StartMission @0x525C9E; Server_OnPlayerJoin - the clear @0x51A7DA].
-			CHECK(!own->link.respawn_pending && (player->flags & 1u) != 0);
-			for (int i = 0; i < 3; ++i) role.run_tick(tick_input(0));
-			CHECK(!own->link.respawn_pending && (player->flags & 1u) == 0);
-			CHECK(!inmatch::death_menu_triggered(view));
-			CHECK(!dead_triggers());
-			kernel.world.tables.mission_attrib_flags |=
-					w::MissionTables::kMissionAttribSinglePlayerRespawn;
-			CHECK(dead_triggers());
-			// The single player's own death under the attribute: no auto-lose,
-			// the DEATH trigger, a SPAWNPOINTS_LIST over the zone its own client
-			// banked from the loopback, and the zone pick on its own client
-			// redeploys the body. [orig: Server_CheckWinConditions @0x51AD68;
-			//  Render_ProcessMainSceneFrame @0x5CAB42..0x5CAB8B;
-			//  UI_UpdateDeathScreenContent @0x553b53..0x553c4e;
-			//  Input_HandleActionBinding case 12 @0x49b17b;
-			//  Server_ProcessClientRequestRespawn @0x519AF0]
-			w::EntityHandle zone_handle;
-			kernel.world.registry.for_each([&](const w::Entity &e) {
-				if (e.net_id == 21) zone_handle = e.handle;
-			});
-			w::Entity *zone_entity = kernel.world.registry.get(zone_handle);
-			CHECK(zone_entity != nullptr);
-			if (zone_entity == nullptr) continue;
-			// An unnumbered zone (control 0) no capture event touches: it has no
-			// timer entry, so it lists [orig: UI_UpdateDeathScreenContent
-			// @0x553bd3..0x553bd5].
-			zone_entity->team = player->team;
-			w::Entity *body = kernel.world.registry.get(own->link.owned_entity);
-			body->alive = false;
-			body->health = 0;
-			body->flags |= w::kEntityFlagDead;
-			for (int i = 0; i < 16; ++i) role.run_tick(tick_input(0));
-			CHECK(kernel.local.local_player_dead());
-			CHECK(!kernel.world.match.outcome().ended);
-			CHECK(inmatch::death_menu_triggered(view));
-			const w::SpawnZoneRegistry zones = kernel.world.zones.build_spawn_zone_list();
-			std::vector<w::DeployZoneRow> rows;
-			CHECK(inmatch::deploy_zone_rows(view, zones, rows));
-			CHECK(rows.size() == 1 && rows[0].index == 0 && rows[0].letter == 'A' &&
-					rows[0].secured);
-			CHECK(host.client_runtime->queue_deployment_pick(zone_handle.packed));
-			for (int i = 0; i < 4 && kernel.local.local_player_dead(); ++i)
-				role.run_tick(tick_input(0));
-			CHECK(!kernel.local.local_player_dead());
-			continue;
-		}
 		// The add hid the held body; the own client's C2S 0x0B joins it held in the first
-		// frame's receive pump (D-NET-884).
+		// frame's receive pump (D-NET-884), the single player's as a listen host's: its own
+		// 0x0A carries the overlay bit and re-sets the hide out of a session too.
+		// [orig: Entity_SpawnFromAnimSlotProperty @0x43C508; Game_StartMission @0x525C9E;
+		//  NetPacket_WritePlayerState @0x4FF7B8..0x4FF7BC]
 		CHECK(!own->link.respawn_pending && (player->flags & 1u) != 0);
 		for (int i = 0; i < 3; ++i) role.run_tick(tick_input(0));
 		CHECK(own->link.respawn_pending && (player->flags & 1u) != 0);
@@ -1937,7 +1954,101 @@ int main() {
 		CHECK(!inmatch::death_menu_triggered(view));
 		CHECK(!host.client_runtime->state().take_death_menu_open(false, false));
 		CHECK(!host.client_runtime->state().death_menu_open_latch);
+		if (mp_session) {
+			CHECK(dead_triggers());
+			continue;
+		}
+		CHECK(!dead_triggers());
+		kernel.world.tables.mission_attrib_flags |=
+				w::MissionTables::kMissionAttribSinglePlayerRespawn;
 		CHECK(dead_triggers());
+		// The single player's own death under the attribute: no auto-lose,
+		// the DEATH trigger, a SPAWNPOINTS_LIST over the zone its own client
+		// banked from the loopback, and the zone pick on its own client
+		// redeploys the body. [orig: Server_CheckWinConditions @0x51AD68;
+		//  Render_ProcessMainSceneFrame @0x5CAB42..0x5CAB8B;
+		//  UI_UpdateDeathScreenContent @0x553b53..0x553c4e;
+		//  Input_HandleActionBinding case 12 @0x49b17b;
+		//  Server_ProcessClientRequestRespawn @0x519AF0]
+		w::EntityHandle zone_handle;
+		kernel.world.registry.for_each([&](const w::Entity &e) {
+			if (e.net_id == 21) zone_handle = e.handle;
+		});
+		w::Entity *zone_entity = kernel.world.registry.get(zone_handle);
+		CHECK(zone_entity != nullptr);
+		if (zone_entity == nullptr) continue;
+		// An unnumbered zone (control 0) no capture event touches: it has no
+		// timer entry, so it lists [orig: UI_UpdateDeathScreenContent
+		// @0x553bd3..0x553bd5].
+		zone_entity->team = player->team;
+		w::Entity *body = kernel.world.registry.get(own->link.owned_entity);
+		body->alive = false;
+		body->health = 0;
+		body->flags |= w::kEntityFlagDead;
+		for (int i = 0; i < 16; ++i) role.run_tick(tick_input(0));
+		CHECK(kernel.local.local_player_dead());
+		CHECK(!kernel.world.match.outcome().ended);
+		CHECK(inmatch::death_menu_triggered(view));
+		const w::SpawnZoneRegistry zones = kernel.world.zones.build_spawn_zone_list();
+		std::vector<w::DeployZoneRow> rows;
+		CHECK(inmatch::deploy_zone_rows(view, zones, rows));
+		CHECK(rows.size() == 1 && rows[0].index == 0 && rows[0].letter == 'A' &&
+				rows[0].secured);
+		CHECK(host.client_runtime->queue_deployment_pick(zone_handle.packed));
+		for (int i = 0; i < 4 && kernel.local.local_player_dead(); ++i)
+			role.run_tick(tick_input(0));
+		CHECK(!kernel.local.local_player_dead());
+	}
+
+	// --- a DFX2 single player holds at its mission start with no spawn zone ---
+	// dfx2.exe's join writes the state byte 0x13 whatever the mission holds, so a
+	// single player's own join is RESPAWN-PENDING and its own 0x0A raises the
+	// deploy overlay every frame: the DEATH screen opens at the mission start and
+	// stays until the Default Spawn pick deploys the body.
+	// [orig: Server_OnPlayerJoin @0x517717 (19); NetPacket_WritePlayerState
+	//  @0x4fc88a..0x4fc89c; Server_TickUpdate @0x51a810 - the walk's call @0x51b324;
+	//  NapiNPClientMsg_0x00A @0x431993 (dfx2.exe)]
+	{
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		ms::MissionKernel &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		inmatch::HostRole &role = *role_storage;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "dfx2_sp_hold", source_over(&files));
+		ms::KernelBootOptions options;
+		options.title_rules = &w::title_rules("dfx2");
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			role.bring_up_singleplayer(*opennova::title_by_code("dfx2"));
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(!kernel.world.zones.has_spawn_zone());
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		inmatch::NapiNPConnection *own = nullptr;
+		for (inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+			if (conn.link.owned_entity == kernel.world.cached.local_player) own = &conn;
+		CHECK(own != nullptr && host.client_runtime != nullptr);
+		if (own != nullptr && host.client_runtime != nullptr) {
+			inmatch::RoleView view;
+			view.kernel = &kernel;
+			view.runtime = host.client_runtime.get();
+			for (int i = 0; i < 3; ++i) role.run_tick(tick_input(0));
+			CHECK(own->link.respawn_pending);
+			// Held across frames, not a one-frame raise the next 0x0A drops.
+			for (int i = 0; i < 4; ++i) role.run_tick(tick_input(0));
+			CHECK(own->link.respawn_pending);
+			CHECK(host.client_runtime->state().deploy_overlay_active);
+			CHECK(inmatch::death_menu_triggered(view));
+			CHECK(host.client_runtime->queue_deployment_pick(0xFFFFu));
+			for (int i = 0; i < 3 && own->link.respawn_pending; ++i) role.run_tick(tick_input(0));
+			CHECK(!own->link.respawn_pending);
+			role.run_tick(tick_input(0));
+			CHECK(!host.client_runtime->state().deploy_overlay_active);
+			CHECK(!inmatch::death_menu_triggered(view));
+		}
 	}
 
 	// --- the objective Co-op mission start out of a session (D-PWR-2) ---------
@@ -2020,6 +2131,52 @@ int main() {
 			CHECK(kernel.world.rules.difficulty == 0);
 			CHECK(local->health == (restart ? 100 : profile_word == -1 ? 200 : 50));
 			CHECK(w::local_player_max_health(kernel.world) == 100);
+		}
+	}
+
+	// --- dfx2.exe's mission start sets no difficulty (DFX2-28) ---------------
+	// dfx2.exe's start runs no difficulty block: the word stays the profile's
+	// copy, on a restart too, so an objective Co-op mission takes neither the -1
+	// nor the single-player respawn attribute nor the doubled health, and the SP
+	// config's byte is the profile's word.
+	// [orig: Game_StartMission @0x521530 - nothing between @0x522EA9 and
+	//  @0x522EAE; Game_ApplySessionSettingsToGlobals @0x54F1BF..0x54F1C5 (dfx2.exe)]
+	for (const int32_t profile_word : {0, 1}) {
+		for (const bool restart : {false, true}) {
+			auto kernel_storage = std::make_unique<ms::MissionKernel>();
+			ms::MissionKernel &kernel = *kernel_storage;
+			auto role_storage = std::make_unique<inmatch::HostRole>();
+			inmatch::HostRole &role = *role_storage;
+			role.bind(kernel);
+			bms::File mission = two_entity_mission();
+			mission.header.attrib_flags = bms::AttribFlags::Coop;
+			kernel.open_document(std::move(mission), "dfx2_coop_start", source_over(&files));
+			ms::KernelBootOptions options;
+			options.title_rules = &w::title_rules("dfx2");
+			options.game_type = mission_game_type(kernel.mission);
+			CHECK(options.game_type == game_type::kObjectiveCoop);
+			options.restart = restart;
+			playersav::ProfileRecord profile;
+			profile.sp_difficulty = profile_word;
+			int32_t spawn_word = -2;
+			options.bringup_net_session = [&] {
+				kernel.world.tables.player.item_hp = 100; // the Player def's hp
+				role.bring_up_singleplayer(*opennova::title_by_code("dfx2"), &profile);
+				spawn_word = kernel.world.rules.difficulty;
+			};
+			std::string error;
+			CHECK(kernel.boot(options, error));
+			const w::Entity *local = kernel.world.registry.get(kernel.world.cached.local_player);
+			CHECK(local != nullptr);
+			if (local == nullptr) continue;
+			CHECK(spawn_word == profile_word);
+			CHECK(kernel.world.rules.difficulty == profile_word);
+			CHECK((kernel.world.tables.mission_attrib_flags &
+			       w::MissionTables::kMissionAttribSinglePlayerRespawn) == 0);
+			CHECK(local->health == (profile_word == 1 ? 50 : 100));
+			CHECK(w::local_player_max_health(kernel.world) == (profile_word == 1 ? 50 : 100));
+			CHECK(role.state.host_owner.ctx.config.config_bytes[6] ==
+			      static_cast<uint8_t>(profile_word));
 		}
 	}
 

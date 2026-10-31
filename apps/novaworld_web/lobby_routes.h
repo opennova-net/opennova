@@ -4,7 +4,10 @@
 // GET /api/lobbies/<rid> (one listing: its game info, the players its host's
 // status reports name, and a hosted server's scoreboard read over its admin
 // link) and GET /api/lobbies/novalogic (the servers on NovaLogic's NovaWorld,
-// from the list web keeps of NovaLogic's feed: novalogic_lobbies.h). None names
+// from the list web keeps of NovaLogic's feed: novalogic_lobbies.h). Each listing
+// of ours carries its server's ONE build where the service knows it (`build`: a
+// running hosted server's, as the server reports it; null for any other, a
+// self-hosted or a retail server's, whose retail listing carries none). None names
 // a joiner's address or an owner. Service policy, not a port.
 
 #include "novalogic_lobbies.h"

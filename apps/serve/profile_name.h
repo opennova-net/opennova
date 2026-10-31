@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/title/title.h>
 #include <runtime/inmatch/character_registry.h>
 #include <runtime/inmatch/napi_np_connection.h> // CharacterJoinVars
 
@@ -18,7 +19,7 @@ std::string process_account_name();
 
 // The profile opennova-serve's own row runs under: the boot's profile load. Every record is
 // seeded fresh, the first named after the account (a name the 16-byte buffer cannot hold leaves
-// it empty), then player.sav's records are read over them and weapon.sav's, each when the
+// it empty) or the title's name for it (Title::profile_first_name), then player.sav's records are read over them and weapon.sav's, each when the
 // process's working directory holds it; game.cfg's player_index picks the current record (an
 // index past the records reads the first). The mission start copies its name onto the row's
 // body as the local profile's, which every joiner's 0x0C carries; the session create's profile
@@ -37,13 +38,15 @@ struct ServeProfile {
 	std::string name;
 	std::optional<inmatch::CharacterJoinVars> character_vars;
 };
-ServeProfile load_serve_profile(int32_t player_index, const std::string &account_name,
-		const std::vector<uint8_t> *player_sav, const std::vector<uint8_t> *weapon_sav,
-		const inmatch::CharacterRegistry &characters);
+// `title` is the one the server runs as (its files' magic, profile::PlayerProfiles).
+ServeProfile load_serve_profile(const Title &title, int32_t player_index,
+		const std::string &account_name, const std::vector<uint8_t> *player_sav,
+		const std::vector<uint8_t> *weapon_sav, const inmatch::CharacterRegistry &characters);
 
 // load_serve_profile over the files the process's working directory holds: player.sav, and
 // weapon.sav at its path for the mounted expansion (playersav::weapon_sav_relpath).
-ServeProfile read_serve_profile(int32_t player_index, const std::string &account_name,
-		const std::string &expansion, const inmatch::CharacterRegistry &characters);
+ServeProfile read_serve_profile(const Title &title, int32_t player_index,
+		const std::string &account_name, const std::string &expansion,
+		const inmatch::CharacterRegistry &characters);
 
 } // namespace opennova::serve

@@ -38,10 +38,14 @@ extends Node
 const MENU_FILE := "death.mnu"
 const MENU_SCREEN := "DEATH"
 const SPAWN_LIST := "SPAWNPOINTS_LIST"
+# The table a title whose DEATH screen picks the loadout lists its spawn points in.
+const SPAWN_TABLE := "SPAWNPOINTS_TABLE"
 # The custom-draw MAP window and the shroud window whose authored size the
 # show-time zoom fit reads (hud/hud_map_view.h DeathMapView::fit).
 const MAP_WIDGET := "MAP"
 const SHROUD_WIDGET := "DEATH_SHROUD"
+# The screen's root window a title hides and shows with the shroud (DeployStatus.shroud_main).
+const MAIN_WIDGET := "MAIN"
 # The team-service pair, shown together; only SWAP_TEAMS has a DEATH callback.
 const SWAP_TEAMS := "SWAP_TEAMS"
 const TEAM_LIST := "BUTTON_TEAMLIST"
@@ -50,6 +54,10 @@ const TEAM_LIST := "BUTTON_TEAMLIST"
 const HIDDEN_BACK := "HIDDEN_BACK"
 const CONFIRM_NO := "CONFIRM_NO"
 const CONFIRM_YES := "CONFIRM_YES"
+# A title whose DEATH screen picks the loadout: its off-screen R-hotkeyed restart and the three
+# lists whose picks the armory's handlers take.
+const RESTART_LEVEL := "RESTART_LEVEL"
+const LOADOUT_LISTS: Array[String] = ["PRIMARY", "SECONDARY", "ACCESSORY"]
 
 signal opened
 signal closed
@@ -57,6 +65,10 @@ signal closed
 ## action 3 (the Exit Mission tone, then the exit; engine
 ## world::pass_through_close_axis carries the key witness).
 signal exit_confirmed
+## RESTART_LEVEL's click past its gate, after the screen closed and the pick 0 went: the shell
+## runs the in-game RESTART's exit (engine world::deploy_restart_level_allowed carries the
+## witness).
+signal restart_requested
 
 var _view: WorldView = null
 var _ui_parent: Node = null
@@ -101,6 +113,8 @@ var _map_view_state := MapViewState.new()
 # again; the close leaves it as it stands (engine world::pass_through_close_axis
 # carries the witness).
 var _input_pass_through := false
+# Whether MAIN hides and shows with the shroud (the title's, read at the open).
+var _shroud_main := false
 
 
 func setup(view: WorldView, ui_parent: Node) -> void:
@@ -108,6 +122,45 @@ func setup(view: WorldView, ui_parent: Node) -> void:
 	_ui_parent = ui_parent
 	_layout_control = ui_parent as Control
 	MenuFrameSurface.connect_layout_source(_layout_control, _ui_parent, _recompute_fit)
+
+
+# The armory presenter whose class pages the DEATH screen's loadout picker fills and applies
+# (the title's death_screen_loadout, DFX2-41); null: no picker.
+var _armory: ArmoryPresenter = null
+
+
+func set_armory(armory: ArmoryPresenter) -> void:
+	_armory = armory
+
+
+# Whether the screen's title picks the loadout here: its activation fills PRIMARY / SECONDARY
+# / ACCESSORY and its close on the triggers' clear applies them (engine
+# Title::death_screen_loadout, world::deploy_loadout_shown).
+func _picks_loadout() -> bool:
+	return _armory != null and _view != null and _armory.death_screen_loadout(_view.resource_root())
+
+
+# The activation's picker: the captions and outlines shown or hidden by the engine's gate, and
+# the three lists filled when shown (engine world::deploy_loadout_shown carries the witness).
+func _activate_loadout(status: DeployStatus) -> void:
+	if not _picks_loadout() or _driver == null:
+		return
+	for control_name in ["STATIC_PRIMARY", "STATIC_SECONDARY", "STATIC_ACCESSORY",
+			"PRIMARY_OUTLINE", "SECONDARY_OUTLINE", "ACCESSORY_OUTLINE"]:
+		var id := _driver.widget_id(control_name)
+		if id >= 0:
+			_driver.set_widget_shown(id, status.show_loadout)
+	if status.show_loadout:
+		_armory.populate_death_screen(_driver)
+
+
+## The frame's close leg, run when its triggers' clear finds the open latch up (the shell's
+## Simulation.take_death_menu_close): a title whose DEATH screen picks the loadout applies
+## the screen's picks there, the screen open or not; any other title's runs nothing (engine
+## ClientState::take_death_menu_close carries the witness).
+func on_death_menu_close() -> void:
+	if _picks_loadout() and _driver != null:
+		_armory.submit_death_screen(_driver)
 
 
 func is_open() -> bool:
@@ -184,11 +237,16 @@ func open() -> bool:
 		return false
 	if not _ensure_menu():
 		return false
-	_apply_team_service_buttons(sim.get_deploy_status(
-			Strings.get_table(Strings.TABLE_GAMETEXT),
-			ControlsBindings.model().display_text_for_token("MedicReq")).show_team_buttons)
-	# The show hides the shroud; the per-frame reveal shows it and runs the
-	# content refresh (_process).
+	var status := sim.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT),
+			ControlsBindings.model().display_text_for_token("MedicReq"))
+	_apply_team_service_buttons(status.show_team_buttons)
+	_activate_loadout(status)
+	# The show's other writes: the permanent-death hides, BRIEFING and a title's STATIC_GAMETYPE
+	# (engine world::apply_deploy_activation carries the witness).
+	_driver.apply_deploy_activation(sim, Strings.get_table(Strings.TABLE_GAMETEXT))
+	# The show hides the shroud (and, for a title that hides it with the shroud, MAIN); the
+	# per-frame reveal shows them and runs the content refresh (_process).
+	_shroud_main = status.shroud_main
 	_set_shroud_shown(false)
 	_input_pass_through = true
 	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
@@ -314,6 +372,9 @@ func _process(_delta: float) -> void:
 		_set_shroud_shown(true)
 		if Simulation.deploy_refresh_due(_last_tick, tick):
 			_populate_spawn_list(sim)
+			# A title's team lists ride the same refresh (the engine's gate and witness:
+			# world::deploy_team_lists).
+			_driver.fill_deploy_team_lists(sim, Strings.get_table(Strings.TABLE_GAMETEXT))
 	_last_tick = tick
 	# The map window follows its widget, which the reveal just showed.
 	_place_map_window()
@@ -330,6 +391,9 @@ func _process(_delta: float) -> void:
 #  node) @ 0x55364d, guarded only on node != -1]
 func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 		_value: String) -> void:
+	if kind == "combo" and LOADOUT_LISTS.has(widget_name.to_upper()) and _picks_loadout():
+		_armory.pick_death_screen(_driver, widget_name.to_upper())
+		return
 	if kind != "list" or widget_name.nocasecmp_to(SPAWN_LIST) != 0:
 		return
 	if index < 0 or index >= _spawn_rows.size():
@@ -350,13 +414,36 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int,
 		close()
 
 
+# The spawn table's cell event, for a title whose DEATH screen picks the loadout: a press on a
+# zone's row pans the map to it, a double click sends that row's pick (engine
+# world::deploy_table_click carries the witness).
+func _on_table_cell_clicked(id: int, widget_name: String, row: int, _column: int, state: int,
+		_cell_value: int, double_click: bool) -> void:
+	if widget_name.nocasecmp_to(SPAWN_TABLE) != 0 or _driver == null or not _picks_loadout():
+		return
+	var click := _driver.deploy_table_click(id, row, state, double_click)
+	var map_window := get_map_window()
+	if click.x >= 0 and map_window != null:
+		map_window.pan_to_spawn_zone(click.x)
+	if click.y != -1:
+		send_pick(click.y)
+
+
 func _populate_spawn_list(sim: Simulation) -> void:
 	if _driver == null:
 		return
 	var status := sim.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT),
 			ControlsBindings.model().display_text_for_token("MedicReq"))
 	_apply_statics(status)
-	if status.permanent_death:
+	if status.permanent_death or not status.content_refresh:
+		return
+	# A title whose DEATH screen picks the loadout lists its spawn points in SPAWNPOINTS_TABLE:
+	# the engine collects the zones, builds the rows and refills the table, its scroll top and
+	# selected row kept (world::fill_deploy_spawn_table carries the witness); the health colours
+	# take the HUD's stance colours.
+	if _picks_loadout():
+		var hud: HudOverlay = _hud_source.call() if _hud_source.is_valid() else null
+		_driver.fill_deploy_spawn_table(sim, hud, Strings.get_table(Strings.TABLE_GAMETEXT))
 		return
 	var list_id := _driver.widget_id(SPAWN_LIST)
 	if list_id < 0:
@@ -389,9 +476,11 @@ func _populate_spawn_list(sim: Simulation) -> void:
 		# (the engine's hud::strip_inline_tags (engine: runtime/hud/feed_format.cpp)).
 		var label := Simulation.strip_inline_tags(row.text)
 		_spawn_rows.append(SpawnRow.new(label, row.value))
-	# The list takes the engine's items (MenuDriver.set_deploy_list_items: the same
-	# stripped texts in the menu's code page, a member's roster name as its bytes);
-	# the spawn rows' labels are the script's own view of them. The fill resets the
+	# The list takes the engine's items (MenuDriver.set_deploy_list_items: the list and
+	# STATIC_LIST_TITLE shown again, which the show hides under permanent death, then the
+	# same stripped texts in the menu's code page, a member's roster name as its bytes;
+	# engine world::fill_deploy_spawn_list carries the witness); the spawn rows' labels
+	# are the script's own view of them. The fill resets the
 	# selection to row 0; restore the previous pick by parameter without emitting
 	# (picks ride user clicks only, never the refill).
 	_driver.set_deploy_list_items(list_id, list_rows)
@@ -405,9 +494,18 @@ func _populate_spawn_list(sim: Simulation) -> void:
 
 
 func _set_shroud_shown(shown: bool) -> void:
+	if _shroud_main and _driver != null:
+		var main_id := _driver.widget_id(MAIN_WIDGET)
+		if main_id >= 0:
+			_driver.set_widget_shown(main_id, shown)
 	var id := _driver.widget_id(SHROUD_WIDGET) if _driver != null else -1
-	if id >= 0:
-		_driver.set_widget_shown(id, shown)
+	if id < 0:
+		return
+	var was_shown := _driver.is_widget_shown(id)
+	_driver.set_widget_shown(id, shown)
+	# The loadout icons follow the windows they sit in.
+	if was_shown != shown and _picks_loadout():
+		_armory.refresh_death_screen(_driver)
 
 
 # The swap/team pair's show rule is the engine's (world/deploy_screen_feed.h
@@ -436,11 +534,29 @@ func _on_widget_activated(_id: int, widget_name: String) -> void:
 		close()
 		exit_confirmed.emit()
 		return
+	if widget_name.nocasecmp_to(RESTART_LEVEL) == 0:
+		_restart_level()
+		return
 	if widget_name.nocasecmp_to(SWAP_TEAMS) != 0:
 		return
 	var sim: Simulation = _view.sim() if _view != null else null
 	if sim != null:
 		sim.send_team_change_request()
+
+
+# RESTART_LEVEL, for a title whose DEATH screen picks the loadout: past the engine's gate the
+# screen closes, the pick 0 goes and the shell restarts the mission.
+func _restart_level() -> void:
+	var sim: Simulation = _view.sim() if _view != null else null
+	if sim == null or not _picks_loadout():
+		return
+	var status := sim.get_deploy_status(Strings.get_table(Strings.TABLE_GAMETEXT),
+			ControlsBindings.model().display_text_for_token("MedicReq"))
+	if not status.restart_level:
+		return
+	close()
+	sim.send_deployment_pick(0)
+	restart_requested.emit()
 
 
 # The witnessed STATIC show/text rules, refreshed with the list
@@ -458,6 +574,10 @@ func _on_widget_activated(_id: int, widget_name: String) -> void:
 # binding's display string.
 func _apply_statics(status: DeployStatus) -> void:
 	_apply_team_service_buttons(status.show_team_buttons)
+	# Past the permanent-death branch the refresh writes nothing unless the deploy overlay is
+	# up or the local player is dead (engine DeployScreenStatus::content_refresh).
+	if not status.permanent_death and not status.content_refresh:
+		return
 	var instruction_id := _driver.widget_id("STATIC_INSTRUCTIONS_MSG")
 	var instruction2_id := _driver.widget_id("STATIC_INSTRUCTIONS2_MSG")
 	if instruction_id >= 0 and instruction2_id >= 0:
@@ -519,12 +639,17 @@ func _ensure_menu() -> bool:
 			func(driver: MenuDriver) -> void:
 				_register_text_tables(root)
 				driver.widget_value_changed.connect(_on_widget_value_changed)
-				driver.widget_activated.connect(_on_widget_activated))
+				driver.widget_activated.connect(_on_widget_activated)
+				driver.table_cell_clicked.connect(_on_table_cell_clicked))
 	if surface == null:
 		return false
 	_frame = surface.frame
 	_audio = surface.audio
 	_driver = surface.driver
+	# A title whose DEATH screen has the spawn table draws its custom cells (engine
+	# world::deploy_table_paint carries the witness).
+	if _picks_loadout():
+		_driver.install_deploy_table_painter(_view.sim())
 	_mount_map_window()
 	return true
 
@@ -538,6 +663,10 @@ func _mount_map_window() -> void:
 	_map_window = MapViewWindow.new()
 	_map_window.name = "DeployMapWindow"
 	_map_window.set_view_state(_map_view_state)
+	# The map's move leg deselects the spawn table's rows (engine world::deploy_map_moved).
+	_map_window.death_map_moved.connect(func() -> void:
+		if _driver != null:
+			_driver.deploy_map_moved())
 	_frame.add_child(_map_window)
 	_place_map_window()
 
@@ -612,3 +741,5 @@ func _recompute_fit() -> void:
 	# MenuFrameSurface.fit_frame (shared with the other presenters).
 	MenuFrameSurface.fit_frame(_frame, _layout_control, _ui_parent)
 	_place_map_window()
+	if _driver != null and _picks_loadout():
+		_armory.refresh_death_screen(_driver)

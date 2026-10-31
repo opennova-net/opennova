@@ -10,6 +10,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_keys.h>
+#include <net/protocol/protocol.h> // title_protocol (the folds read their protocol)
 
 #include <cstdio>
 #include <string>
@@ -28,6 +29,7 @@ struct FramedClient {
     SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
     uint64_t now = 1;
     FramedClient() {
+        client.set_protocol(title_protocol("jo"));
         client.seed_session(0x10203040u, 1u, "CONTROL-CLIENT-SCRK", "CONTROL-SERVER-SCRK",
                 1, 0, 2, world::kPlayerInfantryTypeId, 0, 0x00100000u, true);
     }

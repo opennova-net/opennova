@@ -21,6 +21,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
@@ -279,6 +280,7 @@ void test_tdm_round_wire_and_linger() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = rules.game_type;
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 1, &blue_wire, ns::TransportMode::Client, blue, true));
@@ -426,6 +428,7 @@ void test_periodic_list_runs_through_the_linger() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = rules.game_type;
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 1, &blue_wire, ns::TransportMode::Client, blue, true));
@@ -501,6 +504,7 @@ void test_dm_round_wire_named_header() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = rules.game_type;
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 1, &ace_wire, ns::TransportMode::Client, ace, true));
@@ -832,6 +836,7 @@ void test_demolition_death_routes_score_and_round_wire() {
 		ctx.world = &world;
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
+		ctx.np_protocol.identity = title_protocol("jo");
 		ctx.config.game_type = game_type;
 		ctx.np_protocol.connection_list.push_back(
 				make_conn(1, 1, &wire, ns::TransportMode::Client,
@@ -917,6 +922,7 @@ void test_aas_round_wire() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = game_type::kAdvanceAndSecure;
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(3, 1, &wire, ns::TransportMode::Client, red, true));
@@ -971,6 +977,7 @@ void test_coop_script_producers_share_round_wire() {
 		ctx.world = &world;
 		ctx.is_authority = 1;
 		ctx.is_in_session = 1;
+		ctx.np_protocol.identity = title_protocol("jo");
 		ctx.config.game_type = game_type_code;
 		ctx.np_protocol.connection_list.push_back(
 				make_conn(3, 1, &wire, ns::TransportMode::Client, red, true));
@@ -1069,6 +1076,7 @@ void test_aas_capture_events_carry_zone_numbers() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = rules.game_type;
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 1, &wire, ns::TransportMode::Client, blue, true));
@@ -1191,6 +1199,7 @@ void test_ctf_pickup_and_capture_wire_transaction() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = rules.game_type;
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 1, &wire, ns::TransportMode::Client, blue, true));
@@ -1367,6 +1376,7 @@ void test_flag_timeout_wire_transaction() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.config.game_type = rules.game_type;
 	// Keep the dead remote slot active past the ordinary 360-tick redeploy punt.
 	ctx.config.permanent_death = true;
@@ -1457,6 +1467,7 @@ void test_sp_auto_lose_reads_the_dead_bit() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 0;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 2, &loop, ns::TransportMode::Loopback, player, true));
 	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx); // past a 1 Hz check
@@ -1488,6 +1499,7 @@ void test_sp_round_end_runs_the_slot_walk() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 0;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 2, &loop, ns::TransportMode::Loopback, player, true));
 	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx); // past a 1 Hz check
@@ -1574,6 +1586,7 @@ void test_org1_death_transaction_is_the_motor_edge() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 2, &host_loop, ns::TransportMode::Loopback, host, true));
 	ctx.np_protocol.connection_list.push_back(
@@ -1791,6 +1804,7 @@ int main() {
 	ctx.world = &world;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 0; // SP: the tallies + the auto-lose leg are SP-only
+	ctx.np_protocol.identity = title_protocol("jo");
 	ctx.np_protocol.connection_list.push_back(
 			make_conn(1, 2, &loop, ns::TransportMode::Loopback, player, true));
 
@@ -1916,9 +1930,11 @@ int main() {
 	// Each player death below is a lethal one: the body update re-reads the
 	// health word every tick, so a record over a healthy body would revive it.
 	auto pick_default_spawn = [&] {
+		inmatch::ServerDispatchInputs inputs;
+		inputs.server_ctx = &ctx; // the deploy reads the session's protocol
 		(void)inmatch::dispatch_session_replies(ctx.config, ctx.np_protocol.connection_list[0],
 				{make_protocol_message(c2s::RESPAWN_REQUEST, {0xFF, 0xFF})}, world.logic_tick,
-				ctx.np_protocol.connection_list, &world);
+				ctx.np_protocol.connection_list, &world, inputs);
 	};
 	world.tables.mission_attrib_flags = 0x40;
 	world.registry.get(player)->health = 0;

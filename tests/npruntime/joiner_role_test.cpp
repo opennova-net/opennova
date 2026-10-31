@@ -34,6 +34,7 @@
 #include <base/resource_index/resource_index.h>
 
 #include <runtime/world/vehicle_motor.h>
+#include <runtime/world/vehicle_part_anim.h> // kRotorSpeedMax
 #include <runtime/world/collision.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/vehicle_panel_feed.h>
@@ -999,7 +1000,8 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 		authority->run_logic_tick(true);
 		if ((tick + 1) % period == 0) {
 			if (!expect(replication::emit_connection_s2c(*authority, connection,
-					replication::snapshot_world(*authority)), "authority emits vehicle update"))
+					replication::snapshot_world(*authority), 0, 0, 0, 0, &kJo),
+					"authority emits vehicle update"))
 				return false;
 			replication::Datagram update;
 			while (channel.client_recv(update)) {
@@ -2502,7 +2504,7 @@ void install_grant_apply(Harness &h, uint64_t &applied) {
 		w::LocalPlayer &lp = h.kernel->local;
 		if (w::local_loadout_apply_accept(h.kernel->world, lp.loadout, lp.weapon, lp.inventory,
 					lp.inventory_valid, kit, rt.authoritative_loadout().avatar_class,
-					/*validate_banned=*/false))
+					/*validate_banned=*/false, w::LoadoutApplySelect::HeldWeapon))
 			applied = revision;
 	};
 }
@@ -5891,6 +5893,71 @@ bool run_the_header_load_binds_the_streamed_guns() {
 	return ok;
 }
 
+// A header-only joiner's streamed helicopters take their rotor from the 0x0D latch byte at the
+// load's class init: with bit 7 (the host's rotor turning) the rotor starts at the full rate and
+// at full speed, without it the rotor rests. The materialize, ahead of the def's traits, runs
+// none of it.
+// [orig: NapiNPClientMsg_0x00D @0x432C40 - +0xB0 @0x4331B7..0x4331BA; Game_StartMission
+//  @0x524360 - Entity_InitAllFromModels called @0x52567F; Entity_InitHelicopterAIFromDef
+//  @0x4683C0 -> Entity_InitAircraftWeaponBones @0x490160 - @0x4902BB..0x4902F7]
+bool run_a_streamed_helo_takes_its_turning_rotor() {
+	constexpr uint16_t kHeloType = 4094;
+	Harness h;
+	w::World &world = h.kernel->world;
+	world.registry.configure_pool(1, 16);
+	h.role.poll_preload();
+	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	// The joiner's boot (mission::KernelBootOptions::joiner).
+	world.rules.mp_session = true;
+	world.rules.projectile_authority = false;
+	def::DefItemDef defs[2]{};
+	defs[0].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+	defs[0].type = 3;
+	defs[0].hp = 100;
+	defs[1].id = kHeloType + mission::kItemIdOffset;
+	defs[1].type = 1;
+	defs[1].hp = 100;
+	std::strcpy(defs[1].ai_function, "chel");
+	def::DefItemsFile items{defs, 2};
+	h.kernel->set_items_table(&items);
+	const w::EntityHandle turning_h{0x1003};
+	const w::EntityHandle resting_h{0x1004};
+	PoolSpawnBatch batch;
+	for (const auto &[handle, byte] : {std::pair<w::EntityHandle, uint8_t>{turning_h, 0x81},
+			std::pair<w::EntityHandle, uint8_t>{resting_h, 0x01}}) {
+		PoolSpawnRecord spawn;
+		spawn.slot_id = handle.packed;
+		spawn.item_type_id = kHeloType;
+		spawn.has_sound_latch_byte = true;
+		spawn.sound_latch_byte = byte;
+		batch.records.push_back(spawn);
+	}
+	h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(batch));
+	h.role.run_tick(h.input);
+	w::Entity *turning = world.registry.get(turning_h);
+	w::Entity *resting = world.registry.get(resting_h);
+	bool ok = expect(turning != nullptr && resting != nullptr &&
+					turning->veh.spawn_sound_latch == -127 &&
+					resting->veh.spawn_sound_latch == 1 &&
+					turning->veh.part_spin.speed == 0 && turning->veh.part_spin.rate == 0,
+			"streamed helo: the row keeps its latch byte, and its materialize starts no rotor");
+	if (turning == nullptr || resting == nullptr) {
+		h.kernel->set_items_table(nullptr);
+		return false;
+	}
+	h.kernel->resolve_item_traits([](int) { return uint8_t{0}; });
+	h.role.run_streamed_weapon_slot_class_inits();
+	ok &= expect(turning->veh.part_spin.rate == w::PartSpinRates{}.full &&
+					turning->veh.part_spin.speed == w::kRotorSpeedMax,
+			"streamed helo: bit 7 starts the rotor at the full rate and speed");
+	ok &= expect(resting->veh.part_spin.rate == 0 && resting->veh.part_spin.speed == 0,
+			"streamed helo: without bit 7 the rotor rests");
+	h.kernel->set_items_table(nullptr);
+	return ok;
+}
+
 // A 0x18 row of a type the mission start's install never saw loads its def as the record
 // lands: the type's seat table joins the installed one and the row takes its seats, the
 // ones the def load's userpoint walk gives the type.
@@ -6555,6 +6622,7 @@ int main() {
 	ok &= run_role_runtimes_step_the_process_report_count();
 	ok &= run_the_settle_materializes_the_world_stream();
 	ok &= run_the_header_load_binds_the_streamed_guns();
+	ok &= run_a_streamed_helo_takes_its_turning_rotor();
 	ok &= run_a_full_spawn_row_loads_its_def();
 	ok &= run_the_ewep_stale_ground_asks_leave_as_0x0f();
 	if (!ok) return 1;

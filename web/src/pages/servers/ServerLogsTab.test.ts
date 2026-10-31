@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ServerLogsTab from './ServerLogsTab.vue';
 import { fetchLogs } from '../../api/logs';
 import { fleetServer } from '../../test/adminFixtures';
+import { hostedServer } from '../../test/hostedFixtures';
 import { NOW, logPage } from '../../test/usageFixtures';
 
 vi.mock('../../api/logs', () => ({ fetchLogs: vi.fn() }));
@@ -36,6 +37,13 @@ describe('ServerLogsTab', () => {
     expect(wrapper.get('h2').text()).toBe('Start 1');
     // An older start no longer grows.
     expect(wrapper.find('#hosted-server-12-log-follow').exists()).toBe(false);
+  });
+
+  it("reads the owner's server as the owner's page has it, for an admin's session there", async () => {
+    wrapper = mount(ServerLogsTab, { props: { server: hostedServer(12, { generation: 2 }), scope: 'owner', now: NOW } });
+    await flushPromises();
+    expect(wrapper.findAll('option').map((o) => o.text())).toEqual(['2 (newest)', '1']);
+    expect(read).toHaveBeenCalledWith({ subject: 'server', id: 12, generation: 2, limit: 200 }, expect.anything());
   });
 
   it('says a server that never started has no log', async () => {

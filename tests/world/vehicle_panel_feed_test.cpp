@@ -290,6 +290,54 @@ int main() {
         CHECK(state.seats.size() == rows.size());
     }
 
+    // --- DFX2-82's riders: the control seat's resolved occupant, then each gun child's UseGun
+    //     occupant once per definition gun-slot byte holding its bone, with its slot weapon's
+    //     attachtextid (none without a weapon or a key; the root's slot under the route bit)
+    //     [orig: HUD_DrawVehicleHealthBars @0x5A44BE..0x5A4530, @0x5A41C0..0x5A429D,
+    //     @0x5A476C..0x5A478E (dfx2.exe); Entity_GetWeaponSlots @0x543378..0x543383 (dfx2.exe)].
+    {
+        Rig r;
+        std::vector<VehiclePanelRider> riders;
+        vehicle_panel_riders(r.w, r.veh, nullptr, riders);
+        CHECK(riders.empty()); // nobody aboard
+        r.seat_occupant(r.veh, 8, r.driver);
+        r.seat_occupant(r.gun, 9, r.gunner);
+        r.e(r.veh).def_slot_userpoints = {4, 5, 0, 0};
+        WeaponTableEntry fifty;
+        fifty.valid = true;
+        fifty.name = "50cal";
+        fifty.attach_text_id = "attach_50cal";
+        r.w.tables.weapons.entries.push_back(fifty);
+        r.e(r.gun).primary_weapon_slot_adm = 0;
+        vehicle_panel_riders(r.w, r.veh, nullptr, riders);
+        CHECK(riders.size() == 2);
+        CHECK(riders.size() == 2 && riders[0].rider == r.driver && !riders[0].gunner);
+        CHECK(riders.size() == 2 && riders[1].rider == r.gunner && riders[1].gunner &&
+                riders[1].has_weapon && riders[1].weapon_key == "attach_50cal");
+        // A weapon without a key, and no weapon, give the gunner none.
+        r.w.tables.weapons.entries[0].attach_text_id.clear();
+        vehicle_panel_riders(r.w, r.veh, nullptr, riders);
+        CHECK(riders.size() == 2 && !riders[1].has_weapon && riders[1].weapon_key.empty());
+        r.w.tables.weapons.entries[0].attach_text_id = "attach_50cal";
+        r.e(r.gun).primary_weapon_slot_adm = kAdmSlotNone;
+        vehicle_panel_riders(r.w, r.veh, nullptr, riders);
+        CHECK(riders.size() == 2 && !riders[1].has_weapon);
+        // The route bit reads the root's slot.
+        r.e(r.gun).primary_weapon_slot.redirect_to_parent_slot = true;
+        r.e(r.veh).primary_weapon_slot_adm = 0;
+        vehicle_panel_riders(r.w, r.veh, nullptr, riders);
+        CHECK(riders.size() == 2 && riders[1].has_weapon);
+        // A bone two gun-slot bytes hold names the gunner twice (the unauthored slots' 0s here).
+        r.e(r.veh).def_slot_userpoints = {4, 0, 0, 0};
+        vehicle_panel_riders(r.w, r.veh, nullptr, riders);
+        CHECK(riders.size() == 4 && riders[3].rider == r.gunner);
+        // An unresolved driver is no rider.
+        r.e(r.veh).def_slot_userpoints = {4, 5, 0, 0};
+        r.w.registry.despawn(r.driver);
+        vehicle_panel_riders(r.w, r.veh, nullptr, riders);
+        CHECK(riders.size() == 1 && riders[0].gunner);
+    }
+
     if (failures != 0) {
         std::printf("%d failure(s)\n", failures);
         return 1;

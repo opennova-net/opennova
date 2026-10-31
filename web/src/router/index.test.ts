@@ -54,6 +54,7 @@ describe('router', () => {
     ['/me/billing', BillingPage],
     ['/me/servers/stats', MyServerStatsPage],
     ['/me/servers/hosts/167772161', HostedGamePage],
+    ['/me/servers/12/logs', ServerLogsTab],
     ['/lobby/167772175', PublicServerPage],
     ['/lobby/novalogic/167782351', PublicServerPage],
     ['/admin', OverviewPage],
@@ -76,28 +77,9 @@ describe('router', () => {
     expect(await resolvedPage(path)).toBe(page);
   });
 
-  // The paths before the admin became six sections, the account's billing
-  // page's and the public hosting page's: each lands on its new place.
+  // The account's billing page's and the public hosting page's old paths, which
+  // links outside the site carry: each lands on its new place.
   it.each([
-    ['/admin/overview', '/admin'],
-    ['/admin/users', '/admin/players/accounts'],
-    ['/admin/users/7', '/admin/players/7'],
-    ['/admin/cd-keys', '/admin/players/cd-keys'],
-    ['/admin/fleet', '/admin/servers'],
-    ['/admin/fleet?tab=roll', '/admin/servers/roll'],
-    ['/admin/fleet/machines/12', '/admin/machines/12'],
-    ['/admin/fleet/41', '/admin/servers/41'],
-    ['/admin/fleet/41/logs', '/admin/servers/41/logs'],
-    ['/admin/fleet/41/machine', '/admin/servers/41'],
-    ['/admin/usage', '/admin/servers'],
-    ['/admin/settings', '/admin/servers/machines'],
-    ['/admin/addresses', '/admin/billing/addresses'],
-    ['/admin/costs', '/admin/billing/costs'],
-    ['/admin/novaworld', '/admin/system'],
-    ['/admin/jobs', '/admin/system/jobs'],
-    ['/admin/infrastructure', '/admin/system/infrastructure'],
-    ['/admin/infrastructure/programs/lobby', '/admin/programs/lobby'],
-    ['/admin/infrastructure/resources/rds', '/admin/resources/rds'],
     ['/me/support?checkout=cancel', '/me/billing?checkout=cancel'],
     ['/me/addresses', '/me/billing#addresses'],
     ['/me/servers/5/settings', '/me/servers/5'],

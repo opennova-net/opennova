@@ -19,6 +19,7 @@ const std::vector<DefField> kItemFields = {
 	FIELD_CUT(DefItemDef, display_name, 47), // the 46-character cut [orig: ItemDef_ParseProperty @0x49EBFB]
 	FIELD(DefItemDef, id, Integer),
 	FIELD_CUT(DefItemDef, sid, 16), // strncpy(.., 15) [orig: @0x49EC69..0x49EC8D]
+	FIELD(DefItemDef, ui_name, Text),
 	FIELD(DefItemDef, type, Integer),
 	FIELD(DefItemDef, graphic, Text),
 	FIELD(DefItemDef, anim_def, Text),

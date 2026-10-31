@@ -204,8 +204,10 @@ private:
 	// The texture a Replace with image... pick is for (S18), and the files the OS dropped, held for the
 	// item they land on (drop_files) for `frames` more end_frames.
 	std::string replace_target_;
-	// The NovaWorld project a Get... pick is for (ADR 0069), until the pick comes back.
-	std::string novaworld_get_key_;
+	// The .cpt an Export heights... pick is for, until the pick comes back.
+	std::string heights_target_;
+	// The NovaWorld project a Sync... pick is for (ADR 0069), until the pick comes back.
+	std::string novaworld_sync_key_;
 	// The music bank stream a ...from a wave pick is for: its bank, and its place ("" a new stream at the end).
 	struct StreamPick {
 		std::string bank, place;

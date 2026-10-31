@@ -347,6 +347,11 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
                     current.vehicle_spawn_mask |= uint32_t(1) << slot;
             }
             parsed = 1;
+        } else if (key_is(key, "uiname")) {
+            /* A token longer than 15 characters stores nothing [orig: @0x49eccc]. */
+            const char *name = tokens.token(1);
+            if (strlen(name) <= 15) copy_token(current.ui_name, sizeof(current.ui_name), tokens, 1);
+            parsed = 1;
         } else if (key_is(key, "sid")) {
             /* strncpy(alias, tokens[2], 15) [orig: @0x49EC69..0x49EC8D] */
             copy_token(current.sid, 16, tokens, 1);

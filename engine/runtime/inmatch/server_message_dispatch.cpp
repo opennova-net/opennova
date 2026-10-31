@@ -847,8 +847,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				LoadoutAvailability availability;
 				if (inputs.server_ctx != nullptr) {
 					availability.restrictions = &inputs.server_ctx->weapon_restrictions;
-					availability.armory_only = protocol_in_match(
-							inputs.server_ctx->np_protocol.identity).armory_only_availability;
+					availability.armory_only =
+							protocol_in_match(inputs.server_ctx->np_protocol.identity)
+									.s2c_66.armory_only_availability;
 				}
 				availability.requester_in_armory_zone =
 						((loadout_player->flags | loadout_player->engine_flags) &

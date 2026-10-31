@@ -13,10 +13,10 @@
 namespace opennova::playersav {
 namespace {
 
-// The 16-byte header's first two dwords, tested for equality by the loader
-// [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0]. 1128419398 / 825307696 in
-// the original's decimal immediates; little-endian they read as ASCII.
-constexpr uint32_t kMagic = 0x43425046u;    // "FPBC"
+// The 16-byte header's version dword, the second the loader tests for equality
+// after the title's magic (the caller's) [orig: PlayerProfile_LoadAllFromDisk
+// @0x54f4d0]. 825307696 in the original's decimal immediate; little-endian it
+// reads as ASCII.
 constexpr uint32_t kVersion = 0x31313230u;  // "0211"
 
 // The witnessed regions of a side block leave a trailing span with no reader in
@@ -38,63 +38,6 @@ int32_t parse_value(const std::string &text)
 std::string format_value(int32_t v)
 {
     return std::to_string(v);
-}
-
-// A default page: its names, each with the three -1 values the static blobs
-// carry ("<name>\0-1\0-1\0-1\0" per entry).
-KitPage names_page(std::initializer_list<const char *> names)
-{
-    KitPage page;
-    for (const char *name : names) {
-        KitEntry entry;
-        entry.name = name;
-        page.entries.push_back(entry);
-    }
-    return page;
-}
-
-// The eleven static default pages, by the data address InitDefaults copies
-// from [orig: PlayerProfile_InitDefaults @0x54bb40].
-KitPage blue_default_page(size_t class_index)
-{
-    switch (class_index) {
-    case 0:  // class 5, 0x8353F8 @0x54bd7f
-        return names_page({"WPN_M4AUTO", "WPN_colt45", "WPN_DESIGNATOR", "WPN_GRENADEFB",
-                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE", "WPN_MEDPACK"});
-    case 1:  // class 6, 0x8363F8 @0x54bd8f
-        return names_page({"WPN_SR25", "WPN_M9Beretta", "WPN_CLAYMORE", "WPN_GRENADEFB",
-                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE"});
-    case 2:  // class 7, 0x8373F8 @0x54bda5
-        return names_page({"WPN_M60", "WPN_RemmingtonSG", "WPN_DESIGNATOR", "WPN_GRENADEFB",
-                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE"});
-    case 3:  // class 8, 0x8393F8 @0x54bdbb
-        return names_page({"WPN_M4AUTO", "WPN_colt45", "WPN_SATCHEL_CHARGE", "WPN_GRENADEFB",
-                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE"});
-    default:  // class 9, 0x83A3F8 @0x54bdd1
-        return names_page({"WPN_M16BURST", "WPN_colt45", "WPN_AT4", "WPN_GRENADEFB",
-                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE"});
-    }
-}
-
-KitPage red_default_page(size_t class_index)
-{
-    switch (class_index) {
-    case 0:  // class 5, 0x835BF8 @0x54bd1a
-        return names_page({"WPN_AK47AUTO", "WPN_colt45", "WPN_DESIGNATOR", "WPN_GRENADEFB",
-                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2", "WPN_MEDPACK"});
-    case 1:  // class 6, 0x836BF8 @0x54bd2a
-        return names_page({"WPN_DRAGUNOV", "WPN_357", "WPN_CLAYMORE", "WPN_GRENADEFB",
-                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2"});
-    case 2:  // class 7, 0x837BF8 @0x54bd40
-        return names_page({"WPN_PKM", "WPN_RemmingtonSG", "WPN_DESIGNATOR", "WPN_GRENADEFB",
-                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2"});
-    case 3:  // class 8, 0x839BF8 @0x54bd56
-        return names_page({"WPN_AK47AUTO", "WPN_colt45", "WPN_SATCHEL_CHARGE", "WPN_GRENADEFB",
-                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2"});
-    default:  // class 9, 0x83ABF8 @0x54bd6c
-        return names_page({"WPN_AK74AUTO", "WPN_357", "WPN_RPG", "WPN_GRENADEFB",
-                "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2"});
-    }
 }
 
 void read_side(io::ByteReader &r, Side &side)
@@ -251,7 +194,7 @@ void encode_kit_page(const KitPage &page, uint8_t *out, size_t size)
     // out[pos] is already 0 from the memset: that byte is the blob terminator.
 }
 
-bool read(const uint8_t *data, size_t size, File &out)
+bool read(const uint8_t *data, size_t size, uint32_t want_magic, File &out)
 {
     out = File{};
     if (data == nullptr || size < kHeaderBytes)
@@ -260,7 +203,7 @@ bool read(const uint8_t *data, size_t size, File &out)
     io::ByteReader r(data, size);
     const uint32_t magic = r.read_u32();
     const uint32_t version = r.read_u32();
-    if (magic != kMagic || version != kVersion)
+    if (magic != want_magic || version != kVersion)
         return false;
     out.flags = r.read_u32();
     out.extra = r.read_u32();
@@ -283,10 +226,10 @@ bool read(const uint8_t *data, size_t size, File &out)
     return true;
 }
 
-std::vector<uint8_t> write(const File &in)
+std::vector<uint8_t> write(const File &in, uint32_t magic)
 {
     io::ByteWriter w;
-    w.write_u32(kMagic);
+    w.write_u32(magic);
     w.write_u32(kVersion);
     w.write_u32(in.flags);
     w.write_u32(in.extra);
@@ -298,11 +241,57 @@ std::vector<uint8_t> write(const File &in)
     return w.take();
 }
 
+// The eleven static default pages, as the names each holds, by the data address InitDefaults
+// copies from [orig: PlayerProfile_InitDefaults @0x54bb40].
+namespace {
+// [orig: Buffer_CopyUntilDoubleNull(+65548, 0x833BF8, 2048) @0x54bced]
+constexpr const char *kSinglePlayer[] = { "WPN_M4AUTO", "WPN_M4", "WPN_colt45", "WPN_AT4",
+    "WPN_GRENADEFB", "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE", nullptr };
+// Side 0 (blue): classes 5..9 at 0x8353F8 @0x54bd7f, 0x8363F8 @0x54bd8f, 0x8373F8 @0x54bda5,
+// 0x8393F8 @0x54bdbb, 0x83A3F8 @0x54bdd1.
+constexpr const char *kBlue5[] = { "WPN_M4AUTO", "WPN_colt45", "WPN_DESIGNATOR", "WPN_GRENADEFB",
+    "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE", "WPN_MEDPACK", nullptr };
+constexpr const char *kBlue6[] = { "WPN_SR25", "WPN_M9Beretta", "WPN_CLAYMORE", "WPN_GRENADEFB",
+    "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE", nullptr };
+constexpr const char *kBlue7[] = { "WPN_M60", "WPN_RemmingtonSG", "WPN_DESIGNATOR", "WPN_GRENADEFB",
+    "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE", nullptr };
+constexpr const char *kBlue8[] = { "WPN_M4AUTO", "WPN_colt45", "WPN_SATCHEL_CHARGE", "WPN_GRENADEFB",
+    "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE", nullptr };
+constexpr const char *kBlue9[] = { "WPN_M16BURST", "WPN_colt45", "WPN_AT4", "WPN_GRENADEFB",
+    "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE", nullptr };
+// Side 1 (red): classes 5..9 at 0x835BF8 @0x54bd1a, 0x836BF8 @0x54bd2a, 0x837BF8 @0x54bd40,
+// 0x839BF8 @0x54bd56, 0x83ABF8 @0x54bd6c.
+constexpr const char *kRed5[] = { "WPN_AK47AUTO", "WPN_colt45", "WPN_DESIGNATOR", "WPN_GRENADEFB",
+    "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2", "WPN_MEDPACK", nullptr };
+constexpr const char *kRed6[] = { "WPN_DRAGUNOV", "WPN_357", "WPN_CLAYMORE", "WPN_GRENADEFB",
+    "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2", nullptr };
+constexpr const char *kRed7[] = { "WPN_PKM", "WPN_RemmingtonSG", "WPN_DESIGNATOR", "WPN_GRENADEFB",
+    "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2", nullptr };
+constexpr const char *kRed8[] = { "WPN_AK47AUTO", "WPN_colt45", "WPN_SATCHEL_CHARGE", "WPN_GRENADEFB",
+    "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2", nullptr };
+constexpr const char *kRed9[] = { "WPN_AK74AUTO", "WPN_357", "WPN_RPG", "WPN_GRENADEFB",
+    "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE2", nullptr };
+} // namespace
+
+const char *const *const kJointOpsSinglePlayerKit = kSinglePlayer;
+const char *const *const kJointOpsClassKits[kJointOpsClassKitCount] = {
+    kBlue5, kBlue6, kBlue7, kBlue8, kBlue9, kRed5, kRed6, kRed7, kRed8, kRed9,
+};
+
 KitPage default_single_player_page()
 {
-    // [orig: Buffer_CopyUntilDoubleNull(+65548, 0x833BF8, 2048) @0x54bced]
-    return names_page({"WPN_M4AUTO", "WPN_M4", "WPN_colt45", "WPN_AT4", "WPN_GRENADEFB",
-            "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE"});
+    return kit_page_of_names(kJointOpsSinglePlayerKit);
+}
+
+KitPage kit_page_of_names(const char *const *names)
+{
+    KitPage page;
+    for (const char *const *name = names; name != nullptr && *name != nullptr; ++name) {
+        KitEntry entry;
+        entry.name = *name;
+        page.entries.push_back(entry);
+    }
+    return page;
 }
 
 KitPage default_kit_page(SideId side, uint8_t klass)
@@ -310,7 +299,7 @@ KitPage default_kit_page(SideId side, uint8_t klass)
     if (klass < kMinPlayerClass || klass > kMaxPlayerClass)
         return KitPage{};
     const size_t index = static_cast<size_t>(klass) - kMinPlayerClass;
-    return side == SideId::Blue ? blue_default_page(index) : red_default_page(index);
+    return kit_page_of_names(kJointOpsClassKits[(side == SideId::Blue ? 0 : kKitPagesPerSide) + index]);
 }
 
 File make_defaults()

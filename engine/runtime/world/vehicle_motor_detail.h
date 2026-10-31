@@ -243,6 +243,18 @@ void vehicle_crush_damage(
 
 void vehicle_contact_impact(World &world, Entity &vehicle, const VehicleTraits &traits,
 		int severity, EntityHandle hit, int32_t px, int32_t py, int32_t pz);
+// The same with the hull's impact speed its solve computed (the tracked solve's,
+// tracked_impact_speed); the form above takes |velocity| summed x, y, z.
+void vehicle_contact_impact(World &world, Entity &vehicle, const VehicleTraits &traits,
+		int severity, EntityHandle hit, int32_t px, int32_t py, int32_t pz, int32_t impact);
+// The tracked solve's severity-3 impact speed: |(vx, vy, vz)| capped at 0x7FFF0000 and
+// truncated, its squares summed in the title's x87 order, vx^2 + (vy^2 + vz^2) or, `xz_first`,
+// (vx^2 + vz^2) + vy^2 (TitleRules::tracked_impact_speed_xz_first, DFX2-113).
+// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - the filds @0x47CCAD..0x47CCBD, the
+//  sum @0x47CCC7..0x47CCD3, fsqrt @0x47CCD5, the cap @0x47CCD7..0x47CCE2, _ftol2_sse @0x47CCE4]
+// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - the sum @0x47CCC7..0x47CCD1, fsqrt
+//  @0x47CCD3 (dfx2.exe)]
+int32_t tracked_impact_speed(int32_t vx, int32_t vy, int32_t vz, bool xz_first);
 
 // The sev-3 0.25-cut distance gate every solve runs: the STRONGEST planar
 // force among the first `scan` probes must sit > 0x8000 (0.5 u) from the

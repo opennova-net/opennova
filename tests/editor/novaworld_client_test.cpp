@@ -283,7 +283,7 @@ static int test_accounts() {
 	// A player may read another's project but not push it.
 	std::string error;
 	push(service, root, "x", kPlayerCookie, &error);
-	TEST_EXPECT(error == editor::novaworld_push_refusal("MOD") && service.head == 0);
+	TEST_EXPECT(error == editor::novaworld_push_refusal() && service.head == 0);
 
 	// A renewed session: kept by the account the job leaves.
 	service.renew_next = true;

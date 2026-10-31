@@ -15,7 +15,11 @@
 // @0x76276A -> Input_ProcessKeyboardEvents @0x49D42F (the binding scan) /
 // @0x49D498 (Chat_HandleInputChar while capturing); the page draws the capture
 // @0x50B245..0x50B25A]. Nothing on the page is the console's own; the colours
-// and the ticker, which text cannot carry, are left out.
+// and the ticker, which text cannot carry, are left out. Each print opens with
+// one line of the console's own above the page, none of retail's (whose window
+// shows no version): the server's version line (Server::version_line, the one
+// it logs as it starts), so a running server always shows the game, ONE's
+// build and the protocol it runs, however far its start's log has scrolled.
 
 #include <runtime/hud/hud_chat_entry.h>
 #include <runtime/hud/hud_server_status.h>
@@ -26,6 +30,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 
 namespace opennova::serve {
 
@@ -43,7 +48,9 @@ std::string status_page_rows(const hud::ServerStatusPageState &page);
 
 class StatusConsole {
 public:
-	explicit StatusConsole(std::FILE *out) : out_(out) {}
+	// `version_line` heads every print as "opennova-serve <line>" ("" prints no head).
+	explicit StatusConsole(std::FILE *out, std::string version_line = {}) :
+			out_(out), version_line_(std::move(version_line)) {}
 
 	// One frame: at the page's 200 ms throttle (the server has no window to
 	// lose focus), fill the page from the running server and print it when its
@@ -58,6 +65,7 @@ private:
 	const hud::GameTextLookup &gametext(Server &server);
 
 	std::FILE *out_;
+	std::string version_line_;
 	uint32_t last_ms_ = 0;
 	std::string last_rows_;
 	hud::ChatEntry chat_;

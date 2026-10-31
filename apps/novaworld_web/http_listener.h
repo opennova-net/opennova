@@ -212,8 +212,9 @@ public:
 	// The images the release pins (hosted/model/fleet_config.h ONNET_FLEET_IMAGE_ID,
 	// the launch templates', which a fleet roll's preview holds each machine's
 	// against; ONNET_HOSTED_HOSTD_IMAGE), which the machines' JSON and the
-	// fleet's health (hosted/model/fleet_health.h) hold each machine's against. Set
-	// before start().
+	// fleet's health (hosted/model/fleet_health.h) hold each machine's against, and
+	// ONNET_HOSTED_SERVE_IMAGE, which the servers' JSON holds each server's pinned image
+	// against (its server build update). Set before start().
 	void set_fleet_release(hosted::ReleaseImages release) { fleet_release_ = std::move(release); }
 	// Whether the static addresses are on (hosted/model/hosted_policy.h
 	// HostedPolicy::addresses_on)

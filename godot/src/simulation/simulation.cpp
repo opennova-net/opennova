@@ -7,9 +7,11 @@
 #include <godot_cpp/core/object.hpp>
 #include "simulation/environment_snapshot.h" // the F3 Environment record as a typed read
 #include "simulation/hud_view_records.h" // RoundOutcome
+#include "simulation/load_warning_box.h"
 #include "simulation/present_event_records.h" // SoundEmitterRow (the bound emitter drain)
 
 #include "env/weather.h"
+#include "mission/mission_catalog.h" // the process mission table (the end screens' entry)
 #include "network/novaworld_identity.h" // primary_desktop_size (the HUD fonts' display width)
 #include "resource_index/resource_root.h" // session_title (a listen host's caps)
 #include "util/string_convert.h"
@@ -21,6 +23,7 @@
 
 #include <runtime/inmatch/host_settings.h> // host_player_slot_limit (the BMS admission limit)
 #include <runtime/inmatch/slot_staging.h> // stage_slot_position (the parity runner's slot staging)
+#include <runtime/mission/mission_catalog.h> // Row (the end screens' entry)
 #include <runtime/mission/mission_sidecars.h> // mission_base_name
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
 #include <runtime/terrain_query/terrain_field_build.h> // the ONE cpt/trn(+charmap) field builder (ADR 0042 d4)
@@ -28,15 +31,6 @@
 using namespace sim_internal;
 
 namespace {
-
-// The rules the mission's World runs from its load (KernelBootOptions::title_rules): the title the
-// shell named for the session (Simulation::set_game_title), else the mounted root's game, the
-// launch's with no root. A role's session stamps the same over it.
-const opennova::world::TitleRules &boot_title_rules(const opennova::Title *named,
-		const godot::Ref<godot::ResourceRoot> &root) {
-	return opennova::world::title_rules(
-			(named != nullptr ? *named : godot::ResourceRoot::session_title(root)).code);
-}
 
 // The BMS admission limits (promote.cpp's player_limit/team_count gates). A
 // host admits against its live slot limit (host_player_slot_limit over the
@@ -52,21 +46,21 @@ const opennova::world::TitleRules &boot_title_rules(const opennova::Title *named
 // host-equivalent defaults. Retail joiners never promote the .bms (admission
 // is host-only), so the joiner leg is a port decision with no binary witness.
 void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
-		const godot::SimulationNetState &net, bool host_listening,
-		const opennova::inmatch::ClientRuntime *joined) {
+		const godot::SimulationNetState &net, const godot::Ref<godot::ResourceRoot> &root,
+		bool host_listening, const opennova::inmatch::ClientRuntime *joined) {
 	// The cfg block's Shadow Quality word, which gates the face slots (engine
 	// KernelBootOptions::shadow_quality carries the witness).
 	if (net.game_config.is_valid())
 		options.shadow_quality = net.game_config->native().cfg().shadow_quality;
 	// The host's caps are its session's title's; a listen host no host screen configured runs as
-	// the launch's game.
+	// the session's game (session_title).
 	const opennova::Title &host_title = net.host_session_config.title != nullptr
 			? *net.host_session_config.title
-			: ResourceRoot::session_title(Ref<ResourceRoot>());
+			: session_title(net, root);
 	options.player_limit = host_listening
 			? static_cast<int32_t>(opennova::inmatch::host_player_slot_limit(
 					static_cast<int32_t>(net.host_max_players), net.host_serve_and_play,
-					host_title))
+					net.host_session_config.network_connect_type, host_title))
 			: static_cast<int32_t>(net.host_session_config.player_slot_limit());
 	options.team_count = net.host_session_config.num_teams;
 	if (!options.joiner || joined == nullptr) return;
@@ -79,7 +73,7 @@ void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
 // The bring-up's session create refused on the mpreset word
 // (inmatch::HostRole::session_create): the in-memory loads fail as the file
 // boot's phase A does (inmatch::HostBoot::session_create), and
-// session_create_ended_process() tells the embedder, which ends the process
+// load_ended_process() tells the embedder, which ends the process
 // with exit code 0 (the game shell's GameWorld.process_exit_requested).
 bool session_create_refused(const opennova::inmatch::HostRole *p_role, std::string &r_error) {
 	if (p_role == nullptr ||
@@ -89,11 +83,44 @@ bool session_create_refused(const opennova::inmatch::HostRole *p_role, std::stri
 	return true;
 }
 
+// The end screens' mission (engine world::EpilogMission carries the witnesses), stamped at each
+// boot: the title's screens; the menu's current entry, the process mission table's row for the
+// mission's file (none for an in-memory or unlisted mission), with its high score; and the
+// session status's mission name, the header's, cut to its field.
+void stamp_epilog_mission(opennova::world::EpilogCine &r_epilog, const opennova::Title &p_title,
+		const std::string &p_mission_file, const opennova::bms::File &p_mission) {
+	opennova::world::EpilogMission mission;
+	mission.debriefing_screens = p_title.epilog_debriefing_screens;
+	// The table lists a mission by its file name, without its folder.
+	const std::string file = p_mission_file.substr(p_mission_file.find_last_of("/\\") + 1);
+	if (const opennova::mission_catalog::Row *row =
+					file.empty() ? nullptr : godot::MissionCatalog::process_row(file)) {
+		mission.entry = true;
+		mission.file = row->file;
+		mission.title = row->title;
+		mission.win_debriefing = row->win_debriefing;
+		mission.lose_debriefing = row->lose_debriefing;
+		mission.high_score = godot::MissionCatalog::process_high_score(row->file);
+	}
+	mission.server_mission_name =
+			p_mission.get_mission_name().substr(0, opennova::world::kServerMissionNameChars);
+	r_epilog.mission = std::move(mission);
+}
+
 } // namespace
 
-bool Simulation::session_create_ended_process() const {
-	return host_role_ != nullptr &&
-			host_role_->session_create() == opennova::inmatch::CreateSessionResult::ProcessExit;
+bool Simulation::load_ended_process(int32_t &r_code) const {
+	if (host_role_ != nullptr &&
+			host_role_->session_create() == opennova::inmatch::CreateSessionResult::ProcessExit) {
+		r_code = 0;
+		return true;
+	}
+	// The engine's MissionKernel::load_warning_quit carries the exit code's witness.
+	if (kernel_ != nullptr && kernel_->load_warning_quit()) {
+		r_code = -1;
+		return true;
+	}
+	return false;
 }
 
 Simulation::Simulation() {
@@ -132,20 +159,24 @@ void Simulation::reset_world() {
 	kernel_ = std::move(next_kernel);
 	// The title's rules from the World's creation (a weapon-table load ahead of any boot seeds
 	// the single-player kit by them); the boot restamps them, and the role's bind stamps its own.
-	kernel_->world.rules.title_rules = &boot_title_rules(net_.game_title, assets_.root);
+	kernel_->world.rules.title_rules =
+			&opennova::world::title_rules(session_title(net_, assets_.root).code);
 	role_->bind(*kernel_);
 	// The retained .til (set_terrain_til_data, the boot's) onto the fresh
 	// store's placed-tile overlay; a file boot replaces it with its own.
 	kernel_->set_placed_tiles(net_.terrain_til_data);
 	kernel_->set_assets(
 			assets_.root.is_valid() ? &assets_.root->native_assets() : nullptr);
-	kernel_->collision.set_trace_profile_enabled(runtime_profiling_enabled_);
-	kernel_->profile.set_active(runtime_profiling_enabled_);
+	kernel_->collision.set_trace_profile_enabled(profiling_.runtime_profiling_enabled);
+	kernel_->profile.set_active(profiling_.runtime_profiling_enabled);
 	// player_.weapon is player-scoped and outlives every load [orig:
 	// PlayerProfile_LoadAllFromDisk @0x54f4d0 runs from the startup path, not
 	// Game_StartMission], as the spawn buffer is process-scoped (the role binds the
 	// ClientProcessState's); every peer's mission start re-copies its side's page.
 	player_.weapon.seeded_side = -1;
+	// With no profile installed it is a fresh profile's, the mounted game's (engine
+	// inmatch::SessionWeaponProfile::use_fresh).
+	player_.weapon.use_fresh(session_title(net_, assets_.root));
 	// Round init clears the map mode and the zooms return to the spawn
 	// defaults (witness at hud::HudMapControl — Game_InitNewRound /
 	// Player_InitPlayer lifecycle).
@@ -158,8 +189,8 @@ void Simulation::reset_world() {
 	sync_class_attribute_flags();
 	apply_session_rules();
 	world_installed_ = false;
-	last_sim_tick_us_ = 0;
-	last_net_tick_us_ = 0;
+	profiling_.last_sim_tick_us = 0;
+	profiling_.last_net_tick_us = 0;
 	present_.last_occlusion_build_us = 0;
 	present_.last_occlusion_probe_us = 0;
 	present_.last_snapshot_us = 0;
@@ -421,6 +452,11 @@ void Simulation::apply_character_traits_to_world() {
 	kernel_->world.tables.character_traits.clear();
 	for (const CharacterSexRow &row : assets_.character_sex_rows)
 		kernel_->world.tables.character_traits.set(row.character_id, row.female);
+	// The session title's avatar pick, whose sex the profile sounds take (engine
+	// inmatch::install_viewer_side_pick, DFX2-53).
+	opennova::inmatch::install_viewer_side_pick(kernel_->world.tables.character_traits,
+			&session_title(net_, assets_.root),
+			assets_.character_registry_mounted ? &assets_.character_registry : nullptr);
 }
 
 void Simulation::set_water_z(double p_water_y) {
@@ -620,7 +656,8 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 				p_terrain_til.ptr() + p_terrain_til.size());
 	request.wire_header_world = p_mission->is_wire_header_only();
 	ms::KernelBootOptions &options = request.boot_options;
-	options.title_rules = &boot_title_rules(net_.game_title, p_resource_root);
+	options.title_rules =
+			&opennova::world::title_rules(session_title(net_, p_resource_root).code);
 	options.music_globals = wac_music_globals();
 	options.playable = p_playable;
 	options.joiner = is_joiner();
@@ -629,18 +666,21 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	// profile word and intro cine and keeps the first start's UP-TIME stamp (D-PWR-8; the
 	// engine's KernelBootOptions::restart carries the witness).
 	options.restart = restart_boot_ && !options.mp_session;
+	// The load's warning box, over the game's window (engine KernelBootOptions::load_warning).
+	options.load_warning = load_warning_box;
 	// The shell owns the terrain field's parsed-document entry (the store the
 	// seam below builds, or none): the kernel never loads one from files here.
 	options.terrain = false;
 	options.wac = !p_wac_basename.is_empty();
 	options.wac_basename = opennova::to_std(p_wac_basename);
 	options.game_type = mission_game_type;
-	stamp_admission_limits(options, net_, is_host_listening(),
+	stamp_admission_limits(options, net_, p_resource_root, is_host_listening(),
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	// A map change's next map gates its placements on the slot limit its staging took from the
-	// cfg block (engine inmatch::stage_next_mission), as opennova-serve's does.
-	if (next_mission && net_.staged_player_limit > 0) options.player_limit = net_.staged_player_limit;
-	net_.staged_player_limit = 0;
+	// cfg block (engine inmatch::stage_next_mission, GameConfig::mission_slot_limit), as
+	// opennova-serve's does.
+	if (next_mission && net_.host_session_config.mission_slot_limit.has_value())
+		options.player_limit = static_cast<int32_t>(*net_.host_session_config.mission_slot_limit);
 	options.infantry_adm = p_infantry_adm.is_empty()
 			? std::string(ms::kDefaultInfantryAdm)
 			: opennova::to_std(p_infantry_adm);
@@ -662,6 +702,8 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		fail_session_load(boot_error.c_str());
 		return ERR_CANT_OPEN;
 	}
+	stamp_epilog_mission(kernel_->world.epilog, session_title(net_, p_resource_root), mission_file,
+			kernel_->mission);
 	// What the boot read, retained for the binding's own reads and the next
 	// fresh kernel: the mission text (the HUD's people names), the .til, the
 	// water plane (apply_sound_state_to_world re-stamps it) and, on a host,
@@ -739,13 +781,14 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 		kernel_->set_items_table(&pending_item_db->native_items());
 	}
 	opennova::mission::KernelBootOptions options;
-	options.title_rules = &boot_title_rules(net_.game_title, assets_.root);
+	options.title_rules =
+			&opennova::world::title_rules(session_title(net_, assets_.root).code);
 	options.music_globals = wac_music_globals();
 	options.playable = false; // callers spawn explicitly (or a host role's round init spawns)
 	options.joiner = is_joiner();
 	options.mp_session = is_host_listening() || is_joiner();
 	options.game_type = opennova::game_type::for_mission_attribs(kernel_->mission.header.attrib_flags);
-	stamp_admission_limits(options, net_, is_host_listening(),
+	stamp_admission_limits(options, net_, assets_.root, is_host_listening(),
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
@@ -754,6 +797,8 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 		return false;
 	}
 	finish_kernel_boot();
+	stamp_epilog_mission(kernel_->world.epilog, session_title(net_, assets_.root), std::string(),
+			kernel_->mission);
 	if (pending_item_db.is_valid()) resolve_item_traits(pending_item_db);
 	complete_session_load();
 	return true;
@@ -791,16 +836,16 @@ bool Simulation::compile_and_set_wac(const PackedStringArray &p_sources) {
 }
 
 void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
-	if (runtime_profiling_enabled_ == p_enabled) return;
-	runtime_profiling_enabled_ = p_enabled;
-	last_trace_profile_ = opennova::world::CollisionWorld::TraceProfile{};
-	last_sim_tick_us_ = 0;
-	last_net_tick_us_ = 0;
+	if (profiling_.runtime_profiling_enabled == p_enabled) return;
+	profiling_.runtime_profiling_enabled = p_enabled;
+	profiling_.last_trace_profile = opennova::world::CollisionWorld::TraceProfile{};
+	profiling_.last_sim_tick_us = 0;
+	profiling_.last_net_tick_us = 0;
 	present_.last_snapshot_us = 0;
 	present_.last_occlusion_build_us = 0;
 	present_.last_occlusion_probe_us = 0;
-	frame_sim_us_ = 0;
-	frame_sink_us_ = 0;
+	profiling_.frame_sim_us = 0;
+	profiling_.frame_sink_us = 0;
 	if (kernel_ != nullptr) {
 		kernel_->profile.reset();
 		kernel_->profile.set_active(p_enabled);
@@ -809,7 +854,7 @@ void Simulation::set_runtime_profiling_enabled(bool p_enabled) {
 }
 
 Vector4i Simulation::get_last_projectile_trace_times_us() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
+	const opennova::world::CollisionWorld::TraceProfile &tp = profiling_.last_trace_profile;
 	return Vector4i(trace_profile_lane(tp.terrain_us),
 			trace_profile_lane(tp.static_us),
 			trace_profile_lane(tp.dynamic_us),
@@ -817,7 +862,7 @@ Vector4i Simulation::get_last_projectile_trace_times_us() const {
 }
 
 Vector4i Simulation::get_last_projectile_trace_counts() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
+	const opennova::world::CollisionWorld::TraceProfile &tp = profiling_.last_trace_profile;
 	return Vector4i(trace_profile_lane(tp.calls),
 			trace_profile_lane(tp.static_survivors),
 			trace_profile_lane(tp.dynamic_survivors),
@@ -826,12 +871,12 @@ Vector4i Simulation::get_last_projectile_trace_counts() const {
 
 void Simulation::take_projectile_trace_profile() {
 	if (kernel_ == nullptr) return;
-	last_trace_profile_ = kernel_->collision.trace_profile();
+	profiling_.last_trace_profile = kernel_->collision.trace_profile();
 	kernel_->collision.clear_trace_profile();
 }
 
 Vector2i Simulation::get_last_projectile_trace_faces() const {
-	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
+	const opennova::world::CollisionWorld::TraceProfile &tp = profiling_.last_trace_profile;
 	return Vector2i(trace_profile_lane(tp.static_faces),
 			trace_profile_lane(tp.dynamic_faces));
 }
@@ -842,15 +887,15 @@ Dictionary Simulation::get_runtime_perf_counters() const {
 	out["listen_server"] = listen_server_;
 	out["ai_count"] = kernel_ ? kernel_->world.ai.count() : 0;
 	out["present_entity_count"] = present_.last_entity_count;
-	out["sim_tick_us"] = static_cast<int64_t>(last_sim_tick_us_);
-	out["net_tick_us"] = static_cast<int64_t>(last_net_tick_us_);
+	out["sim_tick_us"] = static_cast<int64_t>(profiling_.last_sim_tick_us);
+	out["net_tick_us"] = static_cast<int64_t>(profiling_.last_net_tick_us);
 	out["present_snapshot_us"] = static_cast<int64_t>(present_.last_snapshot_us);
 	out["occlusion_build_us"] = static_cast<int64_t>(present_.last_occlusion_build_us);
 	out["occlusion_probe_us"] = static_cast<int64_t>(present_.last_occlusion_probe_us);
-	out["runtime_profiling_enabled"] = runtime_profiling_enabled_;
+	out["runtime_profiling_enabled"] = profiling_.runtime_profiling_enabled;
 	// The last tick's projectile-trace attribution (collision.h TraceProfile), as the
 	// tick's sink took it (take_projectile_trace_profile).
-	const opennova::world::CollisionWorld::TraceProfile &tp = last_trace_profile_;
+	const opennova::world::CollisionWorld::TraceProfile &tp = profiling_.last_trace_profile;
 	out["trace_profiling_enabled"] = kernel_->collision.trace_profile_enabled();
 	out["trace_calls"] = tp.calls;
 	out["trace_terrain_us"] = tp.terrain_us;

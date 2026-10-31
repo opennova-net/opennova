@@ -1,5 +1,7 @@
 #include <runtime/hud/hud_map_view.h>
 
+#include <base/title/title.h>
+
 #include <base/io/bam.h>
 #include <base/io/crt_ftol.h>
 #include <runtime/hud/hud_math.h>
@@ -23,9 +25,9 @@ float pc24(double value) {
 // already-stored product: below 0.1 stores 0.1, above 10 stores 10.
 // [orig: @0x5544ba..0x554504 (DEATH drag); @0x553385..0x5533b9 (the fit);
 //  @0x549d2f..0x549d72 (CMAP drag)]
-float clamp_zoom(float zoom) {
+float clamp_zoom(float zoom, float zoom_max) {
 	if (zoom < kMapViewZoomMin) return kMapViewZoomMin;
-	if (zoom > kMapViewZoomMax) return kMapViewZoomMax;
+	if (zoom > zoom_max) return zoom_max;
 	return zoom;
 }
 
@@ -266,7 +268,7 @@ void MapViewPan::drag_zoom(int32_t x, int32_t y) {
 	last_y = y;
 	// zoom x= 1.005^(-dx), stored, then clamped [orig: @0x55447d..0x5544b4].
 	zoom = pc24(map_view_integer_pow(kMapViewDragZoomBase, -dx) * static_cast<double>(zoom));
-	zoom = clamp_zoom(zoom);
+	zoom = clamp_zoom(zoom, zoom_max);
 }
 
 void MapViewPan::zoom_step(int direction) {
@@ -277,7 +279,7 @@ void MapViewPan::zoom_step(int direction) {
 		if (zoom < kMapViewZoomMin) zoom = kMapViewZoomMin;
 	} else if (direction < 0) {
 		zoom = pc24(static_cast<double>(zoom) * static_cast<double>(kMapViewZoomOutStep));
-		if (zoom > kMapViewZoomMax) zoom = kMapViewZoomMax;
+		if (zoom > zoom_max) zoom = zoom_max;
 	}
 }
 
@@ -294,15 +296,26 @@ void DeathMapView::on_load() {
 	initialized = true;
 }
 
+void CommandMapView::apply_title(const Title &title) {
+	view.zoom_max = title.map_view_zoom_max;
+}
+
+void DeathMapView::apply_title(const Title &title) {
+	view.zoom_max = title.map_view_zoom_max;
+	frame_color = title.death_map_frame_color;
+}
+
 void DeathMapView::fit(const DeathMapFitInput &in) {
 	const auto reset_on_max = [this](float zoom) {
 		// [orig: `10.0 == zoom` @0x5533e5..0x5533f2 -> the pan, the target and
-		//  dword_25A3988 zeroed @0x5533f4..0x55340c]
-		if (zoom == kMapViewZoomMax) {
+		//  dword_25A3988 zeroed @0x5533f4..0x55340c] [orig: `6.0 == zoom` @0x550974
+		//  -> @0x550976..0x55098e (dfx2.exe)]
+		if (zoom == view.zoom_max) {
 			view.pan_x = 0;
 			view.pan_y = 0;
 			target_x = 0;
 			target_y = 0;
+			zoom_ease = false;
 		}
 	};
 	if (!in.shroud_present) {
@@ -348,7 +361,7 @@ void DeathMapView::fit(const DeathMapFitInput &in) {
 	const float ratio = pc24(static_cast<double>(extent) / static_cast<double>(divisor));
 	const float zoom = pc24(static_cast<double>(ratio) * (1.0 / 65536.0) *
 			static_cast<double>(1.5f));
-	view.zoom = clamp_zoom(zoom);
+	view.zoom = clamp_zoom(zoom, view.zoom_max);
 	// The pan centres the AABB [orig: @0x5533bb..0x5533cf].
 	view.pan_x = io::bam_sub(io::bam_add(min_x, max_x) >> 1, in.player_x);
 	view.pan_y = io::bam_sub(io::bam_add(min_y, max_y) >> 1, in.player_y);
@@ -360,6 +373,16 @@ void DeathMapView::ease_frame() {
 	//  (target - pan) >> 3 on both axes]
 	view.pan_x = io::bam_add(view.pan_x, io::bam_sub(target_x, view.pan_x) >> 3);
 	view.pan_y = io::bam_add(view.pan_y, io::bam_sub(target_y, view.pan_y) >> 3);
+	// [orig: `if (dword_25A3988)`, `flt_25A39B8 > 0.80000001` -> x 0.95999998
+	//  @0x5547b9..0x5547d8]
+	if (zoom_ease && view.zoom > 0.8f)
+		view.zoom = pc24(static_cast<double>(view.zoom) * static_cast<double>(0.96f));
+}
+
+void DeathMapView::table_pan(int32_t dx, int32_t dy) {
+	target_x = dx;
+	target_y = dy;
+	zoom_ease = true;
 }
 
 DeathMapFrame DeathMapView::render(const MapViewRect &rect, int32_t scaled_800,
@@ -373,6 +396,7 @@ DeathMapFrame DeathMapView::render(const MapViewRect &rect, int32_t scaled_800,
 	frame.center_x = io::bam_add(view.pan_x, player_x);
 	frame.center_y = io::bam_add(view.pan_y, player_y);
 	frame.scale = view.draw_scale();
+	frame.frame_color = frame_color;
 	return frame;
 }
 
@@ -400,8 +424,10 @@ bool DeathMapView::on_event(MapViewEvent event, int32_t x, int32_t y, uint32_t b
 		view.right_drag = false; // [orig: @0x55457e]
 		return false;
 	case MapViewEvent::kWheel:
-		// [orig: DeathScreen_ZoomStep(event, 0, g_MouseState.wheelRemainder) @0x5545c6]
+		// [orig: DeathScreen_ZoomStep(event, 0, g_MouseState.wheelRemainder) @0x5545c6,
+		//  dword_25A3988 = 0 @0x5545ce]
 		view.zoom_step(wheel > 0 ? 1 : (wheel < 0 ? -1 : 0));
+		zoom_ease = false;
 		return false;
 	case MapViewEvent::kMove:
 		if (view.left_drag && (buttons & kMapViewButtonLeft) != 0) {
@@ -414,7 +440,9 @@ bool DeathMapView::on_event(MapViewEvent event, int32_t x, int32_t y, uint32_t b
 			target_x = io::bam_add(target_x, dx);
 			target_y = io::bam_add(target_y, dy);
 		} else if (view.right_drag && (buttons & kMapViewButtonRight) != 0) {
+			// [orig: dword_25A3988 = 0 on every arm of the clamp @0x5544cb / @0x5544f6]
 			view.drag_zoom(x, y);
+			zoom_ease = false;
 		} else {
 			view.left_drag = false; // [orig: @0x554510..0x554517]
 			view.right_drag = false;
@@ -662,7 +690,10 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 	input.rect_y2 = device_to_virtual(frame.rect.bottom, input.surface_h, kDesignHeight);
 	input.player_x = frame.center_x;
 	input.player_y = frame.center_y;
-	input.flags = kDeathMapMask;
+	input.flags = input.overlays != nullptr && input.overlays->death_map_no_names
+			? kDeathMapMask & ~kDeathMapNamesBit
+			: kDeathMapMask;
+	input.death_map_pass = true;
 	input.flip_180 = false;
 	input.window_scale = frame.scale;
 	input.window_marker_angle_bias_bam = static_cast<int32_t>(0x3FFFFFC0u - 0x40000000u);
@@ -791,6 +822,19 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 
 	// The player crosshair [orig: MapOverlay_DrawView @0x5a5d32..0x5a5ed6].
 	map_view_crosshair(input, frame.rect, facts, hud_frame, out.over_lines);
+	// The title's frame after the map: top, right, bottom, left, in the quad colour
+	// [orig: CMap_OverlayInputHandler - CGfxDevice_SetQuadDiffuse @0x550ff9, Line2D_DrawXY
+	//  (Line2D_Draw) @0x55100f / @0x551026 / @0x55103c / @0x551052 (dfx2.exe)].
+	if (frame.frame_color != 0) {
+		const float l = static_cast<float>(frame.rect.left);
+		const float t = static_cast<float>(frame.rect.top);
+		const float r = static_cast<float>(frame.rect.right);
+		const float b = static_cast<float>(frame.rect.bottom);
+		out.over_lines.push_back({l, t, r, t, frame.frame_color});
+		out.over_lines.push_back({r, t, r, b, frame.frame_color});
+		out.over_lines.push_back({r, b, l, b, frame.frame_color});
+		out.over_lines.push_back({l, b, l, t, frame.frame_color});
+	}
 }
 
 void map_view_crosshair(const HudMinimapInput &view, const MapViewRect &rect,

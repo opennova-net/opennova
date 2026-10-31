@@ -290,6 +290,22 @@ void Supervisor::tick(uint64_t now_ms) {
 	for (const HostedServer &s : live) {
 		seen.insert(s.id);
 		if (limited.count(s.id) != 0) continue;
+		if (!s.settings_error.empty()) {
+			// Its stored configuration does not read: it fails alone, its slot let go (so its
+			// agent stops its container), and every other server's pass goes on.
+			try {
+				if (s.machine_ref)
+					release_slot(db, s.id);
+				finish(db, s, State::Failed,
+						"its stored configuration does not read (" + s.settings_error + ")",
+						StartCause::NoData);
+			} catch (const db::Error &e) {
+				good = false;
+				std::fprintf(stderr, "[hosted] WARN server %lld: %s\n",
+						static_cast<long long>(s.id), e.what());
+			}
+			continue;
+		}
 		Runtime &rt = runtimes_[s.id];
 		if (rt.since_ms == 0 || rt.state != s.state) {
 			// A state this pass did not set (a route's stop, a new request, or a
@@ -814,12 +830,14 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 	// The weapons its trees name, the expansion's when it has any. A saved option those
 	// trees no longer take (a weapon a newer tree renamed) fails this server alone,
 	// before its account and admin login turn over.
-	gamecfg::WeaponRoster weapons;
-	if (const auto base = find_tree(db, base_tree)) weapons = base->weapons;
-	if (expansion_tree) {
-		if (const auto expansion = find_tree(db, *expansion_tree); expansion && !expansion->weapons.empty())
-			weapons = expansion->weapons;
-	}
+	gamecfg::WeaponRoster base_weapons, expansion_weapons;
+	if (const auto base = find_tree(db, base_tree))
+		base_weapons = base->weapons;
+	if (expansion_tree)
+		if (const auto expansion = find_tree(db, *expansion_tree))
+			expansion_weapons = expansion->weapons;
+	const gamecfg::WeaponRoster &weapons =
+			server_weapon_roster(base_weapons, expansion_tree ? &expansion_weapons : nullptr);
 	try {
 		(void)settings_block(s.settings, data->title, weapons);
 	} catch (const std::invalid_argument &e) {
@@ -961,7 +979,8 @@ void Supervisor::on_booting(db::Database &db, const Fleet &fleet, const HostedSe
 		return;
 	}
 	if (s.update_requested) {
-		replace(db, s, now_ms, "updated to its game's current data", StartCause::Update);
+		replace(db, s, now_ms, "updated to its game's current data and server build",
+				StartCause::Update);
 		return;
 	}
 	if (machine->state != FleetMachineState::Ready) {
@@ -999,7 +1018,8 @@ void Supervisor::on_listing(db::Database &db, const Fleet &fleet, const HostedSe
 		return;
 	}
 	if (s.update_requested) {
-		replace(db, s, now_ms, "updated to its game's current data", StartCause::Update);
+		replace(db, s, now_ms, "updated to its game's current data and server build",
+				StartCause::Update);
 		return;
 	}
 	const SlotReport *report = report_of(fleet, s);
@@ -1033,9 +1053,11 @@ void Supervisor::on_running(db::Database &db, const Fleet &fleet, const HostedSe
 		return;
 	}
 	// The owner's update: its slot let go and placed again at once (the next
-	// start takes the current trees), the machine's kind of move, no restart.
+	// start takes the current trees and the fleet's serve image), the machine's kind
+	// of move, no restart.
 	if (s.update_requested) {
-		replace(db, s, now_ms, "updated to its game's current data", StartCause::Update);
+		replace(db, s, now_ms, "updated to its game's current data and server build",
+				StartCause::Update);
 		return;
 	}
 	const SlotReport *report = report_of(fleet, s);

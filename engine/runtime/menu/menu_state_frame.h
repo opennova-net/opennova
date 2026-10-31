@@ -33,6 +33,7 @@ void frame_set_caret(MenuFrameState &state, int index, int caret);
 void frame_set_text(MenuFrameState &state, int index, const std::string &text, int hotkey_pos);
 // CWnd_SetRect: the widget's own rect, parent-relative design edges.
 void frame_set_rect(MenuFrameState &state, int index, int left, int top, int right, int bottom);
+void frame_set_image(MenuFrameState &state, int index, uint32_t states, const std::string &file);
 // The open dropdown's hovered row; false when it already was.
 bool frame_set_hover_item(MenuFrameState &state, int index, int row);
 void frame_set_selection(MenuFrameState &state, int index, int selected, int hover, int scroll_row);
@@ -71,8 +72,12 @@ public:
 	using Configure = std::function<bool(const std::string &screen, MenuFrameCompiler &compiler)>;
 	using Clicked = std::function<void(int index, int part)>;
 	using Scrolled = std::function<void(int index, int value)>;
+	// A widget's run-time image interned past the configure's textures: the embedder loads the
+	// slots it added, as the game's frame does at once (MenuFrameAssets::load_added_textures).
+	using TexturesAdded = std::function<void(MenuFrameCompiler &compiler)>;
 
 	void set_configure(Configure configure) { configure_ = std::move(configure); }
+	void set_textures_added(TexturesAdded added) { textures_added_ = std::move(added); }
 	void set_clicked(Clicked clicked) { clicked_ = std::move(clicked); }
 	void set_scrolled(Scrolled scrolled) { scrolled_ = std::move(scrolled); }
 
@@ -109,6 +114,7 @@ public:
 	void set_widget_popup_open(int index, bool open) override;
 	void set_widget_focused(int index, bool focused) override;
 	void set_widget_rect(int index, int left, int top, int right, int bottom) override;
+	void set_widget_image(int index, uint32_t states, const std::string &file) override;
 	void set_widget_caret(int index, int caret) override;
 
 	int get_widget_caret(int index) const override { return frame_widget_caret(state_, index); }
@@ -146,6 +152,7 @@ private:
 	MenuFrameState state_;
 	MenuClickLatch click_;
 	Configure configure_;
+	TexturesAdded textures_added_;
 	Clicked clicked_;
 	Scrolled scrolled_;
 	bool configured_ = false;

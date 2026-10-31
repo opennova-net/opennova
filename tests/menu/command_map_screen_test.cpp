@@ -73,6 +73,7 @@ struct Frame : MenuFrameSeam {
 	MenuRectF widget_rect(int) const override { return {}; }
 	void design_scale(float &sx, float &sy) const override { sx = sy = 1.0f; }
 	std::vector<MenuPumpWindow> press_mouse(float, float) override { return {}; }
+	void set_widget_image(int, uint32_t, const std::string &) override {}
 	int process_mouse(float, float, bool) override { return -1; }
 	void release_mouse() override {}
 	bool press_popup_mouse(int, float, float) override { return false; }

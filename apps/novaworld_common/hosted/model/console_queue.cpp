@@ -24,6 +24,7 @@ AdminCommandResult take_answer(db::Database &db, int64_t id, const db::Row &row)
 	out.configuration_saved = row.as_int(3).value_or(0) != 0;
 	out.settings_revision = row.as_int(4).value_or(0);
 	out.delivery_unknown = row.as_int(5).value_or(0) != 0;
+	out.refused_command = row.as_text(6).value_or("");
 	for (const db::Row &r :
 			db.query("SELECT text FROM hosted_console_replies WHERE command_id = $1 ORDER BY n;",
 					{ BindValue(id) }))
@@ -60,7 +61,8 @@ AdminCommandResult run_console_command(db::ConnectionPool &pool, int64_t server_
 			auto lease = pool.acquire();
 			db::Database &db = *lease;
 			const auto rows = db.query(
-					"SELECT state, outcome, sent, configuration_saved, settings_revision, delivery_unknown FROM hosted_console_commands WHERE id = $1;",
+					"SELECT state, outcome, sent, configuration_saved, settings_revision, "
+					"delivery_unknown, refused_command FROM hosted_console_commands WHERE id = $1;",
 					{ BindValue(id) });
 			if (rows.empty())
 				return out; // the fleet let it go: LinkDown

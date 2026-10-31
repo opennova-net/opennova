@@ -84,14 +84,15 @@ int Simulation::request_local_player_nvg_gain(int p_delta) {
 	return opennova::world::player_view_adjust_nvg_gain(kernel_->local.view, p_delta);
 }
 
-void Simulation::apply_local_player_view_action(int p_action) {
-	// The preference re-resolves the mode at once; the action's input bit
-	// lands in the authority's BMS word only: the evaluator runs the host's
-	// chains and a joiner never opens the .bms (world/player_view.h
-	// player_view_apply_view_action).
-	opennova::world::player_view_apply_view_action(kernel_->local.view,
-			is_joiner() ? nullptr : &kernel_->world.script.input_action_bits, p_action);
+bool Simulation::apply_local_player_view_action(int p_action) {
+	// The preference re-resolves the mode at once; the action's input bit lands in the process's
+	// word, which the authority's BMS chains read and a joiner's toggle (412) reads too (a joiner
+	// never opens the .bms) (world/player_view.h player_view_apply_view_action). True when the
+	// FP gun bit turns on (the HUD toggles' flag).
+	const bool gun = opennova::world::player_view_apply_view_action(kernel_->local.view,
+			&kernel_->world.script.input_action_bits, p_action);
 	refresh_local_player_view_effects();
+	return gun;
 }
 
 int Simulation::debug_input_action_bits() const {
@@ -106,6 +107,10 @@ void Simulation::set_local_player_debug_third_person(bool p_enabled) {
 
 bool Simulation::local_death_screen_active() const {
 	return opennova::inmatch::local_death_screen_active(role_view());
+}
+
+const opennova::Title &Simulation::game_title() const {
+	return session_title(net_, assets_.root);
 }
 
 Ref<PlayerLocalView> Simulation::get_local_player_view() const {

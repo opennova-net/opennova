@@ -1,5 +1,12 @@
 import type { RouteLocationRaw } from 'vue-router';
 
+// The ONE build a listed server runs (utils/buildView.ts Build): its version
+// ("0.0.22.123") and its commit's short sha, each null when not named.
+export interface LobbyBuild {
+  version: string | null;
+  commit: string | null;
+}
+
 export interface LobbyHost {
   id: number;
   serverName: string;
@@ -15,6 +22,9 @@ export interface LobbyHost {
   expansion?: string | null;
   // A game password guards it.
   locked?: boolean;
+  // The ONE build its server runs, as a server NovaWorld hosts reports it;
+  // null for any other (a player's own server, or a retail one, says none).
+  build?: LobbyBuild | null;
 }
 
 // One player on a server NovaWorld hosts, as its admin link reports them.
@@ -113,4 +123,6 @@ export interface ServerRow {
   // It is locked (with or without a password).
   locked?: boolean;
   punkBuster?: boolean;
+  // The ONE build its server runs, where it is known (a server NovaWorld hosts).
+  build?: LobbyBuild | null;
 }

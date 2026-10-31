@@ -526,7 +526,10 @@ int check_S_81_score_delta_sound() {
 	ScoreDeltaSound out;
 	EXPECT(decode_score_delta_sound(w.b.data(), w.b.size(), out));
 	EXPECT(out.score == -42);
-	EXPECT(!decode_score_delta_sound(w.b.data(), w.b.size() - 1, out));
+	// A short body reads 0, a long one its first four bytes [orig: @0x42A0BA..0x42A0CD].
+	EXPECT(decode_score_delta_sound(w.b.data(), w.b.size() - 1, out) && out.score == 0);
+	w.u8(0x7F);
+	EXPECT(decode_score_delta_sound(w.b.data(), w.b.size(), out) && out.score == -42);
 	cover('S', 0x81);
 	return 0;
 }

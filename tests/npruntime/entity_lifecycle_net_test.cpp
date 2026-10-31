@@ -42,6 +42,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
+#include <net/protocol/protocol.h>
 
 #include <runtime/world/ai.h>
 #include <runtime/world/player_spawn.h>
@@ -142,6 +143,7 @@ const ns::ClientEntityState *row_for(const ns::ClientState &state, uint16_t hand
 bool run_team_assign_relatches_self_and_resubmits() {
 	constexpr uint16_t kSelf = 0x0005;
 	inmatch::JoinerConnection joiner("TeamJoiner", [] { return uint64_t(0); });
+	joiner.set_protocol(title_protocol("jo"));
 	inmatch::JoinerConnection::LoadoutKit kit;
 	kit.player_class = 6;
 	kit.equipped_combo = 212; // deliberately NOT 195: the re-submit must ignore it
@@ -255,6 +257,7 @@ bool same_rows(const std::vector<LoadoutSubmitEntry> &got,
 bool run_team_assign_reselects_the_new_sides_profile() {
 	constexpr uint16_t kSelf = 0x0005;
 	inmatch::JoinerConnection joiner("SideJoiner", [] { return uint64_t(0); });
+	joiner.set_protocol(title_protocol("jo"));
 	inmatch::JoinerConnection::LoadoutKit kit;
 	// The single applied kit is deliberately DIFFERENT from BOTH side blocks, so an
 	// implementation that keeps submitting "the one applied kit" cannot pass.
@@ -358,6 +361,9 @@ bool run_team_assign_reselects_the_new_sides_profile() {
 bool run_team_assign_default_kit_stays_byte_identical() {
 	constexpr uint16_t kSelf = 0x0005;
 	inmatch::JoinerConnection joiner("DefaultKitJoiner", [] { return uint64_t(0); });
+	joiner.set_protocol(title_protocol("jo"));
+	// The title the session runs as, whose fresh profile the kitless submit sends.
+	joiner.set_title(title_by_code("jo"));
 	// deliberately NO set_loadout_kit; a synthetic weapon table holding the fresh red
 	// page's names behind an unrelated entry
 	const opennova::playersav::KitPage red =
@@ -580,6 +586,8 @@ bool run_empty_slot_sweep_retires_the_row() {
 	constexpr uint16_t kSelf = 0x0005;
 	constexpr uint16_t kGhost = 0x0003;
 	inmatch::ClientRuntime client("SweepJoiner", [] { return uint64_t(0); });
+	// The 0x0F fold reads its protocol (ProtocolInMatch::s2c_0f).
+	client.set_protocol(title_protocol("jo"));
 	client.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 	                    1, 0, kSelf, w::kPlayerInfantryTypeId);
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();

@@ -25,19 +25,15 @@ uint64_t hash_of(const std::vector<uint8_t> &bytes) {
 
 } // namespace
 
-bool BaseMatch::open(const std::string &install, const std::string &game, std::string &error) {
+bool BaseMatch::open(const std::string &install, std::string &error) {
 	install_ = install;
-	game_ = game;
 	std::error_code ec;
 	if (install.empty() || !fs::is_directory(system_path(install), ec)) {
 		error = install.empty() ? std::string("no game install is set") : "the game install " + install + " is no folder";
 		return false;
 	}
-	InstallSpec spec; // the base game: no expansion, no renames (base_install_spec)
-	spec.root = install;
-	spec.game = game;
 	std::string why;
-	if (!view_.open(spec, why)) {
+	if (!view_.open(base_install_spec(install), why)) {
 		error = "the game install " + install + " does not mount: " + why;
 		return false;
 	}
@@ -86,7 +82,7 @@ bool BaseMatch::archive_copy(const std::string &name, BaseCopy &out, uint64_t &r
 	out.raw = hash_of(bytes);
 	// As served: the loaders' decode of the stored bytes (InstallView::read's, vfs_read_served), in memory.
 	if (!vfs_loader_takes_stored(file->member) &&
-	    vfs_decode_payload(bytes, view_.vfs().scr_policy())) {
+	    vfs_decode_payload(bytes)) {
 		out.served = hash_of(bytes);
 		out.served_size = bytes.size();
 	} else {
@@ -115,8 +111,7 @@ bool BaseMatch::root_copy(const std::string &name, BaseCopy &out, uint64_t &read
 
 void BaseMatch::load(const io::JsonValue &section) {
 	cache_.clear();
-	if (!section.is_object() || section.get_string("install", "") != install_ || section.get_string("game", "") != game_)
-		return;
+	if (!section.is_object() || section.get_string("install", "") != install_) return;
 	const io::JsonValue *files = section.get("files");
 	if (!files || !files->is_array()) return;
 	for (const io::JsonValue &item : files->array) {
@@ -136,7 +131,6 @@ void BaseMatch::load(const io::JsonValue &section) {
 io::JsonValue BaseMatch::save() const {
 	io::JsonValue section = io::JsonValue::make_object();
 	section.set("install", io::JsonValue::make_string(install_));
-	section.set("game", io::JsonValue::make_string(game_));
 	io::JsonValue files = io::JsonValue::make_array();
 	for (const auto &[key, cached] : kept_) {
 		io::JsonValue item = io::JsonValue::make_object();

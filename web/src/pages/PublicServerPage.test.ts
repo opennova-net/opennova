@@ -163,6 +163,19 @@ describe('PublicServerPage, a server our NovaWorld lists', () => {
     ]);
   });
 
+  it("names the ONE build a hosted server runs, and none for a server whose build is not known", async () => {
+    readOurs.mockResolvedValue(listed({ build: { version: '0.0.22.123', commit: 'a1b2c3d' } }));
+    const { page } = await open('/lobby/167772173');
+    expect(facts(page)['Server build']).toBe('ONE 0.0.22.123 a1b2c3d');
+    expect(page.get('.server-build .build-version').text()).toBe('ONE 0.0.22.123');
+    wrapper?.unmount();
+    readOurs.mockResolvedValue(listed({ build: { version: '0.0.22', commit: null } }));
+    expect(facts((await open('/lobby/167772173')).page)['Server build']).toBe('ONE 0.0.22');
+    wrapper?.unmount();
+    readOurs.mockResolvedValue(listed({ build: null }));
+    expect(facts((await open('/lobby/167772173')).page)).not.toHaveProperty('Server build');
+  });
+
   it('says so once the server is no longer listed', async () => {
     readOurs.mockRejectedValue(new LobbyGone());
     const { page } = await open('/lobby/167772173');

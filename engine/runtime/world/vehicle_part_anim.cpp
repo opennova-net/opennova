@@ -76,13 +76,18 @@ void VehicleSystem::rotor_machine_tick(Entity &veh, const VehicleTraits &traits)
 		// the shared stream — the roll is the one PRNG draw this tick takes,
 		// and an unoccupied such item takes it EVERY tick because the
 		// unoccupied arm resets the rate [orig: @0x4928DF..0x492935].
+		// The rates are the title's: dfx2.exe's are about twice Jointops.exe's (DFX2-23)
+		// [orig: Entity_UpdatePartSpinAccumulator @0x4928C0 - 372827 @0x492903, 326222 / 279619
+		//  @0x49291E..0x492945, the decay 372827 @0x492964; Entity_UpdateHeloRotorSpin @0x48FA80 -
+		//  372827 @0x48FB1C / @0x48FB3E, the decay 93206 @0x48FB77 (dfx2.exe)].
+		const PartSpinRates &rates = world.rules.title().part_spin;
 		int32_t rolled = 0;
 		if (rotor_rate_needs_roll(m.part_spin, traits.player_control))
-			rolled = rotor_rate_from_roll(world.next_prng16());
+			rolled = rotor_rate_from_roll(world.next_prng16(), rates);
 		if (machine == RotorMachine::Helo && occupied)
 			play_rotor_start_sound(veh, traits);
-		rotor_seed_rate(m.part_spin, traits.player_control, occupied, rolled);
-		rotor_tick(m.part_spin, occupied, rotor_decay_for(machine));
+		rotor_seed_rate(m.part_spin, traits.player_control, occupied, rolled, rates);
+		rotor_tick(m.part_spin, occupied, rotor_decay_for(machine, rates));
 		if (machine == RotorMachine::Helo) {
 			world.rotor_wash.update(veh, traits);
 			update_rotor_sound(veh, traits);

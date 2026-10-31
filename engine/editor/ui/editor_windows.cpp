@@ -11,11 +11,13 @@
 
 #include <base/io/json.h>
 #include <base/io/os_path.h>
+#include <base/io/strutil.h>
 #include <editor/graph/jump_queries.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/build_result.h>
 #include <editor/session/navigation_controller.h>
+#include <editor/session/novaworld_standing.h>
 #include <editor/session/rename_controller.h>
 #include <editor/project_build/export_build.h>
 #include <editor/session/play_controller.h>
@@ -249,6 +251,11 @@ void EditorWindows::request(EditorRequest request) {
 		replace_target_ = request.path;
 		request.path.clear();
 	}
+	// A .cpt's Export heights...: the file kept likewise, the Shell's save dialog offering its name as a .raw.
+	if (request.kind == EditorRequestKind::PickFile && request.purpose == PickPurpose::HeightsRaw) {
+		heights_target_ = request.path;
+		request.path = utf8_of(path_of(basename_of(request.path)).replace_extension(".raw"));
+	}
 	// A music bank stream's audio from a wave...: the bank and the stream's place ("" a new stream) kept likewise.
 	if (request.kind == EditorRequestKind::PickFile && request.purpose == PickPurpose::MusicStreamWave) {
 		stream_pick_ = StreamPick{request.path, std::string()};
@@ -257,9 +264,9 @@ void EditorWindows::request(EditorRequest request) {
 		request.path.clear();
 		request.values.clear();
 	}
-	// A NovaWorld project's Get... (ADR 0069): its key kept until the Shell's pick of a folder comes back.
+	// A NovaWorld project's Sync... (ADR 0069): its key kept until the Shell's pick of a folder comes back.
 	if (request.kind == EditorRequestKind::PickDirectory && request.purpose == PickPurpose::NovaWorldFolder) {
-		novaworld_get_key_ = request.project_key;
+		novaworld_sync_key_ = request.project_key;
 		request.project_key.clear();
 	}
 	if (in_frame_ && row.acts_on_saved) deferred_.push_back(std::move(request));
@@ -541,13 +548,19 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 		if (!stream_pick_.bank.empty()) request(request::music_stream_audio(stream_pick_.bank, path, stream_pick_.place));
 		stream_pick_ = StreamPick();
 		break;
+	case PickPurpose::HeightsRaw:
+		// A name typed without its extension still lands as a .raw, the name a terrain import reads it by.
+		if (!heights_target_.empty())
+			request(request::export_heights(heights_target_, strutil::ends_with_icase(path, ".raw") ? path : path + ".raw"));
+		heights_target_.clear();
+		break;
 	case PickPurpose::NovaWorldFolder:
 		// Into a folder of its key's name inside the one picked, as a clone makes one.
-		if (!novaworld_get_key_.empty()) {
+		if (!novaworld_sync_key_.empty()) {
 			const bool slash = path.back() == '/' || path.back() == '\\';
-			request(request::novaworld_get(novaworld_get_key_, path + (slash ? "" : "/") + novaworld_get_key_));
+			request(request::novaworld_sync(novaworld_sync_key_, path + (slash ? "" : "/") + novaworld_sync_key_));
 		}
-		novaworld_get_key_.clear();
+		novaworld_sync_key_.clear();
 		break;
 	case PickPurpose::None: break;
 	}
@@ -1158,8 +1171,8 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		                           : "See Problems.";
 	}
 
-	// The project's standing in NovaWorld (ADR 0069): "ACIDGAMBIT r41, 3 changed, 2 incoming".
-	const std::string novaworld_text = novaworld_status_text(v.novaworld);
+	// The project's standing in NovaWorld (ADR 0069): "opennova.net: r41, 3 changed, 2 incoming".
+	const std::string novaworld_text = novaworld_standing(v.novaworld).status;
 
 	// Each part's width, left to right: NovaWorld's standing, the unsaved files, the problem
 	// counts, the state and the buttons (the bar's layout puts an item spacing between items), from the

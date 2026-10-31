@@ -6,6 +6,7 @@
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <net/napi/session.h>
+#include <net/novacrypto/cdkey.h>
 #include <net/novaworld/connect_or_host.h>
 #include <net/novaworld/lobby_identity.h>
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (a GET's nocachefix tick)
@@ -136,6 +137,13 @@ HostLobbyText english_lobby_text() {
 }
 
 } // namespace
+
+LobbyMachineTokens machine_tokens(const FingerprintSerialMix &mix) {
+	RetailMachineInputs machine;
+	if (read_retail_machine_inputs(machine))
+		return make_retail_machine_tokens(machine, mix);
+	return fallback_machine_tokens(stable_identity(), mix);
+}
 
 Lister::Lister(ListerOptions options, ListingSource &source, IDatagramSocket *session_socket) :
 		options_(std::move(options)),
@@ -560,12 +568,17 @@ void Lister::sync_flow_context() {
 std::vector<std::pair<std::string, std::string>> Lister::cookie_vars() {
 	if (identity_vars_.empty()) {
 		read_locale_identity(identity_);
-		LobbyMachineTokens tokens = fallback_machine_tokens(stable_identity());
-		RetailMachineInputs machine;
-		if (read_retail_machine_inputs(machine)) tokens = make_retail_machine_tokens(machine);
+		// NWPSSK under the served protocol's serial term (its session part is complete).
+		const LobbyMachineTokens tokens = machine_tokens(*options_.protocol->nwpssk_mix);
 		identity_.nwpssk = tokens.nwpssk;
 		identity_.nwusid = tokens.nwusid;
 		identity_.nwhwi = options_.hardware_identity;
+		// The CD-key ids of the record the server's boot read filled, for a protocol that keeps one
+		// (LobbyIdentityParams::nwcdkiid carries the witness).
+		if (options_.protocol->cd_key != nullptr) {
+			identity_.nwcdkiid = cdkey::process_key_info().keys.cdkiid;
+			identity_.nwcdkiidexp1 = cdkey::process_key_info().keys.exp1;
+		}
 		identity_vars_ = make_lobby_identity_vars(identity_);
 	}
 	sync_flow_context();

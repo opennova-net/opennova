@@ -364,13 +364,15 @@ public:
 	// A sound-profile slot one replica body's mover leg played this tick, at
 	// the body's position when it played, with the identity the embedder
 	// resolves it through: the row's items.def type and, for a player, its
-	// packed avatar id (the wire net_id) that picks the female binding
+	// packed avatar id (the wire net_id) and its Team, from which the character
+	// its avatar blip names picks the female binding (world::player_blip_character)
 	// [orig: Entity_GetProfileSlotSound @0x528300 ->
 	// Entity_PlaySound3D_FullVolume @0x528E20].
 	struct ReplicaSlotSound {
 		uint16_t handle = 0xFFFF;
 		uint16_t type_id = 0;
 		uint16_t character_id = 0; // a player's net_id; 0 for an org1 body
+		uint8_t team = 0; // the row's Team, 0 while none is known
 		uint8_t slot = 0;
 		int32_t pos[3] = {};
 	};
@@ -386,6 +388,7 @@ public:
 		uint16_t handle = 0xFFFF;
 		uint16_t type_id = 0;
 		uint16_t character_id = 0; // a player's net_id; 0 for an org1 body
+		uint8_t team = 0; // the row's Team, 0 while none is known
 		bool on_entity = false;
 		uint32_t events = 0;
 		int32_t capsule_bottom = 0;
@@ -546,6 +549,18 @@ public:
 	//  @0x429AC8 / @0x429AE2]
 	void use_vehicle_spawn_store(ClientVehicleSpawnAvailability *store) {
 		vehicle_spawn_store_ = store;
+	}
+	// The S2C 0x82 score tracker's entries, the process's (ClientScoreTracker carries the
+	// witness): the embedder hands in its process-lived store (inmatch::ClientProcessState);
+	// null keeps this pipeline's own.
+	void use_score_tracker_store(std::vector<ClientScoreTrackerEntry> *store) {
+		score_tracker_store_ = store;
+	}
+	std::vector<ClientScoreTrackerEntry> &score_tracker_entries() {
+		return score_tracker_store_ != nullptr ? *score_tracker_store_ : own_score_tracker_;
+	}
+	const std::vector<ClientScoreTrackerEntry> &score_tracker_entries() const {
+		return score_tracker_store_ != nullptr ? *score_tracker_store_ : own_score_tracker_;
 	}
 	ClientVehicleSpawnAvailability &vehicle_spawn_availability() {
 		return vehicle_spawn_store_ != nullptr ? *vehicle_spawn_store_ : own_vehicle_spawn_;
@@ -834,15 +849,15 @@ public:
 	// True once a folded 0x08 / 0x7B (or set_game_type) wrote the word.
 	bool game_type_known() const { return game_type_known_; }
 
-	// The title the session speaks (net/protocol/protocol.h; null: JO's), whose
-	// edits to the in-match bodies the folds follow: the 0x0A objective body's
-	// co-op checkpoint (DFX2-1) and the 0x66 armory-only value (DFX2-10).
+	// The protocol the session speaks (net/protocol/protocol.h), whose edits to
+	// the in-match bodies the folds follow: the 0x0A objective body's co-op
+	// checkpoint (DFX2-1) and the 0x66 armory-only value (DFX2-10). Set before
+	// the first fold; a fold with none aborts (protocol_in_match).
 	void set_protocol(const Protocol *protocol) { protocol_ = protocol; }
 	const Protocol *protocol() const { return protocol_; }
-	// The rules the session's title runs (world::title_rules; null: the default
-	// title's, as protocol_in_match reads the default title's for no protocol),
-	// whose joiner-side knobs the folds follow: the 0x0F route's done records
-	// (DFX2-9).
+	// The rules the session's title runs (world::title_rules), whose joiner-side
+	// knobs the folds follow: the 0x0F route's done records (DFX2-9). Unset until
+	// the role sets them, as every rules holder is (world::require_title_rules).
 	void set_rules(const world::TitleRules *rules) { rules_ = rules; }
 
 	// The 0x1D header-form discriminator's session half: retail reads
@@ -942,6 +957,11 @@ private:
 	void apply_player_downed_state(const std::vector<uint8_t> &body);
 	void apply_spawn_wave_status(const std::vector<uint8_t> &body);
 	void apply_score_delta_sound(const std::vector<uint8_t> &body);
+	// S2C 0x80 / 0x82, the score tracker (ClientScoreTracker carries the witness).
+	void apply_score_tracker_reset(const std::vector<uint8_t> &body);
+	void apply_score_tracker_time(const std::vector<uint8_t> &body);
+	// S2C 0x05's score-tracker leg (ClientScoreTracker carries the witness).
+	void apply_game_start_signal(const std::vector<uint8_t> &body);
 	void apply_script_remote_command(const std::vector<uint8_t> &body); // 0x23
 	void apply_objective_notification(const std::vector<uint8_t> &body); // 0x3F
 	// S2C 0x56 -- one chunk of the end-of-round stat board. Reassembles into
@@ -1034,6 +1054,8 @@ private:
 	uint32_t frame_tick_ = 0; // g_CurrentTick's stand-in (frame_tick())
 	ClientVehicleSpawnAvailability own_vehicle_spawn_;             // use_vehicle_spawn_store
 	ClientVehicleSpawnAvailability *vehicle_spawn_store_ = nullptr;
+	std::vector<ClientScoreTrackerEntry> own_score_tracker_;         // use_score_tracker_store
+	std::vector<ClientScoreTrackerEntry> *score_tracker_store_ = nullptr;
 	bool remote_motion_mode_ = false;
 	ReplicaContactResolver replica_contact_resolver_;
 	// tick_remote_motion's per-tick replica-peer sphere table (reused capacity).
@@ -1121,7 +1143,7 @@ private:
 	std::size_t malformed_bodies_ = 0;
 	uint32_t game_type_ = 0;
 	const Protocol *protocol_ = nullptr; // set_protocol
-	const world::TitleRules *rules_ = nullptr; // set_rules
+	const world::TitleRules *rules_ = world::unset_title_rules(); // set_rules
 	bool game_type_known_ = false;
 	bool mp_session_ = false;
 	bool authority_recipient_ = false;

@@ -29,12 +29,12 @@ function(opennova_add_parts name)
 endfunction()
 
 # The tests' registration point (games/games.h): common/install_games.cpp, whose one
-# namespace-scope object calls games::install() ahead of the tests' own, so every title and
-# protocol a test reads is installed. An OBJECT library, so its object is always linked: every
+# namespace-scope object calls games::install() and games::install_rules() ahead of the tests'
+# own, so every title, protocol and rules row a test reads is installed. An OBJECT library, so its object is always linked: every
 # executable this directory makes (service_tests.cmake's included) links it, by the walk at
 # this file's end, and tests/editor's opennova_add_editor_executable does the same.
 add_library(opennova_test_games OBJECT common/install_games.cpp)
-target_link_libraries(opennova_test_games PUBLIC opennova_games)
+target_link_libraries(opennova_test_games PUBLIC opennova_games_rules)
 
 # The mission rig the world/mission ctests share (common/mission_rig.h): one
 # mission (the minted mission set's, common/mission_set.h) booted through the
@@ -87,6 +87,15 @@ target_link_libraries(os_random_test PRIVATE opennova_base Threads::Threads)
 target_compile_features(os_random_test PRIVATE cxx_std_17)
 target_include_directories(os_random_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME os_random COMMAND os_random_test)
+
+# The registry seam (base/os_registry): retail's refused key paths, and the stand-in file's round
+# trip where the platform has no registry (on Windows a read of an absent key only: the test never
+# writes the machine's registry).
+add_executable(os_registry_test os_registry/os_registry_test.cpp)
+target_link_libraries(os_registry_test PRIVATE opennova_base)
+target_compile_features(os_registry_test PRIVATE cxx_std_17)
+target_include_directories(os_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME os_registry COMMAND os_registry_test)
 
 # A project revision's manifest (base/project, ADR 0069): the paths a project's file may have
 # (each Windows rule, the machine's own folder, UTF-8), two paths one file once folded, the
@@ -583,6 +592,13 @@ add_executable(mission_static_sources_test mission/static_sources_test.cpp)
 target_link_libraries(mission_static_sources_test PRIVATE opennova_runtime)
 target_include_directories(mission_static_sources_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_static_sources COMMAND mission_static_sources_test)
+
+# DFX2-60: dfx2.exe's campaign.def parse and progress walk (runtime/mission/campaign.h).
+add_executable(campaign_test mission/campaign_test.cpp)
+target_link_libraries(campaign_test PRIVATE opennova_runtime)
+target_include_directories(campaign_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(campaign_test PRIVATE cxx_std_17)
+add_test(NAME campaign COMMAND campaign_test)
 
 add_executable(mission_catalog_test mission/mission_catalog_test.cpp)
 target_link_libraries(mission_catalog_test PRIVATE opennova_runtime)
@@ -2033,6 +2049,10 @@ add_test(NAME player_info_character COMMAND player_info_character_test)
 add_executable(role_feeds_test netsim/role_feeds_test.cpp)
 target_link_libraries(role_feeds_test PRIVATE opennova_runtime opennova_net)
 target_compile_features(role_feeds_test PRIVATE cxx_std_17)
+# main's frame holds several MissionKernels and ClientRuntimes (the cases' own block scopes).
+if(MSVC)
+    target_link_options(role_feeds_test PRIVATE "/STACK:4194304")
+endif()
 add_test(NAME role_feeds COMMAND role_feeds_test)
 
 # The server config flag word a joiner reads and the join entry's step
@@ -2100,6 +2120,20 @@ add_executable(hud_element_spans_test hud/hud_element_spans_test.cpp)
 target_link_libraries(hud_element_spans_test PRIVATE opennova_runtime)
 target_include_directories(hud_element_spans_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_element_spans COMMAND hud_element_spans_test)
+
+# DFX2-36: dfx2.exe's EXPPOINTS element (hud/hud_exp_points.h): its fade, its tiers and strings, the
+# title that draws it and the compiled element.
+add_executable(hud_exp_points_test hud/hud_exp_points_test.cpp)
+target_link_libraries(hud_exp_points_test PRIVATE opennova_runtime)
+target_include_directories(hud_exp_points_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_exp_points COMMAND hud_exp_points_test)
+
+# The HUD's per-title variants (DFX2-91..): what dfx2.exe's HUD draws where Jointops.exe's draws
+# otherwise, read off the session's Title.
+add_executable(hud_title_draws_test hud/hud_title_draws_test.cpp)
+target_link_libraries(hud_title_draws_test PRIVATE opennova_runtime)
+target_include_directories(hud_title_draws_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_title_draws COMMAND hud_title_draws_test)
 
 # The spinmap's bit-10 legs: the dmgslice marks and the threat ring.
 add_executable(hud_minimap_radar_test hud/hud_minimap_radar_test.cpp)
@@ -3862,7 +3896,7 @@ add_test(NAME protocol COMMAND protocol_test)
 # complete, OP: Acid Gambit's JO's very object, the unwitnessed titles refused by name; the rules
 # each title runs and each game's joiner-side knobs.
 add_executable(games_test games/games_test.cpp)
-target_link_libraries(games_test PRIVATE opennova_games)
+target_link_libraries(games_test PRIVATE opennova_games_rules)
 target_include_directories(games_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME games COMMAND games_test)
 
@@ -4738,13 +4772,18 @@ add_test(NAME opennova_serve_lister_options COMMAND opennova_serve_lister_option
 
 # What a supervised opennova-serve leaves its supervisor (apps/serve/run_reports.h), on a
 # hand-stepped clock: a minute of frames as their p50, p99 and longest frame time and the late
-# frames, the window starting over; the --stats-file, --exit-file and --second-listing-file
-# lines; the --status-page, --stats-file, --exit-file and --second-listing-file flags. No retail
-# data.
+# frames, the window starting over; the --stats-file, --exit-file, --second-listing-file and
+# --build-file lines; the --status-page, --stats-file, --exit-file, --second-listing-file,
+# --build-file and --version flags. No retail data.
 add_executable(opennova_serve_run_reports_test serve/run_reports_test.cpp)
 target_link_libraries(opennova_serve_run_reports_test PRIVATE opennova_serve_core)
 target_include_directories(opennova_serve_run_reports_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_run_reports COMMAND opennova_serve_run_reports_test)
+# opennova-serve --version: the version line, then the exit, with no install and no host file:
+# ONE's build alone ("opennova-serve ONE 0.0.22.123 (a1b2c3d, staging)", as opennova-hostd's).
+add_test(NAME opennova_serve_version COMMAND opennova_serve --version)
+set_tests_properties(opennova_serve_version PROPERTIES PASS_REGULAR_EXPRESSION
+    "^opennova-serve ONE [0-9]+(\\.[0-9]+)*( \\([^)]*\\))?[\r\n]")
 
 # P5 — the headless CLIENT runtime (inmatch::ClientRuntime / Client_ProcessNetworkFrame). Always-on
 # in-process round-trip (client_runtime <-> np server legs <-> Server_TickUpdate + apply_in_match_c2s)

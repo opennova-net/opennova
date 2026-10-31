@@ -8,6 +8,7 @@
 // flip, handler writes, weight and ACCEPT over them. The fills, the page walk, the
 // serialize and the weight are loadout_screen.h's.
 
+#include <base/title/title.h>
 #include <runtime/menu/loadout_screen.h>
 
 #include <cstdint>
@@ -21,20 +22,26 @@ class MenuRuntime;
 struct ArmoryLoadout {
 	ArmoryLoadoutBuffers buffers;
 	ArmoryScreenPairs pairs;
-	// Each category list's rows (loadout_fill_slot) and the grenade positions' weapon.def
-	// rows (armory_fill_grenades) [orig: dword_25DCF3C..dword_25DCF44, the positions'
-	// catalog rows].
+	// Each category list's rows (loadout_fill_slot) and the three grenade positions' weapon.def
+	// rows, -1 for the "None" catalog row: the page walk's (armory_populate_page), the ones the
+	// grenade fill fills overwritten (armory_fill_grenades) [orig: dword_25DCF3C..dword_25DCF44,
+	// the positions' catalog rows] [orig: dword_25DE2C4..dword_25DE2CC (dfx2.exe)].
 	LoadoutSlotRows slot_rows[3];
 	std::vector<int> grenade_rows;
+	// The title the screens run as: its death_screen_loadout serializes every grenade position
+	// (armory_serialize_page), its armory_lists_none_row puts the NONE row over the three lists.
+	// Null: Jointops.exe's serializer and NONE rows.
+	const Title *title = nullptr;
 
 	// UI_PopulateThreeCategoryLists over the class's page: the PRIMARY / SECONDARY /
 	// ACCESSORY lists for the class's filter bit (world::armory_class_filter_mask) and the
 	// entity team's mask (armory_team_mask) under the NONE row `none_label`, then the
-	// page's populate (armory_populate_page) and the grenade positions
-	// (armory_fill_grenades), which that populate runs last.
+	// page's populate (armory_populate_page) and the grenade fill (armory_fill_grenades), which
+	// that populate runs last: the fill's positions overwrite the walk's, the rest keep theirs.
 	// [orig: UI_PopulateThreeCategoryLists @0x566db0 - the fill @0x566e2c..0x566f34, the
 	//  populate @0x566f3c; UI_PopulateAmmoTypeComboBoxes @0x564930 - the grenade fill
-	//  @0x565465]
+	//  @0x565465; UI_PopulateVehicleAmmoSlotList(3) @0x5643c0 - the position store @0x5647f7]
+	// [orig: its twin @0x563320 - the store @0x563757 (dfx2.exe)]
 	void populate(MenuRuntime &menu, const def::DefWeaponsFile &weapons, int entity_team,
 			int selected_class, const WeaponAvailability &availability,
 			const std::string &none_label, const hud::GameTextLookup &text);
@@ -68,6 +75,9 @@ struct ArmoryLoadout {
 	// The weapon.def row a category list's selection carries (-1 for NONE, no selection or
 	// another control).
 	int32_t selected_weapon(const MenuRuntime &menu, const std::string &control) const;
+
+	// Whether the serializer writes every grenade position (the title's death_screen_loadout).
+	bool every_grenade_position() const;
 
 	// The screen's weight over its selections (armory_screen_weight).
 	double weight(const MenuRuntime &menu, const def::DefWeaponsFile &weapons) const;

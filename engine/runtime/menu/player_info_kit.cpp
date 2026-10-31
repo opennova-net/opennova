@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <initializer_list>
 
 namespace opennova::menu {
 
@@ -63,9 +64,8 @@ std::vector<playersav::KitEntry> player_info_kit_entries(const PlayerInfoKitSele
 	if (sel.player_class == kMedicPlayerClass) out.push_back(filler_entry(kKitMedpack)); // [orig: @0x55e624]
 	// PRIMARY and SECONDARY carry their team's ammo-type byte as the entry's
 	// fourth value; ACCESSORY always writes the filler (the caller's flags).
-	out.push_back(slot_entry(sel.primary, weapon_name));
-	out.push_back(slot_entry(sel.secondary, weapon_name));
-	out.push_back(slot_entry(sel.accessory, weapon_name));
+	for (const KitSlotPick *category : {&sel.primary, &sel.secondary, &sel.accessory})
+		if (category->listed) out.push_back(slot_entry(*category, weapon_name));
 	// The three grenade slots are a FIXED array [orig: @0x55e7e0].
 	for (const KitSlotPick &g : sel.grenades) out.push_back(slot_entry(g, weapon_name));
 	return out;

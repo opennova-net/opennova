@@ -12,9 +12,13 @@ struct ConfigurationEdit {
 	io::JsonValue next_launch = io::JsonValue::make_object();
 	std::vector<std::string> commands;
 };
-// Input has passed the same validation as a launch configuration.
-ConfigurationEdit configuration_edit(
-		const io::JsonValue &patch, const gamecfg::WeaponRoster &weapons);
+// A settings patch as the live commands that apply it and the fields that wait for the next
+// launch. `saved` is the configuration the patch edits (its server's title `title`, `weapons` the
+// roster its pinned trees list): a weapon the patch leaves at the availability the saved
+// configuration launches with sends nothing, and a server name SET ServerName's rebuild would cut
+// waits for the next launch. Input has passed the same validation as a launch configuration.
+ConfigurationEdit configuration_edit(const io::JsonValue &patch, const HostedSettings &saved,
+		std::string_view title, const gamecfg::WeaponRoster &weapons);
 // Password-bearing command/reply text must never enter the persistent console.
 std::string console_log_text(std::string_view text);
 } //namespace opennova::novaworld_server::hosted

@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -88,8 +89,17 @@ void the_launch_picks_the_game() {
 			<< "[HEADER]\r\nVERSION=0.1.4\r\n\r\n[COMMAND]\r\n";
 	CHECK(serve::Server(options_for(own, "")).version_line() ==
 			"OP: Acid Gambit 0.1.4" + dot + one + dot + "JO protocol 16");
-	CHECK(serve::Server(options_for(own, "jodemo")).version_line() ==
-			"Joint Operations (Demo)" + dot + one);
+	CHECK(serve::Server(options_for(own, "dfx")).version_line() ==
+			"Delta Force: Xtreme" + dot + one);
+	// --version prints the same line from the same options (serve_version_line); with neither a
+	// folder nor /game the launch names no game, and the line is ONE's build alone.
+	for (const auto &[dir, game] : { std::pair<std::string, std::string>{ jo, "" }, { own, "" },
+				 { own, "dfx2" }, { bhd, "jo" } })
+		CHECK(serve::serve_version_line(options_for(dir, game)) ==
+				serve::Server(options_for(dir, game)).version_line());
+	CHECK(serve::serve_version_line(options_for("", "")) == one);
+	CHECK(serve::serve_version_line(options_for("", "jo")) ==
+			"Joint Operations" + dot + one + dot + "JO protocol 16");
 	std::error_code ec;
 	fs::remove_all(root, ec);
 	std::printf("  /game, else the folder's UPDATE.WIZ, else OpenNova's own; a foreign folder needs /game\n");

@@ -12,6 +12,7 @@
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_tick.h>
@@ -184,7 +185,9 @@ static void test_host_fan_sends_the_relays_in_order() {
     nm::set_connection_mode(ctx, nm::ConnectionMode::HostOnly);
     nm::GameConfig config;
     config.max_players = 4;
-    nm::create_session(ctx, config, {}, nullptr);
+    nm::SessionStartup startup;
+    startup.protocol = title_protocol("jo");
+    nm::create_session(ctx, config, startup, nullptr);
     ctx.world = &w;
     repl::UdpSessionTransport remote{repl::UdpSessionTransport::Role::Host};
     repl::LoopbackChannel loopback;

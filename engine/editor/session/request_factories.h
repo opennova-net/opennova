@@ -221,6 +221,13 @@ inline EditorRequest music_stream_audio(std::string path, std::string wave, std:
 	request.open_first = open_first;
 	return request;
 }
+// The heights of the .cpt at `path` written to the .raw `to`, outside the project (session/heights_export.h).
+inline EditorRequest export_heights(std::string path, std::string to) {
+	EditorRequest request = of(EditorRequestKind::ExportHeights);
+	request.path = std::move(path);
+	request.values.emplace_back("to", std::move(to));
+	return request;
+}
 // Line `line` of the project file `path` written as `text` ("": taken out), refused where it no longer reads `was`
 // (none: unchecked; a blank line's "" is checked); `ask`: Problems' Correct the line... opened on it instead, nothing
 // written (session/source_line.h).
@@ -851,8 +858,8 @@ inline EditorRequest novaworld_sign_out() {
 inline EditorRequest novaworld_check() {
 	return of(EditorRequestKind::NovaWorldCheck);
 }
-inline EditorRequest novaworld_get(std::string project_key, std::string dir) {
-	EditorRequest request = of(EditorRequestKind::NovaWorldGet);
+inline EditorRequest novaworld_sync(std::string project_key, std::string dir) {
+	EditorRequest request = of(EditorRequestKind::NovaWorldSync);
 	request.project_key = std::move(project_key);
 	request.dir = std::move(dir);
 	return request;
@@ -914,6 +921,12 @@ inline EditorRequest novaworld_submit(std::string version) {
 	EditorRequest request = of(EditorRequestKind::NovaWorldSubmit);
 	request.version = std::move(version);
 	return request;
+}
+inline EditorRequest novaworld_rejoin() {
+	return of(EditorRequestKind::NovaWorldRejoin);
+}
+inline EditorRequest novaworld_keep_folder() {
+	return of(EditorRequestKind::NovaWorldKeepFolder);
 }
 inline EditorRequest novaworld_make_own() {
 	return of(EditorRequestKind::NovaWorldMakeOwn);

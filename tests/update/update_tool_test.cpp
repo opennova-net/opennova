@@ -263,6 +263,108 @@ int test_history(const test_temp::TempDir &dir) {
 	return 0;
 }
 
+// A name the build excludes is not the package's to own: no REMOVE row for it is carried from the
+// previous release, whether the previous release shipped the file (the NovaWorld cookie jar, which
+// the game rewrites with the player's cookies) or already carried a REMOVE for it, while another
+// file that left the tree still gets its row. A REMOVE of a file that exists is needed work to the
+// precheck, so a carried one would make every check find an update.
+// [orig: Cupdate2Dlg_PrecheckCommands @ 0x407820 (UPDATE.EXE)]
+// A release the stock updater could not read back is refused naming the value or the row and what
+// UPDATE.EXE would read of it: an expansion's archive entry with a space in its name (JO:TAC's
+// RevX02.pff ships "Audio Track.wav"), a loose file with a comma, a product name with a ';'
+// [orig: CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE); IniFile_GetValue @ 0x403b90 (UPDATE.EXE)].
+int test_unshippable_names(const test_temp::TempDir &dir) {
+	const std::string empty = dir.file("unshippable-none"), to = dir.file("unshippable-to");
+	const std::string folder = to + "/expansion/revx02";
+	TEST_EXPECT(write_text(folder + "/version.txt", "Synthetic TAC, V0.0.1; English"));
+	TEST_EXPECT(make_archive(folder + "/RevX02.pff", { { "ok.def", bytes("ok"), 1700000000 },
+			{ "Audio Track.wav", bytes("RIFF"), 1780718888 } }));
+	update_tool::BuildSpec spec;
+	spec.from = io::os_path(empty);
+	spec.to = io::os_path(to);
+	spec.full = true;
+	spec.products.push_back({ "expansion/revx02", "revx02", "REVX02.CMD",
+			"Joint Operations: Tactical Assault Coalition", "0.0.1", "" });
+	std::vector<update_tool::ProductReport> report;
+	std::string error;
+	update::SfsPackage package;
+	TEST_EXPECT(!update_tool::build_update_package(spec, package, report, error));
+	TEST_EXPECT(error.rfind("the command file REVX02.CMD cannot be written: the COPY row \"Audio "
+							"Track.wav\" (in RevX02.pff) has a space: ",
+						0) == 0 &&
+			error.find("reads the name as \"Audio\"") != std::string::npos &&
+			error.find("[orig: CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE)") != std::string::npos);
+	if (error.find("Audio Track.wav") == std::string::npos)
+		std::fprintf(stderr, "update_tool: %s\n", error.c_str());
+
+	// Renamed, it ships; a loose file with a comma is named as its UPD row.
+	std::error_code ec;
+	std::filesystem::remove(io::os_path(folder + "/RevX02.pff"), ec);
+	TEST_EXPECT(make_archive(folder + "/RevX02.pff", { { "ok.def", bytes("ok"), 1700000000 },
+			{ "AudioTrack.wav", bytes("RIFF"), 1780718888 } }));
+	TEST_EXPECT(update_tool::build_update_package(spec, package, report, error));
+	TEST_EXPECT(write_text(folder + "/my,file.txt", "loose"));
+	TEST_EXPECT(!update_tool::build_update_package(spec, package, report, error));
+	TEST_EXPECT(error.rfind("the command file REVX02.CMD cannot be written: the UPD row "
+							"\"my,file.txt\" has a comma: ",
+						0) == 0);
+	std::filesystem::remove(io::os_path(folder + "/my,file.txt"), ec);
+
+	// A product name the header reader ends at its ';'.
+	spec.products[0].product = "Joint Operations; TAC";
+	TEST_EXPECT(!update_tool::build_update_package(spec, package, report, error));
+	TEST_EXPECT(error.rfind("the command file REVX02.CMD cannot be written: the PRODUCT value \"Joint "
+							"Operations; TAC\" has a ';', where UPDATE.EXE's header reader ends the "
+							"value, so it reads \"Joint Operations\"",
+						0) == 0);
+	return 0;
+}
+
+int test_excluded_history(const test_temp::TempDir &dir) {
+	const std::string empty = dir.file("excluded-none"), first = dir.file("excluded-first"),
+			latest = dir.file("excluded-latest");
+	TEST_EXPECT(write_text(first + "/state.txt", "first value"));
+	TEST_EXPECT(write_text(first + "/nw_cdata.coo", "blank jar"));
+	TEST_EXPECT(write_text(first + "/gone.txt", "removed next release"));
+	TEST_EXPECT(write_text(latest + "/state.txt", "latest value"));
+	update_tool::BuildSpec spec;
+	spec.from = io::os_path(empty);
+	spec.to = io::os_path(first);
+	spec.full = true;
+	spec.products.push_back({"", "", "EXCLUDED.CMD", "Synthetic excluded", "1", ""});
+	std::vector<update_tool::ProductReport> report;
+	std::string error;
+	update::SfsPackage shipped, carried, latest_package;
+	TEST_EXPECT(update_tool::build_update_package(spec, shipped, report, error));
+	const auto command = [](const update::SfsPackage &package) {
+		const auto &data = package.sections[0].entries[0].data;
+		return update::read_command_file(std::string(data.begin(), data.end()));
+	};
+	const auto first_cmd = command(shipped);
+	TEST_EXPECT(first_cmd && row(*first_cmd, "nw_cdata.coo") &&
+			row(*first_cmd, "nw_cdata.coo")->type == update::CommandType::Loose);
+	// Built without the exclusion, the next release carries a REMOVE for the jar.
+	spec.to = io::os_path(latest);
+	spec.previous = shipped;
+	spec.products[0].version = "2";
+	TEST_EXPECT(update_tool::build_update_package(spec, carried, report, error));
+	const auto carried_cmd = command(carried);
+	TEST_EXPECT(carried_cmd && row(*carried_cmd, "nw_cdata.coo") &&
+			row(*carried_cmd, "nw_cdata.coo")->type == update::CommandType::Remove);
+	// Excluded, neither the shipped row nor the carried REMOVE comes forward; gone.txt's does.
+	spec.excludes.push_back("nw_cdata.coo");
+	for (const update::SfsPackage *previous : {&shipped, &carried}) {
+		spec.previous = *previous;
+		spec.products[0].version = "3";
+		TEST_EXPECT(update_tool::build_update_package(spec, latest_package, report, error));
+		const auto cmd = command(latest_package);
+		TEST_EXPECT(cmd && row(*cmd, "nw_cdata.coo") == nullptr);
+		TEST_EXPECT(cmd && row(*cmd, "gone.txt") && row(*cmd, "gone.txt")->type == update::CommandType::Remove);
+		TEST_EXPECT(cmd && row(*cmd, "state.txt") && row(*cmd, "state.txt")->type == update::CommandType::Loose);
+	}
+	return 0;
+}
+
 int test_serve(const update::SfsPackage &package) {
 	update_tool::PackageCatalog catalog({ "ftp.novaworld.com" });
 	std::string error;
@@ -328,6 +430,10 @@ int main() {
 	if (int rc = test_serve(package))
 		return rc;
 	if (int rc = test_history(dir))
+		return rc;
+	if (int rc = test_excluded_history(dir))
+		return rc;
+	if (int rc = test_unshippable_names(dir))
 		return rc;
 	std::printf("update_tool: ok\n");
 	return 0;

@@ -20,6 +20,7 @@
 #include <formats/avatars/avatars.h>
 #include <formats/mission/bms.h>
 #include <formats/rtxt/rtxt.h>
+#include <net/novacrypto/cdkey.h>
 #include <net/novaworld/lobby_identity.h> // the NWHWI device reads
 #include <net/protocol/gate_tag.h>
 #include <net/protocol/protocol.h>
@@ -33,6 +34,7 @@
 #include <runtime/inmatch/server_info.h> // read_session_listing_columns (the start's update)
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
+#include <runtime/controls/controls.h> // title_catalog (the role's binding catalog)
 #include <runtime/world/entity.h> // set_pool_capacities (the mount's pools)
 #include <runtime/world/present_drains.h> // discard_entity_presentation (no presenter)
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the NovaWorld session's clock)
@@ -59,8 +61,9 @@ const char kUsage[] =
 		"                      [--also-master-host <gate>] [--also-master-gate-port <n>]\n"
 		"                      [--also-credentials <file>]\n"
 		"                      [--status-page on|off] [--stats-file <file>] [--exit-file <file>]\n"
-		"                      [--second-listing-file <file>]\n"
+		"                      [--second-listing-file <file>] [--build-file <file>]\n"
 		"                      [--send-holdoff-ticks <n>] [--entity-send-budget <bytes>]\n"
+		"       opennova-serve --version [--resource-dir <game dir>] [/game <code>]\n"
 		"  --resource-dir   the game install to serve from (its PFF set, as opennova.exe takes "
 		"it)\n"
 		"  /HOST            the host file: retail's `/HOST <file>` format, one `Key value` per "
@@ -68,7 +71,8 @@ const char kUsage[] =
 		"                   (GameName, MaxPlayers, KillLimit, ...) and one `Mission <file.bms>`\n"
 		"                   line per rotation entry; the last Mission line is the starting map\n"
 		"  --rotation-first start at the first Mission entry instead (hosted play order)\n"
-		"  /maxplayers <n>  the cap a host file's MaxPlayers line yields to (retail's switch)\n"
+		"  /maxplayers <n>  the cap a host file's MaxPlayers line yields to (JO's switch;\n"
+		"                   dfx2.exe has none)\n"
 		"  /exp, /d, /game  mount the expansion (/mod is /exp), prefer loose files, pick the\n"
 		"                   data's game code: its keying and the title the server speaks\n"
 		"                   (default: the game the folder's UPDATE.WIZ names, else acidgambit)\n"
@@ -109,6 +113,11 @@ const char kUsage[] =
 		"  --second-listing-file\n"
 		"                   rewrite this file whenever the second listing's state changes (off,\n"
 		"                   trying, listed, retrying or not_listed, with why), one JSON line\n"
+		"  --build-file     write ONE's build (its version and commit) to this file as the\n"
+		"                   server starts, one JSON line\n"
+		"  --version        print the server's versions on one line and exit: the game and the\n"
+		"                   release --resource-dir holds, ONE's build and the protocol (ONE's\n"
+		"                   build alone without --resource-dir and /game)\n"
 		"  /PROFILE <path>  record each mission to <path>.sph (retail's server log)\n"
 		"  /PUNTLOG, /PUNT.TXT, /CHEATLOG\n"
 		"                   log punts to _PUNT.TXT, start _CHEAT.TXT (the working directory)\n"
@@ -228,6 +237,8 @@ constexpr OwnOption kServeOwnOptions[] = {
 	{"--stats-file", true},
 	{"--exit-file", true},
 	{"--second-listing-file", true},
+	{"--build-file", true},
+	{"--version", false},
 	{"--send-holdoff-ticks", true},
 	{"--entity-send-budget", true},
 };
@@ -272,8 +283,10 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 			if (!value(text)) return 1;
 			const auto number = strutil::parse_int(text);
 			const bool holdoff = a == "--send-holdoff-ticks";
-			const int minimum = holdoff ? 0 : 100;
-			const int maximum = holdoff ? 255 : 1600;
+			// The engine's ranges: the override's ceiling (D-NET-1473) and BANDWIDTH's clamp.
+			const int minimum = holdoff ? 0 : inmatch::kEntitySendBudgetMin;
+			const int maximum = holdoff ? static_cast<int>(inmatch::kSendHoldoffTicksMax)
+										: inmatch::kEntitySendBudgetMax;
 			if (!number || !std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; }) ||
 					*number < minimum || *number > maximum) {
 				error = a + " must be " + std::to_string(minimum) + ".." + std::to_string(maximum);
@@ -334,11 +347,19 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 		} else if (a == "--second-listing-file") {
 			if (!value(out.second_listing_file))
 				return 1;
+		} else if (a == "--build-file") {
+			if (!value(out.build_file))
+				return 1;
+		} else if (a == "--version") {
+			out.print_version = true;
 		} else if (a.rfind("--", 0) == 0) {
 			error = "unknown option '" + a + "'";
 			return 1;
 		}
 	}
+	// The line names the game from what was given; a run's requirements are not a version's.
+	if (out.print_version)
+		return 0;
 	if (out.resource_dir.empty()) {
 		error = "--resource-dir <game dir> is required";
 		return 1;
@@ -360,31 +381,54 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 	return 0;
 }
 
+namespace {
+
+// The launch's product and the title it runs as, chosen as the game's launch chooses them:
+// /game when given, else the folder's UPDATE.WIZ, a folder with none being OpenNova's own
+// (boot_policy.h launch_product, ADR 0067 d2).
+LaunchProduct serve_launch_product(const ServeOptions &options) {
+	LaunchFlags flags;
+	flags.game = strutil::to_lower(options.game);
+	flags.game_given = !options.game.empty();
+	flags.resource_dir = options.resource_dir;
+	return launch_product(flags, folder_product(options.resource_dir));
+}
+
+std::string launch_version_line(const ServeOptions &options, const LaunchProduct &product) {
+	Versions versions;
+	// A player game's name is its command file's PRODUCT, the page's bytes.
+	versions.game = retail_text_to_utf8(product.name);
+	versions.game_version = launch_product_version(options.resource_dir, product);
+	versions.one = one_build();
+	// The title the launch runs as: its name where the product has none, the protocol it speaks.
+	title_versions(product.game, versions);
+	return version_line(versions);
+}
+
+} // namespace
+
+std::string serve_version_line(const ServeOptions &options) {
+	// No folder and no /game: the launch would name OpenNova's own game by default, which a
+	// --version alone says nothing of.
+	if (options.resource_dir.empty() && options.game.empty()) {
+		Versions versions;
+		versions.one = one_build();
+		return version_line(versions);
+	}
+	return launch_version_line(options, serve_launch_product(options));
+}
+
 Server::Server(ServeOptions options) : options_(std::move(options)) {
 	// The switch every read of the process takes [orig: g_LanSwitch, read by
 	// Game_LoadConfig @0x5514B1].
 	config_.set_lan_switch(options_.lan_switch);
-	// The launch's product and the title it runs as, chosen as the game's launch
-	// chooses them: /game when given, else the folder's UPDATE.WIZ, a folder with none being
-	// OpenNova's own (boot_policy.h launch_product, ADR 0067 d2).
-	LaunchFlags flags;
-	flags.game = strutil::to_lower(options_.game);
-	flags.game_given = !options_.game.empty();
-	flags.resource_dir = options_.resource_dir;
-	const LaunchProduct product = launch_product(flags, folder_product(options_.resource_dir));
+	const LaunchProduct product = serve_launch_product(options_);
 	game_code_ = product.game;
 	// A /game the launch does not know is the title's own refusal (resolve_title); a foreign
 	// folder with no /game names no game at all.
-	foreign_folder_ = !flags.game_given && !product.supported;
+	foreign_folder_ = options_.game.empty() && !product.supported;
 	product_command_ = product.command;
-	Versions versions;
-	// A player game's name is its command file's PRODUCT, the page's bytes.
-	versions.game = retail_text_to_utf8(product.name);
-	versions.game_version = launch_product_version(options_.resource_dir, product);
-	versions.one = one_build();
-	// The title the launch runs as: its name where the product has none, the protocol it speaks.
-	title_versions(product.game, versions);
-	version_line_ = opennova::version_line(versions);
+	version_line_ = launch_version_line(options_, product);
 }
 
 Server::~Server() {
@@ -423,6 +467,16 @@ bool Server::begin(std::string &error, const std::atomic<bool> *cancel) {
 		stop();
 		return false;
 	}
+	// The boot's CD-key read, for a protocol that keeps one: the record whose ids the LAN join
+	// check refuses as the host's own (code 12) and the verify Cookie carries. The value is the
+	// machine's registry's; where the platform has none, the stand-in is the working directory's,
+	// where the server keeps every file the game keeps beside itself (ADR 0051). Retail reads it in
+	// its command-line parse, ahead of game.cfg; nothing between reads the record.
+	// [orig: Game_ParseCommandLineAndInit @0x4a7e62 (dfx2.exe), CDKey_ReadRegistry called]
+	if (protocol_->cd_key != nullptr && protocol_->nwpssk_mix)
+		(void)cdkey::read_registry(cdkey::process_key_info(), *protocol_->cd_key,
+				machine_tokens(*protocol_->nwpssk_mix).nwpssk,
+				cdkey::machine_key_store(*protocol_->cd_key, "."));
 	// The renderer's start and its device creation, after that game.cfg read: the device facts
 	// NWHWI prints (sample_device_identity), read once.
 	device_identity_ = sample_device_identity(config_.cfg(), options_);
@@ -569,10 +623,9 @@ bool Server::resolve_title(std::string &error) {
 // The mount opennova.exe makes (godot/game/boot_root_mount.gd over
 // ResourceRoot::mount_runtime / set_root_dir, the one install mount
 // ResourceIndex::scan_install): the witnessed fixed archive table (Packed,
-// PackedWithLooseOverride under /d) under the launch's game code's SCR keying,
-// set ahead of the scan, and, only when asked, a directory with no archives
-// mounted as a plain loose root with no expansion under the same keying
-// (ADR 0025). Then the gate tag: the title's, or the mount's gt.ssc's.
+// PackedWithLooseOverride under /d), and, only when asked, a directory with no
+// archives mounted as a plain loose root with no expansion (ADR 0025). Then the
+// gate tag: the title's, or the mount's gt.ssc's.
 bool Server::mount(std::string &error) {
 	const std::string &code = game_code_;
 	LaunchFlags flags;
@@ -584,7 +637,6 @@ bool Server::mount(std::string &error) {
 	bool mounted = index_.scan_install(options_.resource_dir, flags) ==
 			ResourceIndex::InstallScan::Mounted;
 	if (!mounted && options_.loose_root) {
-		index_.set_scr_policy(title_scr_policy_for_code(code.c_str()));
 		mounted = index_.scan(options_.resource_dir, std::string(), VfsMountMode::LooseOnly,
 				VfsArchiveDiscovery::ScanAll);
 	}
@@ -592,9 +644,12 @@ bool Server::mount(std::string &error) {
 		error = "could not mount '" + options_.resource_dir + "': " + index_.last_error();
 		return false;
 	}
-	// The mount's pools, before any mission loads (world/entity.h pool_capacities_for_expansion)
-	// [orig: Game_Run @0x4a7fb0 -> EntityPool_Allocate @0x4a7fc5].
-	world::set_pool_capacities(world::pool_capacities_for_expansion(index_.mounted_expansion()));
+	// The mount's pools, before any mission loads (world/entity.h pool_capacities_for_expansion),
+	// each capped at what the title's protocol can name (resolve_title resolved it with its
+	// in-match branches) [orig: Game_Run @0x4a7fb0 -> EntityPool_Allocate @0x4a7fc5].
+	const uint32_t pool0_cap = protocol_in_match(protocol_).person_index.pool0_wire_capacity;
+	world::set_pool_capacities(world::pool_capacities_for_expansion(
+			index_.mounted_expansion(), world::wire_pool_capacities(pool0_cap)));
 	// The boot's gt.ssc over the gate manager's default tag, read once the archives mount
 	// [orig: Game_InitSubsystems @0x4a7149..0x4a714e -> Mission_LoadEncryptedConfig @0x4cdcd0].
 	gate_tag_ = protocol_gate_tag(*protocol_, &index_);
@@ -611,8 +666,11 @@ bool Server::mount(std::string &error) {
 	have_text_override_ = !text_override_table_.empty() &&
 			rtxt::parse(text_override_table_.data(), text_override_table_.size(), text_override_,
 					override_error);
-	assets_ = std::make_unique<assets::AssetStore>(&index_);
-	catalog_ = mission_catalog::build(index_, have_text_override_ ? &text_override_ : nullptr);
+	// The server draws nothing: its models keep what the simulation reads (assets::ModelData).
+	assets_ = std::make_unique<assets::AssetStore>(&index_, assets::ModelData::Simulation);
+	// In the title's order (Title::mission_list_order carries the witness).
+	catalog_ = mission_catalog::build(index_, have_text_override_ ? &text_override_ : nullptr,
+			title_by_code(game_code_)->mission_list_order);
 	// The avatar registry, which the admin console's PETERRABBIT SEXCHANGE walks; an install
 	// without Avatars.def leaves it empty [orig: CAvatarDefs_Init @0x57B180 opens
 	// "Avatars.def"].
@@ -652,6 +710,10 @@ bool Server::read_config_over_weapons(std::string &error) {
 	return true;
 }
 
+int32_t host_file_max_player_arg(const Title &title, int32_t max_player_arg) {
+	return title.max_players_switch ? max_player_arg : 0;
+}
+
 // The dead /HOST path [orig: Game_HostMultiplayerSession @0x4A65A0]: the host
 // file over the cfg block (a file that does not open ends the attempt,
 // @0x4A65AA..0x4A65C0), the directory lock (@0x4A65C1..0x4A65F1), Serve Only
@@ -673,7 +735,7 @@ bool Server::read_host_file(std::string &error) {
 		return false;
 	}
 	report_ = inmatch::read_host_file(text.data(), text.size(), config_.cfg(), rotation_, catalog_,
-			options_.max_player_arg);
+			host_file_max_player_arg(*title_by_code(game_code_), options_.max_player_arg));
 	if (options_.rotation_first && rotation_.list.count > 0) {
 		// The service writes rotations in play order, including duplicates. Retail's
 		// host-file selection finds the last named map's first occurrence instead.
@@ -748,17 +810,14 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// over it and the live slot limit from the block, as the game's map change stages it
 	// (inmatch/host_config.h stage_next_mission).
 	inmatch::GameConfig config;
-	int32_t player_limit = 0;
 	if (next_mission) {
-		const inmatch::NextMissionStage stage = inmatch::stage_next_mission(
+		config = inmatch::stage_next_mission(
 				session_config_, &config_.cfg(), list, doc.get_mission_name());
-		config = stage.config;
-		player_limit = stage.player_limit;
 	} else {
 		config = inmatch::host_screen_from_block(config_.cfg(), *config_.title()).config;
 		inmatch::apply_mission_start_session_config(config, nullptr, list, doc.get_mission_name());
-		player_limit = static_cast<int32_t>(config.player_slot_limit());
 	}
+	const int32_t player_limit = static_cast<int32_t>(config.live_slot_limit());
 	config.expansion = index_.mounted_expansion();
 	config.expansion_version_checksum =
 			vfs_expansion_version_checksum(options_.resource_dir, config.expansion);
@@ -777,8 +836,8 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	//  @0x54F4D0 - GetUserNameA @0x54F535, File_CheckExists @0x54F586 / @0x54F6C7;
 	//  Game_ApplySessionSettingsToGlobals @0x551680..0x551695; Player_InitPlayer
 	//  @0x4E184F..0x4E186A; CNapiGameSession_CreateSession @0x4C97C0 - @0x4C9CCE].
-	const serve::ServeProfile row_profile = serve::read_serve_profile(config_.cfg().player_index,
-			serve::process_account_name(), config.expansion, characters_);
+	const serve::ServeProfile row_profile = serve::read_serve_profile(*title_by_code(game_code_),
+			config_.cfg().player_index, serve::process_account_name(), config.expansion, characters_);
 	config.player_name = row_profile.name;
 	// The session config the next map change stages from.
 	session_config_ = config;
@@ -789,6 +848,8 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// keeps them, and the socket with them.
 	if (!next_mission) {
 		role_ = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost);
+		// The game's binding catalog, whose rows the dispatcher's head and the console's walks read.
+		role_->set_controls(controls::title_catalog(*title_by_code(game_code_)));
 		role_->set_socket(&demux_->game());
 		role_->set_rotation(&rotation_);
 		session_ = std::make_unique<inmatch::Session>(*role_);
@@ -818,6 +879,10 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	request.role = role_.get();
 	request.host = role_.get();
 	request.host_cfg.protocol = protocol_;
+	// The host's own CD-key ids, the boot read's record: a DFX2 LAN host refuses a joiner sending
+	// them (code 12; NapiNPServerCtx::host_cd_keys carries the witness).
+	if (protocol_->cd_key != nullptr)
+		request.host_cfg.host_cd_keys = cdkey::process_key_info().keys;
 	request.host_cfg.config = config;
 	request.host_cfg.socket_mode = inmatch::SocketMode::Lan;
 	// A listed server's session runs on the NovaWorld network type, whose
@@ -1011,7 +1076,7 @@ HostRegistration Server::listing_columns() const {
 	r.server_name = config.server_name;
 	r.server_message = config.custom_text;
 	r.max_players = host_.player_limit;
-	r.published_cap = static_cast<int>(config.player_slot_limit());
+	r.published_cap = static_cast<int>(config.live_slot_limit());
 	r.password = !config.server_password.empty();
 	r.listen_host = false;
 	r.lan_only = config_.cfg().mp_novaworld_host_lan_only != 0 ? 1 : 0;
@@ -1600,9 +1665,9 @@ void Server::open_admin() {
 	(void)admincfg::load_file(admincfg::kFileName, config);
 	// The round clock with no session bound is the process's (RemoteAdminConsoles::use_process_state).
 	admin_consoles_.use_process_state(&client_process_);
-	admin_server_ = std::make_unique<AdminServer>(std::move(config), admin_consoles_, admin_rand_,
-			[this](std::string_view line) {
-				(void)files_.write(inmatch::kAdminLogFileName, inmatch::admin_log_file_text(admin_log_redacted(line)),
+	admin_server_ = std::make_unique<AdminServer>(
+			std::move(config), admin_consoles_, admin_rand_, [this](std::string_view line) {
+				(void)files_.write(inmatch::kAdminLogFileName, inmatch::admin_log_file_text(line),
 						/*append=*/true);
 			});
 	admin_tcp_ = std::make_unique<net::AdminTcpServer>(*admin_server_);
@@ -1652,6 +1717,7 @@ void Server::bind_admin_console() {
 	// CMD's binding records (a typed `tod 1230`) join the role's input event queue, which every
 	// update's drain dispatches (engine inmatch/admin_console.h Seams::input_events).
 	seams.input_events = &role_->input_events();
+	seams.catalog = &role_->controls();
 	inmatch::RemoteAdminBinding binding;
 	binding.host = &role_->state.host_owner.ctx;
 	admin_consoles_.bind(binding, std::move(seams));

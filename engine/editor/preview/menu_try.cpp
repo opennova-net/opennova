@@ -5,7 +5,9 @@
 
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <runtime/menu/menu_sound.h>
+#include <runtime/mission/campaign.h>
 #include <runtime/profile/player_profiles.h>
 
 namespace opennova::editor {
@@ -93,6 +95,12 @@ MenuTry::MenuTry() {
 	// The frame's click and scroll reach the runtime as the game's frame signals them (MenuDriver).
 	frame_.set_clicked([this](int index, int part) { runtime_.on_widget_clicked(index, part); });
 	frame_.set_scrolled([this](int index, int value) { runtime_.on_frame_scroll_value(index, value); });
+	// A run-time image (a campaign's, MenuRuntime::set_widget_image) loads as the game's frame loads
+	// it, through the screen's assets.
+	frame_.set_textures_added([this](menu::MenuFrameCompiler &compiler) {
+		if (source_ != nullptr && source_->files != nullptr)
+			assets_.load_added_textures(compiler, *source_->files, decoder_);
+	});
 	runtime_.set_frame(&frame_);
 	runtime_.set_sink([this](const menu::MenuEvent &event) { on_event_(event); });
 	// The single-player screen's controls, the shell's (menu_commands.h).
@@ -116,6 +124,8 @@ bool MenuTry::configure_(const std::string &screen, menu::MenuFrameCompiler &com
 	static const std::map<std::string, std::string> kNoVars;
 	// Every configure a first load of its textures, as the device's own (the editor's menu device).
 	compiler.reset_texture_loads();
+	// The project's game's menu font scale (Title::menu_font_scale, D-FNT-7).
+	compiler.set_font_scale(source_->title != nullptr ? source_->title->menu_font_scale : 1.0f);
 	assets_.configure(compiler, document, found, *source_->files, decoder_, source_->vars ? *source_->vars : kNoVars);
 	return true;
 }
@@ -140,7 +150,8 @@ bool MenuTry::start(const MenuTrySource &source, const std::string &file, const 
 	settings_.clear();
 	sounds_.clear();
 	profile_ = playersav::ProfileRecord{};
-	profile_.bindings = profile::default_binding_table();
+	catalog_ = &controls::title_catalog(source.title != nullptr ? *source.title : default_title());
+	profile_.bindings = profile::default_binding_table(*catalog_);
 	runtime_.screen_history().clear();
 	runtime_.set_version_line(source.version_line);
 	started_ = open_(file, screen);
@@ -183,11 +194,35 @@ bool MenuTry::open_(const std::string &file, const std::string &screen) {
 }
 
 void MenuTry::prepare_() {
-	options_.prepare(runtime_, &profile_);
+	options_.prepare(runtime_, &profile_, *catalog_);
 	options_.apply_policy(runtime_);
+	if (source_ != nullptr && source_->title != nullptr) options_.apply_title(runtime_, *source_->title);
 	options_.seed_profile(runtime_, &profile_);
 	commands_.wire(runtime_, in_mission_);
 	flow_.clear_rows();
+	// The single-player screen's inputs, as the game's shell hands them at each open
+	// (MenuDriver::set_single_player_source): the project's game, and under its campaign tabs
+	// campaign.def, the menu table and the sandbox profile's completion bytes.
+	flow_.set_title(source_ != nullptr ? source_->title : nullptr);
+	if (source_ != nullptr && source_->title != nullptr && source_->title->sp_campaign_tabs && source_->files) {
+		std::vector<uint8_t> def;
+		source_->files->read(campaign::kCampaignFile, def);
+		// The menu table the reader reads, g_TextMenuUi: Game.bin, the game shell's gameui table
+		// (menu_shell.gd menu_ui_text_file), not menutxt.bin [orig: Menu_InitShellResources
+		// @0x54f76c..0x54f779; sub_55FD20's TextResource_FindEntryBySectionAndKey(g_TextMenuUi,
+		// "Campaign", ..) @0x55ff0b (dfx2.exe)].
+		std::vector<uint8_t> text;
+		auto table = std::make_unique<rtxt::File>();
+		std::string error;
+		menu_text_.reset();
+		if (source_->files->read("Game.bin", text) && rtxt::parse(text.data(), text.size(), *table, error))
+			menu_text_ = std::move(table);
+		campaign::CompletionTable progress{};
+		for (size_t c = 0; c < progress.size() && c < profile_.campaign_complete.size(); ++c)
+			for (size_t m = 0; m < progress[c].size() && m < profile_.campaign_complete[c].size(); ++m)
+				progress[c][m] = profile_.campaign_complete[c][m];
+		flow_.set_campaign_source(std::string(def.begin(), def.end()), menu_text_.get(), progress);
+	}
 	if (!commands_.mission_lists().empty() && source_ && source_->missions) {
 		const std::vector<menu::MissionChoice> rows = source_->missions();
 		for (const int id : commands_.mission_lists()) flow_.seed_missions(runtime_, id, rows);
@@ -196,7 +231,8 @@ void MenuTry::prepare_() {
 	if (!commands_.mod_lists().empty() && source_) {
 		expansion_ = source_->expansion;
 		mods_.set_records(source_->expansions ? source_->expansions() : std::vector<ExpansionRecord>());
-		for (const int id : commands_.mod_lists()) mods_.populate(runtime_, id, expansion_);
+		const char *base = source_->title != nullptr ? source_->title->mod_list_base : nullptr;
+		for (const int id : commands_.mod_lists()) mods_.populate(runtime_, id, expansion_, base);
 	}
 }
 
@@ -412,9 +448,10 @@ void MenuTry::on_event_(const menu::MenuEvent &event) {
 		else if (event.text2 == "scroll")
 			value = std::to_string(event.value);
 		setting_(event.text, event.text2, value);
-		// A pick of a mission list selects its mission, of a Mods list describes its game (menu_shell.gd
-		// _on_widget_value_changed).
+		// A pick of the campaign list shows its campaign, of a mission list selects its mission, of a Mods
+		// list describes its game (menu_shell.gd _on_widget_value_changed).
 		const int id = runtime_.widget_id(event.text);
+		if (event.text2 == "list" && flow_.select_campaign(runtime_, id, event.value)) return;
 		if (event.text2 == "list" &&
 				std::find(commands_.mission_lists().begin(), commands_.mission_lists().end(), id) !=
 						commands_.mission_lists().end())
@@ -431,6 +468,8 @@ void MenuTry::on_event_(const menu::MenuEvent &event) {
 		const int kind = runtime_.widget_kind_of(event.id);
 		if (kind == kCheckBox) setting_(event.text, "checkbox", runtime_.is_widget_checked(event.id) ? "checked" : "unchecked");
 		else if (kind == kRadio || kind == kRadioEdit) setting_(event.text, "radio", "checked");
+		// The campaign tabs' radios refresh ACCEPT (menu_shell.gd _on_widget_activated).
+		if (flow_.activate_tab(runtime_, event.text)) return;
 		// The Options surface's own controls (the device radios, DEFAULTS, CLEAR_KEY, its ACCEPT), over the
 		// sandbox's profile record.
 		const std::string screen = runtime_.current_screen();

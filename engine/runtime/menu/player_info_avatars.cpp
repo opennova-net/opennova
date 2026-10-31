@@ -2,6 +2,7 @@
 
 #include <base/crt/crt_rng.h>
 #include <base/io/bam.h>
+#include <base/title/title.h>
 #include <formats/avatars/preview_animation.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/player_info_kit.h>
@@ -29,6 +30,7 @@ struct Fill {
 	int voice;
 	const hud::GameTextLookup &gameui;
 	const hud::GameTextLookup &menutxt;
+	const Title &title;
 
 	// Preserve the existing gameui/Avatars lookup and its raw-key fallback.
 	// [orig: GameText_GetStringWithFallback @0x51eb90 / g_TextGameText @0xB4C2AC;
@@ -46,36 +48,44 @@ struct Fill {
 	}
 
 	// [orig: PlayerInfo_PopulateNationalityList @0x55d8c0; team filter D-PLAYERINFO-5]
+	// No list: the record's nationality stands and the divisions fill from it (the
+	// fill's return @0x55d8dd; PlayerInfo_PopulateAllControls @0x560802).
 	void nationalities() {
 		const int id = menu.widget_id("NATIONALITY");
-		if (id < 0) return;
 		state.nationalities.clear();
-		std::vector<std::string> rows;
-		for (size_t i = 0; i < file.nationalities_count; ++i) {
-			const auto &nat = file.nationalities[i];
-			if ((nat.alignment != 0) != (team != 0)) continue;
-			state.nationalities.push_back(static_cast<int32_t>(i));
-			rows.push_back(name(nat.name_key));
+		if (id >= 0) {
+			std::vector<std::string> rows;
+			for (size_t i = 0; i < file.nationalities_count; ++i) {
+				const auto &nat = file.nationalities[i];
+				if ((nat.alignment != 0) != (team != 0)) continue;
+				state.nationalities.push_back(static_cast<int32_t>(i));
+				rows.push_back(name(nat.name_key));
+			}
+			items(id, rows);
+			state.nationality = state.nationalities.empty() ? -1 : state.nationalities.front();
 		}
-		items(id, rows);
-		state.nationality = state.nationalities.empty() ? -1 : state.nationalities.front();
 		divisions();
 	}
 
 	// [orig: PlayerInfo_PopulateDivisionList @0x55da50]
+	// No list: the record's division stands and the combos fill from it (the
+	// fill's return @0x55da6a; PlayerInfo_PopulateAllControls @0x560865).
 	void divisions() {
 		const int id = menu.widget_id("DIVISION");
-		if (id < 0) return;
-		std::vector<std::string> rows;
-		if (const auto *nat = nationality_at(file, state.nationality)) {
-			for (size_t i = 0; i < nat->divisions_count; ++i) rows.push_back(name(nat->divisions[i].name_key));
+		if (id >= 0) {
+			std::vector<std::string> rows;
+			if (const auto *nat = nationality_at(file, state.nationality)) {
+				for (size_t i = 0; i < nat->divisions_count; ++i)
+					rows.push_back(name(nat->divisions[i].name_key));
+			}
+			items(id, rows);
+			state.division = rows.empty() ? -1 : 0;
 		}
-		items(id, rows);
-		state.division = rows.empty() ? -1 : 0;
 		combos();
 	}
 
-	// [orig: PlayerInfo_PopulateAvatarComboList @0x560210] Head display precedes body.
+	// [orig: PlayerInfo_PopulateAvatarComboList @0x560210] Head display precedes body; a row
+	// per combo, its text empty where the title formats none (Title::player_info_combo_names).
 	void combos() {
 		const int id = menu.widget_id("COMBO_LIST");
 		if (id < 0) return;
@@ -83,7 +93,9 @@ struct Fill {
 		if (const auto *div = division_at(file, state.nationality, state.division)) {
 			for (size_t i = 0; i < div->combos_count; ++i) {
 				const auto &combo = div->combos[i];
-				rows.push_back(name(combo.head.display_name) + " - " + name(combo.body.display_name));
+				rows.push_back(title.player_info_combo_names
+								? name(combo.head.display_name) + " - " + name(combo.body.display_name)
+								: std::string());
 			}
 		}
 		items(id, rows);
@@ -121,9 +133,9 @@ const avatars::AvatarCombo *PlayerInfoAvatars::selected_combo(const MenuRuntime 
 
 int PlayerInfoAvatars::update(MenuRuntime &menu, const avatars::AvatarsFile &file,
 		Change change, int value, int team, int saved_voice,
-		const hud::GameTextLookup &gameui, const hud::GameTextLookup &menutxt) {
+		const hud::GameTextLookup &gameui, const hud::GameTextLookup &menutxt, const Title &title) {
 	preview_changed = false;
-	Fill fill{*this, menu, file, team, saved_voice, gameui, menutxt};
+	Fill fill{*this, menu, file, team, saved_voice, gameui, menutxt, title};
 	switch (change) {
 		case Change::Team:
 			// [orig: PlayerInfo_SaveAndRepopulate @0x5608f0 -> PopulateAllControls(team)]
@@ -162,6 +174,10 @@ std::string PlayerInfoAvatars::voice_preview_trigger(const MenuRuntime &menu,
 	}
 	return saved_voice < 0 ? std::string() : "VOICE_" + std::to_string(saved_voice);
 }
+const char *player_info_combo_list_event(const Title &title) {
+	return title.player_info_combo_spins ? "spinlist" : "combo";
+}
+
 float player_info_preview_blend_step(float blend, bool hovered) {
 	// [orig: @0x55dc43..0x55dc61, the x87 at single precision]
 	const float target = hovered ? 1.0f : 0.0f;

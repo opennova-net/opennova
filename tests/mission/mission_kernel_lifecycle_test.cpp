@@ -529,6 +529,28 @@ int main() {
 		CHECK(second->world.server_num_players == 3);
 	}
 
+	// --- the night phase across kernels -----------------------------------------------
+	// g_EnvIsNightPhase is zero-initialized data no mission start writes: the next World starts
+	// on the phase the last mission's tick left, and its seed (the mission start's clock) keeps
+	// it until a keyframed tick computes the new clock's. A kernel that carried nothing starts a
+	// process's 0. [orig: g_EnvIsNightPhase @0x26C645C; Environment_ComputeTimeOfDayColors
+	//  @0x57DEAE..0x57E061; Game_StartMission @0x524360 - the eager WAC pass @0x525CB3]
+	{
+		auto first = std::make_unique<ms::MissionKernel>();
+		CHECK(first->world.weather.night_phase == 0);
+		first->world.weather.night_phase = 1;
+		auto second = std::make_unique<ms::MissionKernel>();
+		second->carry_across_load_from(*first);
+		w::WeatherSeed noon;
+		noon.tod_fixed24 = 12u << 24;
+		noon.tod_keyframed = true;
+		second->world.weather.seed(noon);
+		CHECK(second->world.weather.night_phase == 1);
+		w::WeatherTickEvents events;
+		second->world.weather.tick_sim(nullptr, events);
+		CHECK(second->world.weather.night_phase == 0);
+	}
+
 	// --- the round pool's cursor and id counter across kernels --------------------
 	// Both are process words only the allocator writes; the mission start's memsets
 	// end at the activity bytes, short of them, so the next mission's first round

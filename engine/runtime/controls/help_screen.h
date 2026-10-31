@@ -53,6 +53,8 @@ private:
 	};
 	void build_page();
 
+	// The catalog the last build read (the bindings').
+	const Catalog *catalog_ = nullptr;
 	std::vector<int> sorted_; // catalog indices in the sorted order, pruned rows dropped
 	std::vector<BindingRecord> records_;
 	std::vector<Page> pages_;

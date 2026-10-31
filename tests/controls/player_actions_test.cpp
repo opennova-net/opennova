@@ -1,5 +1,6 @@
 // Synthetic device streams through the public action poll, plus the real
 // binding sampler for modifier claims and remapping. No production-source pins.
+#include <base/title/title.h>
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/player_actions.h>
 #include <runtime/controls/key_state_reset.h>
@@ -121,13 +122,10 @@ struct QueuedKeys : Keys {
 	bool held_off_keyboard(const char *token) const override { return off.count(token) != 0; }
 };
 
-// The dispatch code of a catalog token's row [orig: word_8159A8 + 108 * row].
+// The dispatch code of a catalog token's row [orig: g_BindingRows + 108 * row].
 int code_of(const char *token) {
-	std::size_t count = 0;
-	const ActionDef *rows = catalog(&count);
-	for (std::size_t i = 0; i < count; ++i)
-		if (std::string(rows[i].token) == token) return action_code(rows[i].id);
-	return -1;
+	const ActionDef *def = opennova::controls::default_catalog().for_token(token);
+	return def != nullptr ? def->code : -1;
 }
 
 // The keyboard pass's event for a token's row: its scanned key-down.
@@ -146,7 +144,7 @@ KeyRowEvent key_row(const char *token, int key, bool sign = false) {
 //  Input_ProcessPlayerFrame @0x49d4c0 - the keyboard pass @0x49d4c6 ahead of the
 //  mouse and toggle passes @0x49d4d8 / @0x49d4de]
 bool test_event_rows_fire_once_per_event() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	QueuedKeys keys;
 	keys.hold("Knife", '1');
 	PlayerActionPoll gate = kLive;
@@ -194,7 +192,7 @@ bool test_event_rows_fire_once_per_event() {
 //  the Radio arm's @0x49c78b / @0x49c796; Input_ProcessKeyboardEvents - a take's skip of
 //  the scan @0x49d305; Input_ProcessFrame - the release edge's consumed test @0x49d6d4]
 bool test_the_chain_takes_digit_keys() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	QueuedKeys keys;
 	CHECK(!actions.chain_digit_key('1', false, false).taken); // no arm holds
 	keys.hold("useitem", 0x10);
@@ -225,7 +223,7 @@ bool test_the_chain_takes_digit_keys() {
 //  Input_HandleActionBinding @0x49AD40 (case 217 @0x49b4b4 MedicReq, case 55 @0x49B20B
 //  respawn); the press scan's queue @0x49d42f / @0x49d488]
 bool test_reload_medic_and_respawn_fire_on_their_events() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	QueuedKeys keys;
 	keys.hold("magazine", 'R');
 	PlayerActionPoll gate = kLive;
@@ -271,7 +269,7 @@ bool test_reload_medic_and_respawn_fire_on_their_events() {
 //  @0x49D42F / @0x49D488); Input_ProcessFrame @0x49D520 (the drain @0x49D599..0x49D5E7);
 //  Input_HandleActionBinding @0x49AD40 (case 25 @0x49B520)]
 bool test_embedder_rows_keep_the_key_order() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	QueuedKeys keys;
 	const int huddetail = code_of("huddetail");
 	const int pause = code_of("pause");
@@ -300,12 +298,12 @@ bool test_embedder_rows_keep_the_key_order() {
 // [orig: Input_ProcessKeyboardEvents @0x49D1F0 - Input_QueueEvent per scanned key-down, the
 //  modifier pass @0x49D42F and the fallback @0x49D488]
 bool test_unowned_rows_are_records() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	QueuedKeys keys;
 	CHECK(code_of("exit") == 3 && code_of("nextflag") == 32);
-	CHECK(!player_actions_own_code(3) && !player_actions_own_code(32) &&
-			player_actions_own_code(code_of("Knife")) && player_actions_own_code(55) &&
-			player_actions_own_code(501));
+	CHECK(!player_actions_own_code(opennova::controls::default_catalog(), 3) && !player_actions_own_code(opennova::controls::default_catalog(), 32) &&
+			player_actions_own_code(opennova::controls::default_catalog(), code_of("Knife")) && player_actions_own_code(opennova::controls::default_catalog(), 55) &&
+			player_actions_own_code(opennova::controls::default_catalog(), 501));
 	PlayerActionPoll gate = kLive;
 	gate.key_events = {key_row("exit", 0x70), key_row("Knife", '1'), key_row("nextflag", 0x77)};
 	auto frame = poll_frame(actions, keys, gate);
@@ -330,7 +328,7 @@ bool test_unowned_rows_are_records() {
 //  queue @0x49d2b1; Input_HandleActionBinding_0 case 0x95 @0x4E07B5 (Input_IsBindingActive
 //  @0x4E07D9)]
 bool test_fire_row_dispatches_its_key_events() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	QueuedKeys keys;
 	const int code = code_of("attack_1");
 	CHECK(code == 149);
@@ -375,7 +373,7 @@ struct ScriptedKeys : QueuedKeys {
 };
 
 bool test_only_the_scripted_left_button_owes_the_left_down() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	ScriptedKeys keys;
 	keys.off.insert("attack_1");
 	keys.hold("attack_1");
@@ -402,7 +400,7 @@ bool test_only_the_scripted_left_button_owes_the_left_down() {
 //  pass's queue @0x49d2b1; Input_HandleActionBinding_0 case 0xDC
 //  @0x4E1161..0x4E1181]
 bool test_to_special_dispatches_its_key_events() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	QueuedKeys keys;
 	const int code = code_of("ToSpecial");
 	keys.raw.insert("ToSpecial");
@@ -433,7 +431,7 @@ bool test_to_special_dispatches_its_key_events() {
 // [orig: rows 110..112 -> Input_HandleActionBinding cases 500..502
 //  @0x49bd58..0x49bd9e; the press scan's queue @0x49d42f / @0x49d488]
 bool test_spectator_rows_fire_on_their_events() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	QueuedKeys keys;
 	PlayerActionPoll dead = kLive;
 	dead.death_screen = true;
@@ -445,7 +443,7 @@ bool test_spectator_rows_fire_on_their_events() {
 	// Each is a record of the update's drain by its code, which maps back to its request
 	// (LI-s15).
 	CHECK(requests[0].code == 502 && requests[1].code == 500 && requests[2].code == 502);
-	const auto back = player_action_request(InputEventRecord{501, 0, 0, 0, false});
+	const auto back = player_action_request(opennova::controls::default_catalog(), InputEventRecord{501, 0, 0, 0, false});
 	CHECK(back && back->action == Action::Spectate && back->value == 501 && back->code == 501);
 	CHECK(actions.poll_spectator(keys, true).empty()); // no off-keyboard arm held
 	PlayerActionPoll idle = dead;
@@ -463,7 +461,7 @@ bool test_spectator_rows_fire_on_their_events() {
 //  @0x49ca73; Input_ProcessKeyboardEvents @0x49d1f0 - the scan's queue @0x49d42f / @0x49d488;
 //  Input_HandleActionBinding @0x49AD40 - cases 500 @0x49bd58, 502 @0x49bd89]
 bool test_picks_escape_and_spectator_rows_keep_the_key_order() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	QueuedKeys keys;
 	PlayerActionPoll gate = kLive;
 	gate.embedder_row = [](int code) { return code == 12 || code == 18; };
@@ -494,7 +492,7 @@ bool test_picks_escape_and_spectator_rows_keep_the_key_order() {
 }
 
 bool test_order_and_held_rows() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	keys.hold("useitem");
 	CHECK(requests_are(poll_frame(actions, keys, kLive), {}));
@@ -529,7 +527,7 @@ bool test_order_and_held_rows() {
 }
 
 bool test_capture_and_overlay_edges() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	for (const char *token : {"attack_1", "magazine", "scope", "MedicReq", "Knife", "seat1",
 			"cycleweaponN", "Crouch", "radarout", "map_toggle"}) keys.hold(token);
@@ -555,7 +553,7 @@ bool test_capture_and_overlay_edges() {
 }
 
 bool test_missing_simulation_freezes_only_scope_zero() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	for (const char *token : {"attack_1", "magazine", "scope", "MedicReq", "seat1", "Knife",
 			"cycleweaponP", "Prone", "ScopeZeroDec", "ScopeZeroInc", "radarin", "map_toggle"})
@@ -577,7 +575,7 @@ bool test_missing_simulation_freezes_only_scope_zero() {
 }
 
 bool test_reset_preserves_switch_hud_medic_and_use_state() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	for (const char *token : {"attack_1", "magazine", "scope", "MedicReq", "seat1", "Knife",
 			"cycleweaponP", "Stand", "Crouch", "Prone", "ScopeZeroDec", "ScopeZeroInc",
@@ -600,7 +598,7 @@ bool test_reset_preserves_switch_hud_medic_and_use_state() {
 // [orig: Input_ProcessFrame @0x49d520 - the aging @0x49d57f ahead of the keyboard pass;
 //  Input_HandleSpecialKeys @0x49c6d8..0x49c730]
 bool test_use_previous_frame_and_single_seat() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	keys.hold("useitem"); keys.hold("Knife", '1');
 	CHECK(!actions.chain_digit_key('1', false, false).taken); // USE was not held before the 1
@@ -630,7 +628,7 @@ bool test_use_previous_frame_and_single_seat() {
 // [orig: Input_ProcessFrame @0x49d520 - the aging @0x49d57f..0x49d585 ahead of the keyboard
 //  pass, the release edge @0x49d6c1..0x49d6dc; Input_HandleSpecialKeys @0x49c6f8..0x49c70c]
 bool test_use_release_digit_priority_and_no_sim_consumption() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	keys.hold("useitem");
 	poll_frame(actions, keys, kLive);
@@ -640,7 +638,7 @@ bool test_use_release_digit_priority_and_no_sim_consumption() {
 	const ChainDigitTake second = actions.chain_digit_key('1', false, false);
 	CHECK(second.taken && !second.pick);
 	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::ToggleScope}}));
-	PlayerActions no_sim;
+	PlayerActions no_sim(opennova::controls::default_catalog());
 	keys = Keys{}; keys.hold("useitem");
 	poll_frame(no_sim, keys, kLive);
 	CHECK(no_sim.chain_digit_key('4', false, false).taken);
@@ -651,7 +649,7 @@ bool test_use_release_digit_priority_and_no_sim_consumption() {
 }
 
 bool test_shell_consume_and_overlay_cancel() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	actions.consume_use_hold(); // a same-frame shell chord survives fresh-press reset
 	actions.reset();
@@ -678,7 +676,7 @@ bool test_shell_consume_and_overlay_cancel() {
 
 bool test_use_swallows_only_digit_event_rows() {
 	for (const int vk : {0, 0x2f, 0x30, 0x39, 0x3a, 0x60}) {
-		PlayerActions actions;
+		PlayerActions actions(opennova::controls::default_catalog());
 		Keys keys;
 		keys.hold("useitem"); poll_frame(actions, keys, kLive);
 		for (const char *token : {"attack_1", "magazine", "scope", "MedicReq", "Primary",
@@ -698,7 +696,7 @@ bool test_use_swallows_only_digit_event_rows() {
 }
 
 struct BoundKeys : PlayerActionSource {
-	BindingSet bindings;
+	BindingSet bindings{opennova::controls::default_catalog()};
 	std::set<int> down;
 	bool pressed(const char *token) const override { return pressed_key(token) != 0; }
 	int pressed_key(const char *token) const override {
@@ -721,7 +719,7 @@ struct BoundKeys : PlayerActionSource {
 // [orig: Input_IsBindingActive @0x498320 - the key slots @0x498348; Input_HandleActionBinding_0
 //  case 0x95 @0x4E07D9]
 bool test_fire_held_reads_the_binding_raw() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	BoundKeys keys;
 	const int attack = keys.bindings.index_of_token("attack_1");
 	const int next_waypoint = keys.bindings.index_of_token("NextWaypoint");
@@ -739,7 +737,7 @@ bool test_fire_held_reads_the_binding_raw() {
 }
 
 bool test_live_binding_modifier_remap_and_use_stream() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	BoundKeys keys;
 	const int radar = keys.bindings.index_of_token("radarout");
 	CHECK(keys.bindings.assign_key(radar, '7', false, false, false, false));
@@ -771,7 +769,7 @@ bool test_live_binding_modifier_remap_and_use_stream() {
 // backward. [orig: Input_ProcessKeyboardEvents @0x49d327..0x49d3ac (modifier
 // pass), @0x49d3ba..0x49d488 (fallback), @0x49d452 (the Shift direction bit)]
 bool test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	BoundKeys keys;
 	keys.down = {0xBB};
 	CHECK(requests_are(poll_frame(actions, keys, kLive), {{Action::RadarZoom, -1}}));
@@ -809,7 +807,7 @@ bool test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint() {
 // the latch follows the keys behind them. [orig: Input_HandleActionBinding
 // case 55 @0x49B20B; the row's code @0x817658]
 bool test_respawn_edges_on_ctrl_r() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	BoundKeys keys;
 	keys.down = {17, 'R'};
 	auto frame = poll_frame(actions, keys, kLive);
@@ -838,20 +836,20 @@ bool test_respawn_edges_on_ctrl_r() {
 // head gates by that row's flags (V-L2-s8, D-NET-710): seat1 (row 17) 182, scope (row 105) 6,
 // cycleweaponP (row 39) 212; the held-USE digit's seat pick and the USE release's mount toggle
 // call their handlers directly, past no head.
-// [orig: word_8159A8 + 108 * row (the catalog's codes); Input_HandleSpecialKeys @0x49c5c0 -
+// [orig: g_BindingRows + 108 * row (the catalog's codes); Input_HandleSpecialKeys @0x49c5c0 -
 //  the seat index @0x49c6e6..0x49c6ed, Entity_FindAvailableSeat (the call @0x49c702);
 //  Input_ProcessFrame @0x49d520 - the release
 //  edge @0x49d6c1..0x49d6dc]
 bool test_key_rows_carry_their_dispatch_codes() {
 	{
-		PlayerActions actions;
+		PlayerActions actions(opennova::controls::default_catalog());
 		Keys keys;
 		keys.hold("seat1", '1');
 		const PlayerActionFrame frame = poll_frame(actions, keys, kLive);
 		CHECK(requests_are(frame, {{Action::SelectSeat, 0}}) && frame.requests[0].code == 182);
 	}
 	{
-		PlayerActions actions;
+		PlayerActions actions(opennova::controls::default_catalog());
 		Keys keys;
 		keys.hold("scope");
 		const PlayerActionFrame frame = poll_frame(actions, keys, kLive);
@@ -859,10 +857,10 @@ bool test_key_rows_carry_their_dispatch_codes() {
 	}
 	// The wheel's record names the row the walk took (BindingSet::mouse_click_action): its
 	// code maps back to the row's request.
-	const auto wheel = player_action_request(InputEventRecord{212, 0, 0, 0, false});
+	const auto wheel = player_action_request(opennova::controls::default_catalog(), InputEventRecord{212, 0, 0, 0, false});
 	CHECK(wheel && wheel->action == Action::WeaponCycle && wheel->value == 1 && wheel->code == 212);
 	{
-		PlayerActions actions;
+		PlayerActions actions(opennova::controls::default_catalog());
 		Keys keys;
 		keys.hold("useitem");
 		poll_frame(actions, keys, kLive);
@@ -900,7 +898,7 @@ bool test_wheel_remainder_dispatches_whole_notches() {
 // latch without firing [orig: rows 110..112 -> Input_HandleActionBinding
 // cases 500..502 @0x49bd58..0x49bd9e].
 bool test_spectator_rows_edge_to_their_codes() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	keys.hold("CycleSpectatorMode");
 	keys.hold("DecSpectatorTarget");
@@ -930,7 +928,7 @@ bool test_spectator_rows_edge_to_their_codes() {
 bool test_voice_menu_digits_pick_and_swallow_the_rows() {
 	PlayerActionPoll emotes = kLive;
 	emotes.emotes_menu_open = true;
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	keys.hold("Knife", '1');
 	CHECK(picks(actions.chain_digit_key('1', true, false), Action::EmotePick, 1));
@@ -955,7 +953,7 @@ bool test_voice_menu_digits_pick_and_swallow_the_rows() {
 // [orig: Input_ProcessKeyboardEvents @0x49D249..0x49D2B9 (the release pass) and
 //  @0x49D42F (the press); ToSpecial's row flags 0x8C000801]
 bool test_to_special_dispatches_both_edges() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	PlayerActionFrame frame = poll_frame(actions, keys, kLive);
 	CHECK(!frame.to_special_held && !to_special(frame));
@@ -1000,7 +998,7 @@ bool test_held_use_runs_the_arm_every_frame() {
 	std::size_t asked = 0;
 	PlayerActionPoll gate = kLive;
 	const auto arm = [&]() { return asked < arms.size() ? arms[asked++] : Arm::kTaken; };
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	arms = {Arm::kMountChain, Arm::kMountChain, Arm::kOpenArmory, Arm::kTaken};
 	keys.hold("useitem");
@@ -1013,7 +1011,7 @@ bool test_held_use_runs_the_arm_every_frame() {
 	CHECK(poll_frame(actions, keys, gate, arm).requests.empty());
 	CHECK(asked == 4);
 
-	PlayerActions fresh;
+	PlayerActions fresh(opennova::controls::default_catalog());
 	arms = {Arm::kOpenArmory};
 	asked = 0;
 	keys.hold("useitem");
@@ -1021,7 +1019,7 @@ bool test_held_use_runs_the_arm_every_frame() {
 	keys.release("useitem");
 	CHECK(poll_frame(fresh, keys, gate, arm).requests.empty());
 
-	PlayerActions dead;
+	PlayerActions dead(opennova::controls::default_catalog());
 	PlayerActionPoll dead_gate = gate;
 	dead_gate.death_screen = true;
 	asked = 0;
@@ -1049,7 +1047,7 @@ bool test_use_held_is_the_hold_the_chain_reads() {
 	std::size_t asked = 0;
 	PlayerActionPoll gate = kLive;
 	const auto arm = [&]() { return asked < arms.size() ? arms[asked++] : Arm::kTaken; };
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	CHECK(!actions.use_held());
 	arms = {Arm::kMountChain, Arm::kMountChain, Arm::kMountChain, Arm::kTaken};
@@ -1070,7 +1068,7 @@ bool test_use_held_is_the_hold_the_chain_reads() {
 	poll_frame(actions, keys, gate, arm);
 	CHECK(!actions.use_held());
 
-	PlayerActions armory;
+	PlayerActions armory(opennova::controls::default_catalog());
 	arms = {Arm::kOpenArmory};
 	asked = 0;
 	keys.hold("useitem");
@@ -1078,7 +1076,7 @@ bool test_use_held_is_the_hold_the_chain_reads() {
 	CHECK(!armory.use_held());
 	keys.release("useitem");
 
-	PlayerActions released;
+	PlayerActions released(opennova::controls::default_catalog());
 	arms = {Arm::kMountChain};
 	asked = 0;
 	keys.hold("useitem");
@@ -1135,7 +1133,7 @@ bool test_menu_freezes_the_use_hold() {
 	gate.active = true;
 	gate.captured = true;
 	gate.simulation_available = true;
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	keys.hold("useitem", 0x10);
 	CHECK(poll_frame(actions, keys, gate).requests.empty()); // the chain holds
 	PlayerActionPoll menu = gate;
@@ -1149,7 +1147,7 @@ bool test_menu_freezes_the_use_hold() {
 	CHECK(poll_frame(actions, keys, gate).requests.empty());
 	// An inactive frame that is no menu runs the input frame: the arm is not
 	// asked, so the hold ends there and the mount toggles.
-	PlayerActions overlay;
+	PlayerActions overlay(opennova::controls::default_catalog());
 	keys.hold("useitem", 0x10);
 	poll_frame(overlay, keys, gate);
 	PlayerActionPoll inactive = gate;
@@ -1171,7 +1169,7 @@ bool test_to_special_release_over_a_screen() {
 	gate.active = true;
 	gate.captured = true;
 	gate.simulation_available = true;
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	keys.hold("ToSpecial", 'F');
 	CHECK(to_special(poll_frame(actions, keys, gate)));
 	PlayerActionPoll screen = gate;
@@ -1186,6 +1184,53 @@ bool test_to_special_release_over_a_screen() {
 	PlayerActionPoll typing = gate;
 	typing.keyboard_captured = true;
 	CHECK(!to_special(poll_frame(actions, keys, typing))); // the text line drops it
+	return true;
+}
+
+// DFX2-110: the weapon rows are the title's catalog's, each requesting the category its code
+// names (code - 200): dfx2.exe's Powerup0 (200) category 0, Grenades (204) 4, Accessory (205)
+// 5, Powerup9 (209) 9, Detonator (210) 10; Jointops.exe's Accessory (207) 7, Detonator (208) 8.
+// A code no row of the title carries names no request.
+// [orig: Input_HandleActionBinding_0 @0x4E0420 - cases 200-210 @0x4e1144] [orig:
+//  Input_HandleActionBinding_0 - cases 200-210 @0x4de239..0x4de24d (dfx2.exe)]
+bool test_title_weapon_rows() {
+	const Catalog &jo = title_catalog(*opennova::title_by_code("jo"));
+	const Catalog &dfx2 = title_catalog(*opennova::title_by_code("dfx2"));
+	const auto category = [](const Catalog &catalog, int code) {
+		const auto request = player_action_request(catalog, InputEventRecord{code, 0, 0, 0, false});
+		return request && request->action == Action::WeaponCategory && request->code == code
+				? request->value
+				: -1;
+	};
+	CHECK(category(dfx2, 200) == 0 && category(dfx2, 204) == 4 && category(dfx2, 205) == 5 &&
+			category(dfx2, 209) == 9 && category(dfx2, 210) == 10);
+	CHECK(category(jo, 201) == 1 && category(jo, 207) == 7 && category(jo, 208) == 8 &&
+			category(jo, 209) == 9);
+	CHECK(category(jo, 200) == -1 && category(jo, 210) == -1);
+	CHECK(player_actions_own_code(dfx2, 210) && !player_actions_own_code(jo, 210));
+	CHECK(!player_action_request(dfx2, InputEventRecord{222, 0, 0, 0, false}) &&
+			player_action_request(jo, InputEventRecord{222, 0, 0, 0, false}));
+	// The poll's key event of dfx2.exe's Detonator row (Backspace) requests category 10.
+	PlayerActions actions(dfx2);
+	QueuedKeys keys;
+	PlayerActionPoll gate = kLive;
+	gate.key_events = {KeyRowEvent{210, false, 0x08, false}, KeyRowEvent{200, false, '0', false}};
+	const PlayerActionFrame frame = poll_frame(actions, keys, gate);
+	CHECK(frame.requests.size() == 2 && frame.requests[0].action == Action::WeaponCategory &&
+			frame.requests[0].value == 10 && frame.requests[0].code == 210 &&
+			frame.requests[1].value == 0 && frame.requests[1].code == 200);
+	// Its Grenades row's off-keyboard arm (a mouse button) requests category 4.
+	PlayerActions held(dfx2);
+	QueuedKeys mouse;
+	mouse.off = {"Grenades"};
+	const PlayerActionFrame pressed = poll_frame(held, mouse, kLive);
+	CHECK(pressed.requests.size() == 1 && pressed.requests[0].action == Action::WeaponCategory &&
+			pressed.requests[0].value == 4 && pressed.requests[0].code == 204);
+	// dfx2.exe's 1st Person Toggle (code 412) is the view toggle's record; Jointops.exe has no
+	// row for it [orig: row 108 @0x817630 (dfx2.exe)].
+	const auto toggle = player_action_request(dfx2, InputEventRecord{412, 0, 0, 0, false});
+	CHECK(toggle && toggle->action == Action::ViewToggle && toggle->code == 412);
+	CHECK(!player_action_request(jo, InputEventRecord{412, 0, 0, 0, false}));
 	return true;
 }
 
@@ -1212,7 +1257,7 @@ int main() {
 			test_voice_menu_digits_pick_and_swallow_the_rows,
 			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r,
 			test_held_use_runs_the_arm_every_frame, test_use_held_is_the_hold_the_chain_reads,
-			test_key_rows_carry_their_dispatch_codes})
+			test_key_rows_carry_their_dispatch_codes, test_title_weapon_rows})
 		if (!test()) ++failed;
 	std::cout << "player_actions: " << failed << " failed\n";
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

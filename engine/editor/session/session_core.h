@@ -266,6 +266,8 @@ public:
 	void create_missing(const std::vector<std::string> &roles);
 	// The recent project `root` dropped from the preferences (ForgetRecent).
 	void forget_recent(const std::string &root);
+	// `root` kept as a working copy on this computer (Preferences::working_copies), the one most lately met.
+	void remember_working_copy(const std::string &root);
 	// Output's Clear: the output lines emptied.
 	void clear_output();
 	// SetViewport: the viewport over the document `path` names ("" the active one; by its path or
@@ -357,7 +359,7 @@ public:
 	// which starts the build once it is in (check_base_export; `base_checked` its own call, the base weighed).
 	void start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash, const ExportIntent &exported,
 	                 bool panel = true, bool base_checked = false,
-			const std::string &gate_tag_file = {}, const std::string &version_file = {});
+			const std::string &gate_tag_file = {}, const std::string &version_file = {}, bool release = false);
 	// A Build joined onto the running build that asks its panel: it opens as the build ends.
 	void report_build() { build_reports_ = true; }
 	// A build's finish (BuildOperation): its report into the view, the findings its gate lacked,
@@ -389,7 +391,8 @@ private:
 	// The recent projects' details (ProjectView::recent_details): those of a root the details hold kept, a
 	// root new to the list read from its project file, a root gone from it dropped (each project file read
 	// once, at start and as it joins the list, never on every save of the preferences); the open project's
-	// own from its document (`open`, as it closes: a title renamed in its settings).
+	// own from its document (`open`, as it closes: a title renamed in its settings). The working copies'
+	// likewise (ProjectView::working_copies), a recent project naming a NovaWorld project joining them.
 	void read_recent_details(const ProjectDocument *open = nullptr, const std::string &open_root = std::string());
 	// The documents open now (DocumentSet::open_with_selection) and the active one kept in the project's
 	// local settings when they changed (the UX round's project lane): as the project closes, as the editor

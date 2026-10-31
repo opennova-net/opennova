@@ -13,6 +13,7 @@
 #include <editor/model/text_document.h>
 #include <editor/preview/hud_canvas.h>
 #include <editor/preview/option_reads.h>
+#include <editor/project/project_document.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
@@ -93,6 +94,9 @@ constexpr HudElementWords kWords[] = {
 	{ HudElement::FrameRateOverlay, "Frame rate", {} },
 	{ HudElement::ConnectStatus, "Connection status", { "CONNECTSTATUS" } },
 	{ HudElement::StartTimer, "Start timer", { "STARTTIMER" } },
+	{ HudElement::ExpPoints, "Experience points", { "EXPPOINTS" } },
+	{ HudElement::LoneGunnerPanel, "Lone gunner panel", {} },
+	{ HudElement::BriefingPanel, "Briefing panel", {} },
 };
 static_assert(std::size(kWords) == opennova::hud::kHudElementCount, "every HudElement has its words");
 
@@ -122,6 +126,7 @@ std::vector<std::string> fixed_textures(HudElement element) {
 	case HudElement::EndRoundStatistics:
 	case HudElement::Briefing:
 	case HudElement::Objectives:
+	case HudElement::BriefingPanel:
 	case HudElement::HelpScreen: return named({ kHudTexBoxBorder, kHudTexBoxTile });
 	case HudElement::NetQuality: return named({ kHudTexNetIcon, kHudTexNetLinkIcon, kHudTexNetNovaWorldIcon });
 	case HudElement::LfpPanel:
@@ -411,6 +416,7 @@ void HudViewport::follow_scope_(const SessionView &view) {
 	if (!range_) range_ = std::make_unique<WeaponRange>();
 	WeaponRangeSetup setup;
 	setup.files = view.findings.assets;
+	setup.game = view.project.document ? view.project.document->target_game : std::string();
 	setup.catalog = "weapon.def";
 	setup.weapon = weapon->name;
 	setup.target.range = float(options_.range);

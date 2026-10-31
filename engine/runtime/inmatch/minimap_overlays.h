@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include <base/title/title.h>
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/replication/client_state.h>
@@ -41,6 +42,8 @@ struct MinimapOverlayInputs {
     // the own slot's revive leg reads live each frame; 0 = automatic requests.
     // [orig: draw_entity_labels_and_markers @0x5a4b49..0x5a4b56]
     int32_t own_auto_medic_off = 0;
+    // The title the session runs as: its map's own legs (Title::map_capture_rings_under_layers).
+    const Title *title = nullptr;
 };
 
 // Entity_GetDisplayName: the name the map labels and the weapon inset draw for

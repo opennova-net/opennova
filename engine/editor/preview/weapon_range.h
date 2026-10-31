@@ -119,6 +119,8 @@ inline constexpr int32_t kWeaponRangeMostTicks = io::kTicksPerSecondInt * 600;
 // gesture is a soldier's shot of it from the eye along the line of fire, the others having no weapon to work.
 struct WeaponRangeSetup {
 	std::shared_ptr<const FileSource> files;
+	// The project's target game (a title code), whose rules the range's world runs.
+	std::string game;
 	std::string catalog;
 	std::string weapon;
 	std::string ammo;

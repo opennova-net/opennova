@@ -18,7 +18,7 @@ constexpr RequestField kFields[] = {
 			"A new project's title (its folder's name when left out); novaworld_put's new NovaWorld project's "
 			"name (left out, the project's title)." },
 	{ F::Game, "game", J::String,
-			"A new project's game, a title code (acidgambit, jo, dfx2, jodemo, dfx, bhd; acidgambit, "
+			"A new project's game, a title code (acidgambit, jo, dfx2, dfx, bhd; acidgambit, "
 			"the default title, when left out)." },
 	{ F::Expansion, "expansion", J::String,
 			"The expansion a new project builds as, played with /exp <name> from expansion\\<name>\\ "
@@ -196,8 +196,8 @@ constexpr RequestField kFields[] = {
 			"preview, inspector, problems, output), as the Windows menu's tick shows it: opened where it was closed, "
 			"shown where it stands aside (the Preview beside a mission)." },
 	{ F::Purpose, "purpose", J::String,
-			"What a picked path is for: new_project_location, open_project, runtime_executable, "
-			"game_install or import_files." },
+			"What a picked path is for: new_project_location, open_project, runtime_executable, game_install, "
+			"import_files, new_project_install, texture_image, music_stream_wave, novaworld_folder or heights_raw." },
 	{ F::WithDependencies, "with_dependencies", J::Boolean,
 			"An import brings the files the chosen ones need." },
 	{ F::Replace, "replace", J::Boolean,
@@ -342,7 +342,7 @@ constexpr RequestField kFields[] = {
 			"novaworld_sign_in's password: a person's alone, typed into the NovaWorld window; novaworld_sign_in is never "
 			"served over the wire." },
 	{ F::ProjectKey, "project_key", J::String,
-			"A NovaWorld project by its key (\"JO\", \"JOX01\"; 1 to 16 of A-Z, 0-9 and _): the one novaworld_get "
+			"A NovaWorld project by its key (\"JO\", \"JOX01\"; 1 to 16 of A-Z, 0-9 and _): the one novaworld_sync "
 			"gets, the one novaworld_put puts the open project on (a new one's key, or an empty one's), and the one "
 			"new_project makes its project for (its project file's novaworld key, the welcome page's Set up...)." },
 	{ F::Message, "message", J::String,
@@ -372,6 +372,9 @@ constexpr RequestField kFields[] = {
 			"A server-generated encoded lobby file to include in this build or export." },
 	{ F::VersionFile, "version_file", J::String,
 			"A server-generated version.txt to include in this expansion's build or export." },
+	{ F::Release, "release", J::Boolean,
+			"An export a release packs (the service's release build): a file it ships under a name the stock "
+			"updater's command file cannot carry refuses it (build.update_name), which any other build packs." },
 	{ F::Lobby, "lobby", J::String,
 			"An existing compatible NovaWorld lobby for a new game, by slug." },
 	{ F::NewLobbyName, "new_lobby_name", J::String,

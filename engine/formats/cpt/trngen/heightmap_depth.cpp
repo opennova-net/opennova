@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <base/io/le.h>
 #include <base/io/strutil.h>
 #include <formats/png/png_decode.h>
 
@@ -116,6 +117,13 @@ bool encode_heightmap_depth16(const std::vector<uint16_t> &raw16, double top, st
 		return false;
 	}
 	return true;
+}
+
+std::vector<uint8_t> encode_heightmap_raw16(const std::vector<uint16_t> &raw16) {
+	std::vector<uint8_t> bytes;
+	bytes.reserve(raw16.size() * 2);
+	for (const uint16_t height : raw16) io::append_u16_le(bytes, height);
+	return bytes;
 }
 
 } // namespace opennova::trngen

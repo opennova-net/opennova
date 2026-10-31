@@ -14,6 +14,7 @@
 
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -121,6 +122,7 @@ struct ResolverCapture {
 
 int main() {
 	ns::ClientReplicaPipeline view;
+	view.set_protocol(nw::title_protocol("jo"));
 	view.set_remote_motion_mode(true);
 	view.set_item_class_resolver([](uint16_t type)
 			-> ns::ClientReplicaPipeline::ItemClassResolution {
@@ -438,6 +440,37 @@ int main() {
 		for (int i = 0; i < 40; ++i) tick_fresh(view);
 		ok &= expect(row_a->rm_vel_xy[1] == 0,
 		             "the |v| <= 8 snap parks the grounded decay at zero");
+		row_a->anim_state_id = 62;
+	}
+
+	// --- DFX2-112: dfx2.exe's airborne glide on a replica row. With the moving bit the steer also
+	// adds ftol(cos/sin(angle) * Q), Q = (-vz) >> 7, and turns savedLivePitch and Roll by
+	// ftol(cos/sin(dir * pi/4) * 2^22). The row looks along +y (heading 0x40000000), falls at
+	// -0x3800 (Q 112), pad 0: vy 0 + (111 - (-63)) = 174, then the damp (174 * 63) >> 6 = 171.
+	// [orig: the twin of Entity_UpdateInfantryPlayerBody @0x4B4140 - @0x4B7933..0x4B7A13
+	//  (dfx2.exe)]
+	{
+		view.set_rules(&opennova::world::title_rules("dfx2"));
+		view.set_water_z(0);
+		cap.return_clearance = 0x10000; // stays in the air
+		row_a->rm_entity_flags = 0x2000u;
+		row_a->rm_vel_xy[0] = 0;
+		row_a->rm_vel_xy[1] = 0;
+		row_a->rm_vel_z = -0x3800;
+		row_a->rm_body_pitch = 0;
+		row_a->roll_bam = 0;
+		row_a->heading_bam = 0x40000000;
+		tick_fresh(view);
+		ok &= expect(row_a->rm_vel_xy[1] == 171 && row_a->rm_vel_xy[0] == 0,
+		             "DFX2-112: the glide adds the fall's share along the look");
+		ok &= expect(row_a->rm_body_pitch == 4194304 && row_a->roll_bam == 0,
+		             "DFX2-112: the steer turns savedLivePitch by the pad angle");
+		view.set_rules(&opennova::world::title_rules("jo"));
+		row_a->rm_entity_flags = 0;
+		row_a->rm_vel_xy[0] = 0;
+		row_a->rm_vel_xy[1] = 0;
+		row_a->rm_vel_z = 0;
+		row_a->rm_body_pitch = 0;
 		row_a->anim_state_id = 62;
 	}
 

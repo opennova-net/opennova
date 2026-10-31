@@ -53,7 +53,7 @@ int64_t ticks_usec() {
 // OcclusionWorld::mirror_water_visible).
 // A camera's horizontal field of view in degrees: the fov word its viewport is built with (its
 // keep-aspect mode decides which axis the camera's own fov names).
-double camera_fov_h_deg(Camera3D *p_camera, double p_default) {
+double camera_fov_h_deg(const Camera3D *p_camera, double p_default) {
 	float tan_h = 0.0f;
 	float tan_v = 0.0f;
 	if (p_camera == nullptr || !ObjectLodFrame::camera_tangents(p_camera, tan_h, tan_v)) {
@@ -63,6 +63,19 @@ double camera_fov_h_deg(Camera3D *p_camera, double p_default) {
 }
 
 } // namespace
+
+OcclusionViewInputs godot::occlusion_view_inputs(const Camera3D *p_camera, const MissionEnvironment *p_env,
+		const Water *p_water) {
+	OcclusionViewInputs in;
+	in.fov_h_deg = camera_fov_h_deg(p_camera, in.fov_h_deg);
+	if (p_env != nullptr) {
+		in.fog_dist = p_env->get_fog_distance();
+	}
+	if (p_water != nullptr && p_water->is_water_render_active()) {
+		in.water_z = p_water->get_water_height();
+	}
+	return in;
+}
 
 void OcclusionFrame::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "terrain", "foliage", "sky", "celestial", "water",
@@ -179,17 +192,11 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width, flo
 	// The viewport the view is built over: the camera's horizontal field (mode-invariant) over the
 	// screen's rect, which the aspect mode's stretch never changes (engine world/occlusion_camera.h
 	// occlusion_camera_from_view carries the witness, D-OCC-12).
-	const double fov_h = camera_fov_h_deg(p_camera, 90.0);
-	double fog = 1000.0;
-	MissionEnvironment *env = environment();
-	if (env != nullptr) {
-		fog = env->get_fog_distance();
-	}
 	Water *w = water();
-	double water_z = -100000.0;
-	if (w != nullptr && w->is_water_render_active()) {
-		water_z = w->get_water_height();
-	}
+	const OcclusionViewInputs in = occlusion_view_inputs(p_camera, environment(), w);
+	const double fov_h = in.fov_h_deg;
+	const double fog = in.fog_dist;
+	const double water_z = in.water_z;
 	// The scene's water mirror collects ahead of it while its water pass is
 	// active, over the view block (the eye without the scene's optics offsets,
 	// which only its drawn reflection takes) and the view's horizontal field on
@@ -328,7 +335,7 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width, flo
 	// cold bodies/weapons (inmatch/role_feeds.h EntityLightingFeed carries the
 	// witnesses: the per-entity setup, its stack push, the 0x80 submit flag
 	// and the person wave's daylight aux).
-	if (env != nullptr) {
+	if (MissionEnvironment *env = environment()) {
 		const int64_t light_query_start = timing ? ticks_usec() : 0;
 		const std::vector<opennova::inmatch::EntityLightingChange> &changes =
 				s->draw_lighting_changes(env->get_light_direction());
@@ -617,6 +624,18 @@ void OcclusionFrame::apply_mirror_view(int p_view, bool p_ran, bool p_below_wate
 			}
 		}
 	}
+}
+
+void OcclusionFrame::apply_draw_husk_leg() {
+	Simulation *s = sim();
+	EntityPresenter *presenter = entities();
+	if (s == nullptr || presenter == nullptr) {
+		return;
+	}
+	std::vector<opennova::world::HuskSwapEvent> swaps;
+	std::vector<opennova::world::DrawFadeStamp> fades;
+	s->take_draw_husk_output(swaps, fades);
+	presenter->present_draw_husk_leg(swaps, fades);
 }
 
 void OcclusionFrame::apply_mirror_admissions(int p_view) {

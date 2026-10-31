@@ -151,8 +151,7 @@
     X(SIM_AI_INFANTRY_COLLISION_REPULSION, "person-sphere separation") \
     X(SIM_AI_INFANTRY_COLLISION_GROUND, "final terrain/model ground ray") \
     X(SIM_AI_INFANTRY_FINISH, "finish_infantry_tick past the motor head, whatever it runs: the motor-to-registry mirror") \
-    X(SIM_UPDATE_ATTACHMENTS, "after the pool-1 walk: the attached children's riders and the query-view epoch reset") \
-    X(SIM_ATTACHMENT_RIDERS, "riders refreshed from attached children") \
+    X(SIM_UPDATE_ATTACHMENTS, "after the pool-1 walk: the query-view epoch reset") \
     X(SIM_UPDATE_HELILIFT_FACES, "HeliLift update + facial interpolation") \
     X(SIM_UPDATE_PRECIPITATION, "precipitation fall tick") \
     X(SIM_UPDATE_PIECES_EVENTS, "death pieces + the timed AI event queue") \

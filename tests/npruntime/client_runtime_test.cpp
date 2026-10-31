@@ -26,6 +26,7 @@
 //      (NOT the dvxi5 fallback), and a HostClient ClientRuntime folds it off the loopback. Guards that
 //      the host's own local view is no longer starved and anchors correctly.
 
+#include <runtime/inmatch/character_registry.h>
 #include <runtime/inmatch/charattr_table.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/game_config_block.h>
@@ -81,6 +82,7 @@
 #include <cstdint>
 #include <array>
 #include <cstdio>
+#include <functional>
 #include <memory>
 #include <map>
 #include <string>
@@ -93,6 +95,7 @@
 
 // JO's title identity (net/protocol/protocol.h), the identity these tests speak.
 static const opennova::Protocol &kJo = *opennova::title_protocol("jo");
+static const opennova::Protocol &kDfx2 = *opennova::title_protocol("dfx2");
 
 namespace {
 
@@ -4552,6 +4555,7 @@ bool run_host_as_client() {
 	// persistent pool-2 markers to the fresh epoch (without the re-arm the
 	// building/zone markers would be missing for the rest of the session).
 	inmatch::ClientRuntime restart_view(host_loop);
+	restart_view.set_protocol(&kJo);
 	inmatch::Server_RearmMinimapInitialScan(ctx);
 	bool restart_map_overlay = false;
 	for (int tick = 0; tick < 16 && !restart_map_overlay; ++tick) {
@@ -4644,6 +4648,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	            "the own client's 0x0B reaches its receiver")) return false;
 	inmatch::Server_TickUpdate(owner.ctx);
 	inmatch::ClientRuntime host_view(host_loop);
+	host_view.set_protocol(&kJo);
 	host_view.view().set_item_class_resolver([](uint16_t type_id) {
 		if (type_id == 0x14B9u) return EntityClass::Player;
 		if (type_id == 5311u) return EntityClass::Infantry;
@@ -7191,6 +7196,48 @@ bool run_game_reset_ends_the_round_linger() {
 			"linger: the client frame after a 0x25 stores mission exit 4");
 }
 
+// A DFX2 joiner's end-round linger: its 0x25 arms the linger at 1240 ticks where JO's zeroes it,
+// so the board stands that long before the countdown stores mission exit 4 (DFX2-17's joiner leg,
+// ProtocolInMatch::s2c_25), dfx2.exe's NapiNPClientMsg_GameReset the twin of Jointops.exe's.
+// [orig: `mov g_EndRoundLingerTimer, 4D8h` @0x42269d in NapiNPClientMsg_GameReset @0x422650;
+//  the countdown @0x42e21e..0x42e22e in sub_42DFF0 (dfx2.exe)]
+// [orig: NapiNPClientMsg_GameReset @0x422800]
+bool run_dfx2_game_reset_keeps_the_board() {
+	constexpr uint32_t kServerKey = 0x4C494E48u;
+	const std::string client_scrk = "CLIENT-LINGER2-SCRK";
+	const std::string server_scrk = "SERVER-LINGER2-SCRK";
+	inmatch::ClientRuntime client("Linger2", [] { return uint64_t{0x31323334u}; });
+	client.set_protocol(&kDfx2);
+	client.seed_session(kServerKey, 1u, client_scrk, server_scrk, 1, 0, 0x0002,
+			w::kPlayerInfantryTypeId, 0x10000u, 0, /*replay_mode=*/false);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	EndRoundHeader header;
+	header.winner_team = 2;
+	header.team_score_0 = 3;
+	header.team_score_1 = 8;
+	header.player_index = 0;
+	const std::vector<uint8_t> round_over = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_HEADER,
+					encode_end_round_header(header, /*non_team_form=*/false))});
+	client.receive(round_over.data(), round_over.size());
+	for (uint32_t tick = 1; tick <= 10; ++tick) client.Client_ProcessNetworkFrame(tick);
+	const std::vector<uint8_t> reset = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::GAME_RESET, {})});
+	client.receive(reset.data(), reset.size());
+	// The frame folds the 0x25 at its receive (1240), then its countdown takes the first tick.
+	client.Client_ProcessNetworkFrame(11);
+	if (!expect(client.state().end_round_linger_ticks == 1239,
+			"dfx2 linger: the 0x25 arms the linger at 1240 ticks, its frame counting one"))
+		return false;
+	for (uint32_t tick = 12; tick < 12 + 1238; ++tick) client.Client_ProcessNetworkFrame(tick);
+	if (!expect(client.mission_exit_reason() == inmatch::kMissionExitNone,
+			"dfx2 linger: the board stands through 1239 frames"))
+		return false;
+	client.Client_ProcessNetworkFrame(12 + 1238);
+	return expect(client.mission_exit_reason() == inmatch::kMissionExitRoundOver,
+			"dfx2 linger: the 1240th frame stores mission exit 4");
+}
+
 // A stance change pressed between boundaries is QUEUED like every other
 // reliable C2S: it mints no sequence and ages nothing until the next open
 // boundary, which carries it in queue order ahead of what was queued after it
@@ -8945,9 +8992,11 @@ struct StillBodySource final : w::IRootMotionSource {
 // The client half of a replica body's mover-leg sound: the profile slot its
 // leg queued resolves through the body's items.def binding and plays at the
 // position the leg played it. One remote player row, one mover tick against
-// the given contact clearance, then the client's sound pass.
+// the given contact clearance, then the client's sound pass. `stage` sets the
+// world and the row up further before the first tick.
 std::vector<w::SoundSlotEvent> replica_mover_sounds(uint32_t flags, int32_t vel_z,
-        int32_t clearance, uint32_t chute_carry = 0, int ticks = 1) {
+        int32_t clearance, uint32_t chute_carry = 0, int ticks = 1,
+        const std::function<void(w::World &, ns::ClientEntityState &)> &stage = nullptr) {
     inmatch::ClientRuntime runtime("ReplicaMoverAudio");
     runtime.set_protocol(&kJo);
     w::World world;
@@ -8961,11 +9010,14 @@ std::vector<w::SoundSlotEvent> replica_mover_sounds(uint32_t flags, int32_t vel_
             "     ChuteClose     T_CHUTE_CLOSE\r\n"
             "     ChuteFlap      T_CHUTE_FLAP\r\n"
             "     FreeFall       T_FREEFALL\r\n"
+            "end\r\n"
+            "begin \"SP_RemoteFemale\"\r\n"
+            "     SSFallAlive    T_LAND_F\r\n"
             "end\r\n";
     world.tables.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1);
     opennova::audio::OrganicSoundProfile binding;
     binding.primary = 1;
-    binding.female = 1;
+    binding.female = 2;
     world.tables.organic_sound_profiles.set(w::kPlayerInfantryTypeId, binding);
     StillBodySource still;
     runtime.view().set_remote_motion_mode(true);
@@ -8986,6 +9038,7 @@ std::vector<w::SoundSlotEvent> replica_mover_sounds(uint32_t flags, int32_t vel_
     // (0 here, no dry sentinel), so a fall must not reach it.
     row.z = 100 << 16;
     row.net_smooth_target[2] = row.z;
+    if (stage) stage(world, row);
     for (int t = 0; t < ticks; ++t) {
         runtime.view().tick_remote_motion(0xFFFF);
         runtime.tick_remote_stance_sounds(world);
@@ -9010,6 +9063,57 @@ bool run_remote_landing_thumps() {
            expect(dead.size() == 1 && std::string(dead[0].set_name) == "T_BODYDROP",
                    "a dead remote body lands with SSFallDead") &&
            expect(grounded.empty(), "a grounded remote body plays no thump");
+}
+
+// DFX2-53: a joiner's remote player lands in the sex of the character its avatar blip names, as
+// the profile slot reads the blip's sex byte. dfx2.exe's sector render points the blip at the first
+// combo of the good side while the person is on the local player's team (or there is none), else
+// of the evil side: a male spawn of the other team sounds as the evil side's first (female) combo,
+// a female spawn of the local team as the good side's first (male); Jointops.exe's (and no
+// registry) keeps the spawn's pick.
+// [orig: Entity_GetProfileSlotSound @0x525490 - the blip @0x52549F, its sex byte @0x5254AC;
+//  Terrain_RenderSectorEntitiesBySide @0x5C6C20 - the Team compare @0x5C6EEE..0x5C6F00, the blip
+//  stored @0x5C6F3D..0x5C6F42 (dfx2.exe)] [orig: Entity_GetProfileSlotSound @0x528300 - @0x52831C]
+bool run_remote_slot_sound_sex_follows_the_drawn_character() {
+    inmatch::CharacterRegistry registry;
+    registry.add_entry(0, 0, 0, 0, 0, 1, opennova::avatars::AVATAR_ALIGN_GOOD, 1, false);
+    registry.add_entry(0, 0, 1, 0, 0, 2, opennova::avatars::AVATAR_ALIGN_GOOD, 3, false);
+    registry.add_entry(1, 0, 0, 7, 0, 1, opennova::avatars::AVATAR_ALIGN_EVIL, 10, true);
+    const uint16_t good_male = registry.entries()[1].packed_id;
+    const uint16_t evil_female = registry.entries()[2].packed_id;
+    const auto land = [&](const char *code, bool with_registry, uint16_t net_id, uint8_t team,
+                              bool with_local = true) {
+        const auto sounds = replica_mover_sounds(0x2000u, 0, -0x100, 0, 1,
+                [&](w::World &world, ns::ClientEntityState &row) {
+                    for (const inmatch::CharacterEntry &entry : registry.entries())
+                        world.tables.character_traits.set(entry.packed_id, entry.head_female);
+                    inmatch::install_viewer_side_pick(world.tables.character_traits,
+                            opennova::title_by_code(code), with_registry ? &registry : nullptr);
+                    if (with_local) {
+                        world.registry.configure_pool(0, 4);
+                        w::Entity local;
+                        local.team = 1;
+                        world.cached.local_player = world.registry.spawn(0, local);
+                    }
+                    row.net_id = net_id;
+                    row.team = team;
+                    row.team_known = true;
+                });
+        return sounds.size() == 1 ? std::string(sounds[0].set_name) : std::string("<none>");
+    };
+    return expect(registry.first_character_id(opennova::avatars::AVATAR_ALIGN_EVIL) == evil_female,
+                   "the fixture's first evil combo is the female one") &&
+           expect(land("dfx2", true, good_male, 2) == "T_LAND_F",
+                   "DFX2: the other team's male spawn sounds as the evil side's first, female") &&
+           expect(land("dfx2", true, evil_female, 1) == "T_LAND",
+                   "DFX2: a teammate's female spawn sounds as the good side's first, male") &&
+           expect(land("dfx2", true, evil_female, 2, false) == "T_LAND",
+                   "with no local player every DFX2 player sounds as the good side's first") &&
+           expect(land("jo", true, good_male, 2) == "T_LAND" &&
+                          land("jo", true, evil_female, 1) == "T_LAND_F",
+                   "a JO joiner hears each player's spawn pick") &&
+           expect(land("dfx2", false, evil_female, 1) == "T_LAND_F",
+                   "no registry keeps the spawn pick");
 }
 
 // A remote player's chute family plays on the client itself: the deployed
@@ -9274,6 +9378,7 @@ int main() {
                     run_remote_stance_sound_parent_is_the_mount_only() &&
                     run_remote_death_edge_screams() &&
                     run_remote_landing_thumps() &&
+                    run_remote_slot_sound_sex_follows_the_drawn_character() &&
                     run_remote_chute_family_plays() &&
                     run_radio_zone_context_uses_the_nearest_entry_coverage() &&
 	                run_direct_uplink_framing_is_transient() &&
@@ -9294,6 +9399,7 @@ int main() {
 	                run_missing_sequence_request_leaves_from_the_receive_pump() &&
 	                run_resend_answer_and_pong_leave_from_the_receive_pump() &&
 	                run_game_reset_ends_the_round_linger() &&
+	                run_dfx2_game_reset_keeps_the_board() &&
 	                run_queued_stance_waits_for_the_send_boundary() &&
 	                run_c2s_producers_share_one_chronological_queue() &&
 	                run_carrier_repair_queues_at_its_record() &&

@@ -163,7 +163,7 @@ int HostSessionOptions::get_player_slot_limit() const {
 			? *config_.title
 			: ResourceRoot::session_title(Ref<ResourceRoot>());
 	return static_cast<int>(opennova::inmatch::host_player_slot_limit(
-			max_players_, serve_and_play_, title));
+			max_players_, serve_and_play_, config_.network_connect_type, title));
 }
 
 void HostSessionOptions::seed_from_block(const Ref<GameConfigBlock> &p_block) {

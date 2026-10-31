@@ -3,6 +3,8 @@
 #include "util/record_bind.h"
 #include "util/string_convert.h"
 
+#include <base/vfs/vfs.h> // vfs_expansion_dir
+
 #include <godot_cpp/classes/ref.hpp>
 
 #include <string>
@@ -17,6 +19,11 @@ void ModListing::_bind_methods() {
 	ClassDB::bind_static_method("ModListing", D_METHOD("read_reply", "json", "listings"), &ModListing::read_reply);
 	ClassDB::bind_static_method("ModListing", D_METHOD("remove_folder", "game_root", "code"),
 			&ModListing::remove_folder);
+	ClassDB::bind_static_method("ModListing", D_METHOD("folder_marked", "game_root", "code"),
+			&ModListing::folder_marked);
+	ClassDB::bind_static_method("ModListing", D_METHOD("marked_folders", "game_root"),
+			&ModListing::marked_folders);
+	ClassDB::bind_static_method("ModListing", D_METHOD("folder", "game_root", "code"), &ModListing::folder);
 	ClassDB::bind_method(D_METHOD("write_wizard", "game_root", "runtime_dir"), &ModListing::write_wizard);
 	OPENNOVA_RECORD_READ_ONLY(ModListing, Variant::STRING, key)
 	OPENNOVA_RECORD_READ_ONLY(ModListing, Variant::STRING, code)
@@ -43,6 +50,20 @@ String ModListing::read_reply(const String &json, TypedArray<ModListing> listing
 String ModListing::remove_folder(const String &game_root, const String &code) {
 	std::string error;
 	return opennova::remove_mod_folder(to_std(game_root), to_std(code), error) ? String() : to_gd(error);
+}
+
+bool ModListing::folder_marked(const String &game_root, const String &code) {
+	return opennova::mod_folder_marked(to_std(game_root), to_std(code));
+}
+
+String ModListing::folder(const String &game_root, const String &code) {
+	return to_gd(opennova::vfs_expansion_dir(to_std(game_root), to_std(code)));
+}
+
+PackedStringArray ModListing::marked_folders(const String &game_root) {
+	PackedStringArray out;
+	for (const std::string &code : opennova::marked_mod_folders(to_std(game_root))) out.push_back(to_gd(code));
+	return out;
 }
 
 String ModListing::write_wizard(const String &game_root, const String &runtime_dir) const {

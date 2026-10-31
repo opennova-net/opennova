@@ -229,13 +229,6 @@ public:
 		// resolve_title_protocol) whose gate manager holds `gate_tag`
 		// (protocol_gate_tag): NA, BDAT and CO set, the rest as defaulted.
 		static Config lobby(const Protocol &protocol, std::string gate_tag);
-
-		// Preset for the in-match game session: the ClientHello the client sends
-		// to a host after NWJoin, which flips the connection protocol from the
-		// lobby (NOVAWORLDUDP) to the title's game protocol (JO's
-		// JOINTOPERATIONS). The complete CO/AP/BDAT/PN/PG/PV1/PV2 identity is the
-		// title's CNapiNetwork_Init @ 0x4ca4a0 block (make_protocol_client_hello).
-		static Config game_protocol(const Protocol &protocol);
 	};
 
 	// A server notification the owner acts on (state changes are already applied).

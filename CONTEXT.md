@@ -184,8 +184,8 @@ _Avoid_: role, service (for one program), tier, microservice, pod
 **Gate**:
 The program that is retail's first contact: UDP port 7597 (the protocol in
 `engine/net/novaworld/gate`, the listener in `apps/novaworld_gate`), which hands a client the HTTP
-service URL and the one lobby address every **lobby instance** announces, and takes the hosts'
-status blobs on the same port. It holds no session; its address is the one retail's hosts file names.
+service URL and the one lobby address every **lobby instance** announces. It holds no session; its
+address is the one retail's hosts file names.
 _Avoid_: lobby, edge
 
 **Lobby**:
@@ -257,8 +257,34 @@ A folder on a disk that holds a game's **project** at a revision (its base): its
 `project.opennova` names the project by its key (ADR 0073), and the editor keeps each service's
 base by itself under `.opennova/novaworld/<host>/`. What it changed since its base is its push,
 what others pushed since its pull. Every OpenNova Editor project folder on NovaWorld is one; a
-folder not on NovaWorld yet is put there once (**Put on NovaWorld**).
+folder not on NovaWorld yet is put there once (**Put on NovaWorld**). One folder can be a working
+copy on two services at once, staging and live, each with a base of its own: staging's work lists
+as changes in the live editor and is promoted by a push. The editor remembers the folders it knows
+as working copies apart from the recent projects (roots alone, each one's project read from its own
+file), so Forget and a full recent list leave them known.
 _Avoid_: checkout, clone, mirror, binding, bind (gone: nothing binds a folder)
+
+**Sync**:
+The editor's verb for bringing a NovaWorld **project** to this computer: a new **working copy** in a
+folder of its own, its project file naming the project whatever the revision's said, opened once it
+lands. A folder already holding the project opens instead. A mod's base game comes along where the
+account can read it; a retail game the account cannot read is imported from the game install. In
+the open project the verbs are Pull and Push.
+_Avoid_: get (its old name), clone, download
+
+**Rejoin**:
+Taking a folder back to the NovaWorld **project** its own state under `.opennova/novaworld/` names
+and its project file no longer does (Make it your own undone, or a key the service does not show):
+the key written back, nothing downloaded, its base kept. It takes no key and lists nothing, so it
+binds nothing (ADR 0073).
+_Avoid_: bind, link, relink, reattach
+
+**Replace with this folder**:
+For a **working copy** holding no revision of a project that has some (a folder synced from another
+service, or one that lost its base): the head taken as its base with no file changed, so every
+difference, deletions too, is a change for the next push. Pull is the other way through, and it
+brings in what only NovaWorld has.
+_Avoid_: force push (no revision is rewritten; the push is an ordinary next revision)
 
 **Put on NovaWorld**:
 The editor's verb for a **project** not on NovaWorld yet (ADR 0073): it becomes a new project of
@@ -725,12 +751,13 @@ surface takes the middle dot as 0xB7.
 _Avoid_: build label, version string, version text (retail's `V1.7.5.7`)
 
 **Title**:
-The retail game a **game** runs as, by its code (`jo`, `dfx2`, `acidgambit`; `jodemo`, `dfx` and
-`bhd` are unwitnessed and refused by name): its rules, the **protocol** it speaks and what its
-install carries (its name and title text, its SCR policy, executable, command file and game.cfg
-table). A `Title` row in `engine/base/title`'s registry (`title_by_code`), each game's in
+The retail game a **game** runs as, by its code (`jo`, `dfx2`, `acidgambit`; `dfx` and `bhd`
+are unwitnessed and refused by name): its rules, the **protocol** it speaks and what its install
+carries (its name and title text, executable, command file and game.cfg table). A `Title`
+row in `engine/base/title`'s registry (`title_by_code`), each game's in
 `games/<code>/<code>_title.cpp`, its rules in `<code>_rules.cpp`; `games::install()` fills the
-registries, and `engine/` holds the types and lookups and names no title (ADR 0076). OP: Acid
+title and protocol registries, `games::install_rules()` the rules registry (a program that runs a
+match), and `engine/` holds the types and lookups and names no title (ADR 0076). OP: Acid
 Gambit is its own title, whose protocol and rules are JO's, and the default one: a launch, a
 project or a session that names none runs as it. Titles are in scope as data (ADR 0055); an
 unwitnessed field is refused where it is needed, never filled with JO's value. The editor and the
@@ -849,7 +876,8 @@ The vocabulary of ADR 0046's project model.
 A **game**'s source as the editor and NovaWorld keep it: one project in two places (ADR 0046,
 ADR 0069, ADR 0071). On a disk, a directory the editor owns: `project.opennova` (versioned
 JSON: title, target game, feature toggles, export settings), the loose source files anywhere
-beneath it, and a disposable `.opennova/` cache; the folder IS the source tree, and the editor
+beneath it, and the machine's own `.opennova/`, a disposable cache but for each service's base
+(the **working copy**'s state); the folder IS the source tree, and the editor
 keeps none of it in a database. In NovaWorld, the game's line of revisions, each a manifest of
 the project's files by path, SHA-256 and size (every file stored once by its SHA-256), which
 every folder of it is a **working copy** of. A project may have an owner, the account that made

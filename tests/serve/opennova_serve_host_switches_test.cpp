@@ -14,6 +14,7 @@
 #include <runtime/inmatch/host_file.h>
 #include <runtime/inmatch/mission_rotation.h>
 
+#include <base/title/title.h>
 #include <formats/gamecfg/game_cfg.h>
 
 #include <cstdio>
@@ -38,6 +39,22 @@ int32_t cap_after(const std::string &text, int32_t max_player_arg) {
 	const std::vector<mission_catalog::Row> catalog;
 	(void)inmatch::read_host_file(text.data(), text.size(), cfg, rotation, catalog, max_player_arg);
 	return cfg.mp_max_players;
+}
+
+// The switch is Joint Operations' command line's: dfx2.exe's walk has none, so under DFX2 the host
+// file's MaxPlayers stores its own value [orig: Game_ParseCommandLineAndInit @0x4a7360 -
+// "/noreload" @0x4a7727 then "/version" @0x4a773f; ServerConfig_ApplyHostSetting @0x4a6060 -
+// @0x4a6289..0x4a6296 (dfx2.exe)].
+void run_the_switch_is_the_titles() {
+	expect(serve::host_file_max_player_arg(*title_by_code("jo"), 12) == 12,
+	       "JO's command line takes /maxplayers");
+	expect(serve::host_file_max_player_arg(*title_by_code("acidgambit"), 12) == 12,
+	       "OP: Acid Gambit's command line is JO's");
+	expect(serve::host_file_max_player_arg(*title_by_code("dfx2"), 12) == 0,
+	       "dfx2.exe's command line has no /maxplayers");
+	expect(cap_after("MaxPlayers 40\r\n",
+			       serve::host_file_max_player_arg(*title_by_code("dfx2"), 12)) == 40,
+	       "a DFX2 host file's MaxPlayers stands");
 }
 
 void run_the_maxplayers_switch() {
@@ -157,6 +174,7 @@ void run_network_launch_options() {
 
 int main() {
 	run_the_maxplayers_switch();
+	run_the_switch_is_the_titles();
 	run_the_random_start();
 	run_network_launch_options();
 	if (failures == 0) std::printf("opennova_serve_host_switches: all passed\n");

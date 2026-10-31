@@ -475,10 +475,13 @@ bool SessionCore::open_project(const std::string &dir, bool import_pass, const s
 		// Taken off the recent projects, and said so where the welcome page shows why.
 		const bool listed = std::find(view_.project.recent_projects.begin(), view_.project.recent_projects.end(), dir) !=
 		                    view_.project.recent_projects.end();
-		if (listed) {
-			preferences_.forget_recent_project(dir);
-			save_preferences();
-		}
+		// What was read of it is old: a working copy that no longer opens is offered as one no longer.
+		std::vector<ProjectView::RecentProject> &copies = view_.project.working_copies;
+		copies.erase(std::remove_if(copies.begin(), copies.end(),
+		                            [&dir](const ProjectView::RecentProject &copy) { return copy.root == dir; }),
+		             copies.end());
+		if (listed) preferences_.forget_recent_project(dir);
+		save_preferences();
 		refuse_project(why, listed ? "The project could not be opened, and it is off the recent projects now"
 		                           : "The project could not be opened");
 		return false;
@@ -542,6 +545,7 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	view_.activity.has_export = false;
 	view_.activity.last_export = std::make_shared<const ExportReport>();
 	preferences_.remember_recent_project(paths_.root);
+	if (!view_.project.document->novaworld.empty()) preferences_.remember_working_copy(paths_.root);
 	save_preferences();
 	read_recent_details(view_.project.document.get(), paths_.root); // its entry as it is now, whatever was there
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
@@ -557,7 +561,7 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	if (view_.project.document->expansion.on_base_project()) weigh_base_export(open.base_export(), BuildAfterBase());
 	restore_workspace(); // the documents it was left with (the UX round's project lane)
 	navigation().clear(); // its history starts where it reopened, with no place behind it
-	novaworld().project_opened(); // its binding to a NovaWorld project, ADR 0069
+	novaworld().project_opened(); // its place on NovaWorld, ADR 0073
 	const std::string &title = view_.project.document->title;
 	note("Opened " + title + ".");
 	view_.activity.status = "Opened " + title + ".";
@@ -671,7 +675,7 @@ ImportRunResult SessionCore::absorb_refresh(ProjectRefresh &refresh) {
 		                            (source.outputs.size() == 1 ? "" : "s") + ")");
 	files_scanned_ = refresh.files_scanned();
 	view_.project.scan = std::make_shared<const AssetScan>(std::move(refresh.scan()));
-	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
+	problems().set_scan(paths_.root, *view_.project.scan);
 	// The requirements over that scan, with the project's document as it is now: a features change
 	// made while the refresh ran (S13 A3: it waits for none) is the one they follow.
 	view_.project.requirements = std::make_shared<const RequirementReport>(
@@ -726,7 +730,7 @@ void SessionCore::absorb_changed(ImportRunResult &imports, const std::vector<std
 	files_scanned_ = scan.update(paths_, *view_.project.document, paths);
 	note_came_back(*view_.project.scan, scan, files, refreshed);
 	view_.project.scan = std::make_shared<const AssetScan>(std::move(scan));
-	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
+	problems().set_scan(paths_.root, *view_.project.scan);
 	view_.project.requirements = std::make_shared<const RequirementReport>(
 			requirements_of(*view_.project.document, *view_.project.scan));
 	touch(ViewConcern::Files);
@@ -774,7 +778,7 @@ void SessionCore::update_files(const std::vector<std::string> &paths) {
 	AssetScan scan = *view_.project.scan;
 	files_scanned_ = scan.update(paths_, *view_.project.document, paths);
 	view_.project.scan = std::make_shared<const AssetScan>(std::move(scan));
-	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
+	problems().set_scan(paths_.root, *view_.project.scan);
 	view_.project.requirements = std::make_shared<const RequirementReport>(
 			requirements_of(*view_.project.document, *view_.project.scan));
 	touch(ViewConcern::Files);
@@ -794,7 +798,7 @@ void SessionCore::update_folders(const std::vector<std::string> &made, const std
 		if (!folder.empty()) folders[folder] = io::file_modified_ticks(system_path(join_path(paths_.root, folder)));
 	scan.set_folders(std::move(folders));
 	view_.project.scan = std::make_shared<const AssetScan>(std::move(scan));
-	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
+	problems().set_scan(paths_.root, *view_.project.scan);
 	touch(ViewConcern::Files);
 }
 
@@ -974,6 +978,7 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 bool SessionCore::write_project(const ProjectDocument &project, Diagnostic &error) {
 	if (!save_project_document(paths_.project_file, project, error)) return false;
 	view_.project.document = std::make_shared<const ProjectDocument>(project);
+	read_recent_details(view_.project.document.get(), paths_.root); // a key put or taken out shows at once
 	touch(ViewConcern::Project);
 	return true;
 }
@@ -999,7 +1004,7 @@ void SessionCore::create_missing(const std::vector<std::string> &roles) {
 	}
 	now.update(paths_, doc, result.created);
 	view_.project.scan = std::make_shared<const AssetScan>(std::move(now));
-	problems().set_scan(paths_.root, *view_.project.scan, doc.target_game);
+	problems().set_scan(paths_.root, *view_.project.scan);
 	view_.project.requirements = std::make_shared<const RequirementReport>(requirements_of(doc, *view_.project.scan));
 	touch(ViewConcern::Files);
 	problems().show_requirements(); // the rows they lead with, at once
@@ -1019,6 +1024,10 @@ void SessionCore::create_missing(const std::vector<std::string> &roles) {
 void SessionCore::forget_recent(const std::string &root) {
 	preferences_.forget_recent_project(root);
 	save_preferences();
+}
+
+void SessionCore::remember_working_copy(const std::string &root) {
+	if (preferences_.remember_working_copy(ProjectPaths::for_root(root).root)) save_preferences();
 }
 
 void SessionCore::check_install(const std::string &path) {
@@ -1085,29 +1094,32 @@ void SessionCore::read_recent_details(const ProjectDocument *open, const std::st
 		recent.novaworld = doc.novaworld;
 		return recent;
 	};
-	std::vector<ProjectView::RecentProject> details;
-	for (const std::string &root : view_.project.recent_projects) {
-		if (open && root == open_root) {
-			details.push_back(worded(root, *open));
-			continue;
-		}
-		const auto known = std::find_if(view_.project.recent_details.begin(), view_.project.recent_details.end(),
-		                                [&root](const ProjectView::RecentProject &each) { return each.root == root; });
-		if (known != view_.project.recent_details.end()) {
-			details.push_back(*known);
-			continue;
-		}
+	std::vector<ProjectView::RecentProject> known = view_.project.recent_details;
+	known.insert(known.end(), view_.project.working_copies.begin(), view_.project.working_copies.end());
+	const auto details_of = [&](const std::string &root) {
+		if (open && root == open_root) return worded(root, *open);
+		const auto held = std::find_if(known.begin(), known.end(),
+		                               [&root](const ProjectView::RecentProject &each) { return each.root == root; });
+		if (held != known.end()) return *held;
 		ProjectDocument doc;
 		Diagnostic error;
-		if (::opennova::editor::open_project(root, doc, error)) {
-			details.push_back(worded(root, doc));
-		} else {
-			ProjectView::RecentProject recent;
-			recent.root = root;
-			details.push_back(std::move(recent));
-		}
-	}
+		if (::opennova::editor::open_project(root, doc, error)) return worded(root, doc);
+		ProjectView::RecentProject recent;
+		recent.root = root;
+		return recent;
+	};
+	std::vector<ProjectView::RecentProject> details;
+	for (const std::string &root : view_.project.recent_projects) details.push_back(details_of(root));
+	// A recent project on NovaWorld is known from now on, whatever becomes of the recent list.
+	bool noted = false;
+	for (const ProjectView::RecentProject &recent : details)
+		if (recent.found && !recent.novaworld.empty()) noted = preferences_.know_working_copy(recent.root) || noted;
+	std::vector<ProjectView::RecentProject> copies;
+	for (const std::string &root : preferences_.values().working_copies) copies.push_back(details_of(root));
 	view_.project.recent_details = std::move(details);
+	view_.project.working_copies = std::move(copies);
+	Diagnostic unsaved;
+	if (noted && !preferences_.save(unsaved)) report(unsaved);
 }
 
 void SessionCore::refuse_project(const Diagnostic &why, const std::string &what) {
@@ -1569,7 +1581,7 @@ OperationOutcome SessionCore::absorb_base_export(BaseExportOperation &exported) 
 	hold_for_base();
 	const BuildAfterBase &after = exported.after();
 	if (exported.ok() && after.wanted) start_build(after.play, after.out_dir, after.rehash, after.exported, after.panel, true,
-				after.gate_tag_file, after.version_file);
+				after.gate_tag_file, after.version_file, after.release);
 	// A game you own's expansion made as its base was exported goes on to import its own files (the export done
 	// or failed: they come from the game install).
 	start_stock_import();
@@ -1694,7 +1706,6 @@ BuildTarget SessionCore::build_target() const {
 	target.expansion = view_.project.document->expansion.name;
 	target.install = base_game();
 	target.base_project = view_.project.document->expansion.base_project;
-	target.game = view_.project.document->target_game;
 	// A project on NovaWorld's lobby file as the view holds it (found once as it is cached: NovaWorldView::
 	// gate_tag_file), never read here, which every findings pass asks.
 	// An expansion's version.txt likewise (NovaWorldView::version_file; "" while nothing is published).
@@ -1729,7 +1740,7 @@ ShippedFiles SessionCore::shipped_files(const std::vector<Diagnostic> &gate) {
 
 void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash,
                               const ExportIntent &exported, bool panel, bool base_checked,
-		const std::string &gate_tag_file, const std::string &version_file) {
+		const std::string &gate_tag_file, const std::string &version_file, bool release) {
 	if (intent.wanted && play().refused(intent)) return;
 	if (exported.wanted && export_folder(exported.to).empty()) return;
 	// The lobby file the build ships found again as it starts: the cache as it is now on disk.
@@ -1739,6 +1750,8 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 		target.gate_tag_file = gate_tag_file;
 	if (!version_file.empty())
 		target.version_file = version_file;
+	// A release's export (the service's build worker): a name its command file cannot carry refuses it.
+	target.release = release;
 	if (!view_.project.document->novaworld.empty() && target.gate_tag_file.empty()) {
 		novaworld().refresh_lobby();
 		refuse_now(CoreFinding::BuildRead,
@@ -1758,6 +1771,7 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 		after.panel = panel;
 		after.gate_tag_file = gate_tag_file;
 		after.version_file = version_file;
+		after.release = release;
 		if (check_base_export(after)) {
 			outcome_.operation = operations_.status().id;
 			build_reports_ = panel;

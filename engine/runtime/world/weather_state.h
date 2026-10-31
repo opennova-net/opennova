@@ -43,6 +43,17 @@ struct WeatherSeed {
     int32_t wind_scale = 256;                // g_EnvWindScale @ 0x26c68c0 (Environment_InitDefaults @ 0x57c1d1)
 };
 
+// The mission clock as a host's map change keeps it for the next mission: the 8.24 time and its
+// per-tick advance, read off the old mission at its teardown (the session's time-of-day
+// continuity, inmatch/map_change.h HostMapChange::kept_clock).
+// [orig: Game_TeardownMission @0x522350 - Environment_GetCurrentTime's g_EnvCurTimeFixed24 into
+//  dword_24D5A04 @0x522539, Environment_GetTodRate's g_EnvTodAdvancePerTick into dword_24D5A08
+//  @0x522543]
+struct TodClock {
+    uint32_t tod_fixed24 = 0;
+    uint32_t tod_advance_per_tick = 0;
+};
+
 // One decoded S2C 0x0A phase-2 ENV sub-block in WIRE units (the client
 // writes these into the TARGET globals; the local currents keep chasing)
 // [orig: NapiNPClientMsg_0x00A case 2 @ 0x430244..0x43034c].
@@ -161,7 +172,12 @@ struct WeatherState {
     // g_EnvTodAdvancePerTick @ 0x26c644c, g_EnvTodEpochTickdown @ 0x26c6064,
     // g_EnvTodEpoch @ 0x26c6450].
     static constexpr uint32_t kTodDayFixed24 = 24u << 24;
+    // The minute counter's reload when the tick runs it out
+    // [orig: Environment_UpdateWeatherTick @0x57E9D4..0x57E9E3]; a clock set leaves it at
+    // kClockSetTickdown instead, the mission start's among them
+    // [orig: Environment_SetCurrentTime @0x57C4B0 - @0x57C4B9].
     static constexpr int32_t kTodEpochTicks = 310;
+    static constexpr int32_t kClockSetTickdown = 10;
     // The 62 ticks-per-second scale every WAC seconds argument multiplies by
     // [orig: WacCmd_Rain @ 0x4edf60 `imul 62`; WacCmd_ColorFade @ 0x4edcb0].
     static constexpr int32_t kWacTicksPerSecond = 62;
@@ -173,7 +189,9 @@ struct WeatherState {
     // its emptying and the environment cube its six-face refresh; the render devices answer a
     // change of the count. A count, so a device that reads it once a frame misses no step.
     uint32_t time_set_resets = 0;
-    // Script lvalue, preserved until a keyframed TOD computation writes 0/1.
+    // Script lvalue, preserved until a keyframed TOD computation writes 0/1, across missions too:
+    // no mission start writes it (seed leaves it; MissionKernel::carry_across_load_from hands it
+    // to the next World).
     // [orig: WacCmd_Set @ 0x4ED520; Environment_ComputeTimeOfDayColors @ 0x57DE40]
     int32_t night_phase = 0; // g_EnvIsNightPhase @ 0x26C645C
     bool tod_keyframed = false;

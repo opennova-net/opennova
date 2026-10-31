@@ -16,6 +16,7 @@
 #include <runtime/hud/hud_frame.h>
 
 #include <array>
+#include <string>
 #include <vector>
 
 namespace opennova::world {
@@ -83,6 +84,29 @@ void fill_vehicle_panel_seats(const World &world, EntityHandle root,
                               std::vector<hud::HudVehicleSeat> &out,
                               const VehicleOccupancySource *source = nullptr);
 
+
+// DFX2-82, dfx2.exe's rider lines under the panel: one rider the line names. The driver is
+// the control seat's (slot 8) resolved occupant; a gunner each gun child's UseGun occupant in
+// the slot list's order, once for every gun-slot byte of the root's definition that holds the
+// child's bone (its own slot's userpoint), with its gun's slot-0 weapon's attachtextid (the
+// gun's slot, or the root's under the route bit; none without a weapon or a key).
+// [orig: HUD_DrawVehicleHealthBars @0x5A3DF0 - the driver @0x5A44BE..0x5A4530 (its def @0x5A4525);
+//  the gun walk @0x5A41C0..0x5A4222, the slot-byte compare @0x5A424C, the occupant's def @0x5A427F,
+//  the two picks @0x5A4289..0x5A429D; Entity_GetWeaponSlots(gunner+0x16C) +0x20, +0x3A0
+//  @0x5A476C..0x5A478E (dfx2.exe); Entity_GetWeaponSlots @0x543350 - the route bit
+//  @0x543378..0x543383 (dfx2.exe); Entity_AttachToUseGunSlot @0x546B80 - gunner+0x16C = the gun
+//  @0x546C67]
+struct VehiclePanelRider {
+    EntityHandle rider;
+    bool gunner = false;
+    bool has_weapon = false;
+    std::string weapon_key; // the attachtextid (an Overlays key)
+};
+// Every rider in draw order: the driver, then each gunner match (the HUD names the first two
+// whose definition resolves). Empty when `root` is no panel vehicle.
+void vehicle_panel_riders(const World &world, EntityHandle root,
+                          const VehicleOccupancySource *source,
+                          std::vector<VehiclePanelRider> &out);
 
 // The vehicle the local player rides, re-rooted from an attached gun child to
 // its parent (vehicle_panel_root): shown + the root's items.def id the shell

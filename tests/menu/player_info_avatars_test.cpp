@@ -1,4 +1,5 @@
 #include <base/crt/crt_rng.h>
+#include <base/title/title.h>
 #include <runtime/menu/player_info_avatars.h>
 #include <runtime/menu/menu_runtime.h>
 
@@ -62,6 +63,14 @@ const hud::GameTextLookup gameui = [](const char *section, const char *key, cons
 	if (k == "CHARVOICE_1") return std::string("UI one");
 	return std::string(fallback);
 };
+// Jointops.exe's screen (a default Title's knobs) and dfx2.exe's.
+const Title kJo{};
+const Title kDfx2 = [] {
+	Title t;
+	t.player_info_combo_names = false;
+	t.player_info_combo_spins = true;
+	return t;
+}();
 const hud::GameTextLookup menutxt = [](const char *section, const char *key, const char *fallback) {
 	return std::string(section) == "Menu" && std::string(key) == "CHARVOICE_1"
 			? std::string("Menu one") : std::string(fallback);
@@ -74,7 +83,7 @@ void test_cascade_and_voice() {
 	PlayerInfoAvatars state;
 	int events = 0;
 	menu.set_sink([&](const MenuEvent &event) { if (event.kind == MenuEvent::Kind::ValueChanged) ++events; });
-	CHECK(state.update(menu, data.file, Change::Team, 0, 0, 8, gameui, menutxt) == 0);
+	CHECK(state.update(menu, data.file, Change::Team, 0, 0, 8, gameui, menutxt, kJo) == 0);
 	CHECK(state.nationalities == (std::vector<int32_t>{1, 2}));
 	CHECK(state.nationality == 1 && state.division == 0 && state.preview_changed);
 	CHECK(menu.get_widget_items(menu.widget_id("NATIONALITY")) == (std::vector<std::string>{"Good", "N_EMPTY"}));
@@ -87,17 +96,17 @@ void test_cascade_and_voice() {
 	CHECK(state.voice_preview_trigger(menu, data.file, 0) == "VOICE_4");
 	CHECK(state.voice_preview_trigger(menu, data.file, 99) == "VOICE_99");
 	menu.select_row(combo, 1, false);
-	CHECK(state.update(menu, data.file, Change::Combo, 0, 0, 8, gameui, menutxt) == 8);
+	CHECK(state.update(menu, data.file, Change::Combo, 0, 0, 8, gameui, menutxt, kJo) == 8);
 	CHECK(state.voices == (std::vector<int32_t>{0, 7, 8, 11}));
 	CHECK(menu.selected_row(voice) == 2 && state.preview_changed);
 	CHECK(state.voice_preview_trigger(menu, data.file, 0) == "VOICE_8");
-	CHECK(state.update(menu, data.file, Change::Voice, 1, 0, 8, gameui, menutxt) == 7);
+	CHECK(state.update(menu, data.file, Change::Voice, 1, 0, 8, gameui, menutxt, kJo) == 7);
 	CHECK(!state.preview_changed && menu.selected_row(voice) == 2); // handler stores only; no refill/reselect
-	CHECK(state.update(menu, data.file, Change::Voice, 9, 0, 8, gameui, menutxt) == 0);
-	CHECK(state.update(menu, data.file, Change::Division, 1, 0, 7, gameui, menutxt) == 7);
+	CHECK(state.update(menu, data.file, Change::Voice, 9, 0, 8, gameui, menutxt, kJo) == 0);
+	CHECK(state.update(menu, data.file, Change::Division, 1, 0, 7, gameui, menutxt, kJo) == 7);
 	CHECK(menu.item_count(combo) == 1 && menu.selected_row(combo) == 0);
 	CHECK(state.selected_combo(menu, data.file) == data.combos + 1);
-	CHECK(state.update(menu, data.file, Change::Nationality, 0, 0, 7, gameui, menutxt) == 0);
+	CHECK(state.update(menu, data.file, Change::Nationality, 0, 0, 7, gameui, menutxt, kJo) == 0);
 	CHECK(state.division == 0 && menu.item_count(combo) == 2); // nationality resets division
 	menu.select_row(combo, -1, false);
 	CHECK(state.selected_combo(menu, data.file) == data.combos);
@@ -114,34 +123,102 @@ void test_missing_stages_and_invalid_selections() {
 	const auto no_nat = document({"DIVISION", "COMBO_LIST", "PLAYERVOICE"});
 	MenuRuntime menu; menu.open_document(&complete, "player.mnu", "PLAYER_INFO");
 	PlayerInfoAvatars state;
-	state.update(menu, data.file, Change::Team, 0, 0, 3, gameui, menutxt);
-	CHECK(state.update(menu, data.file, Change::Nationality, 1, 0, 3, gameui, menutxt) == 3);
+	state.update(menu, data.file, Change::Team, 0, 0, 3, gameui, menutxt, kJo);
+	CHECK(state.update(menu, data.file, Change::Nationality, 1, 0, 3, gameui, menutxt, kJo) == 3);
 	CHECK(state.nationality == 2 && state.division == -1 && state.preview_changed);
 	CHECK(menu.item_count(menu.widget_id("COMBO_LIST")) == 0);
 	CHECK(state.voice_preview_trigger(menu, data.file, 0).empty());
-	state.update(menu, data.file, Change::Nationality, 99, 0, 3, gameui, menutxt);
+	state.update(menu, data.file, Change::Nationality, 99, 0, 3, gameui, menutxt, kJo);
 	CHECK(state.nationality == -1 && state.division == -1);
-	state.update(menu, data.file, Change::Team, 0, -2, 3, gameui, menutxt);
+	state.update(menu, data.file, Change::Team, 0, -2, 3, gameui, menutxt, kJo);
 	CHECK(state.nationalities == (std::vector<int32_t>{0})); // nonzero team, not just team == 1
-	state.update(menu, data.file, Change::Team, 0, 0, 3, gameui, menutxt);
-	state.update(menu, data.file, Change::Division, 999, 0, 3, gameui, menutxt);
+	state.update(menu, data.file, Change::Team, 0, 0, 3, gameui, menutxt, kJo);
+	state.update(menu, data.file, Change::Division, 999, 0, 3, gameui, menutxt, kJo);
 	CHECK(state.division == 999 && state.selected_combo(menu, data.file) == nullptr);
+	// A list the screen lacks leaves the record's byte, and the next stage fills from it
+	// [orig: PlayerInfo_PopulateAllControls @0x560802 / @0x560865; @0x55eab2 / @0x55eb15 (dfx2.exe)]:
+	// no nationality list, the record's nationality's divisions (the list's first row picked).
 	menu.open_document(&no_nat, "partial.mnu", "PLAYER_INFO");
-	CHECK(state.update(menu, data.file, Change::Team, 0, 1, 7, gameui, menutxt) == 7);
-	CHECK(state.nationalities == (std::vector<int32_t>{1, 2}) && !state.preview_changed);
+	state.seed_record(1, 1);
+	CHECK(state.update(menu, data.file, Change::Team, 0, 1, 7, gameui, menutxt, kJo) == 0);
+	CHECK(state.nationalities.empty() && state.nationality == 1 && state.division == 0);
+	CHECK(menu.get_widget_items(menu.widget_id("DIVISION")) == (std::vector<std::string>{"D_ZERO", "D_ONE"}));
+	CHECK(menu.item_count(menu.widget_id("COMBO_LIST")) == 2 && state.preview_changed);
+	// No division list: the record's division's combos (a female head: her voices keep 7).
 	menu.open_document(&no_div, "partial.mnu", "PLAYER_INFO");
-	CHECK(state.update(menu, data.file, Change::Team, 0, 1, 7, gameui, menutxt) == 7);
-	CHECK(state.nationality == 0 && state.division == 999 && !state.preview_changed);
+	state.seed_record(-1, 1);
+	CHECK(state.update(menu, data.file, Change::Team, 0, 0, 7, gameui, menutxt, kJo) == 7);
+	CHECK(state.nationality == 1 && state.division == 1 && state.preview_changed);
+	CHECK(menu.get_widget_items(menu.widget_id("COMBO_LIST")) == (std::vector<std::string>{"HEAD_F - BODY_F"}));
+	state.seed_record(-1, 999);
+	CHECK(state.update(menu, data.file, Change::Team, 0, 1, 7, gameui, menutxt, kJo) == 0);
+	CHECK(state.nationality == 0 && state.division == 999 && state.preview_changed);
+	CHECK(menu.item_count(menu.widget_id("COMBO_LIST")) == 0);
 	menu.open_document(&no_combo, "partial.mnu", "PLAYER_INFO");
-	CHECK(state.update(menu, data.file, Change::Team, 0, 0, 7, gameui, menutxt) == 7);
+	CHECK(state.update(menu, data.file, Change::Team, 0, 0, 7, gameui, menutxt, kJo) == 7);
 	CHECK(state.division == 0 && !state.preview_changed);
 	menu.open_document(&no_voice, "partial.mnu", "PLAYER_INFO");
-	CHECK(state.update(menu, data.file, Change::Team, 0, 0, 7, gameui, menutxt) == 7);
+	CHECK(state.update(menu, data.file, Change::Team, 0, 0, 7, gameui, menutxt, kJo) == 7);
 	CHECK(state.preview_changed); // absent voice control retains the saved override
 	menu.open_document(&complete, "player.mnu", "PLAYER_INFO");
-	CHECK(state.update(menu, {}, Change::Team, 0, 0, 7, gameui, menutxt) == 0);
+	CHECK(state.update(menu, {}, Change::Team, 0, 0, 7, gameui, menutxt, kJo) == 0);
 	CHECK(state.nationality == -1 && state.division == -1 && state.preview_changed);
 	CHECK(menu.item_count(menu.widget_id("NATIONALITY")) == 0);
+}
+
+// dfx2.exe's PLAYER_INFO: a COMBO_LIST spin list and neither NATIONALITY nor DIVISION. The
+// combos are the record's nationality and division's [orig: PlayerInfo_PopulateAllControls
+// @0x55e9a0 - PlayerInfo_PopulateAvatarComboList @0x55eb15 (dfx2.exe)].
+void test_record_fills_a_lone_combo_spin_list() {
+	Avatars data;
+	mnu::Document doc = document({"COMBO_LIST"});
+	doc.screens[0].roots[0].children[0].type = mnu::WindowType::SpinList;
+	MenuRuntime menu; menu.open_document(&doc, "player.mnu", "PLAYER_INFO");
+	PlayerInfoAvatars state;
+	state.seed_record(1, 0);
+	state.update(menu, data.file, Change::Team, 0, 0, 0, gameui, menutxt, kJo);
+	const int combo = menu.widget_id("COMBO_LIST");
+	CHECK(state.nationalities.empty() && state.nationality == 1 && state.division == 0);
+	CHECK(menu.get_widget_items(combo) == (std::vector<std::string>{"Head - Body", "HEAD_F - BODY_F"}));
+	CHECK(menu.selected_row(combo) == 0 && state.preview_changed);
+	menu.select_row(combo, 1, false);
+	CHECK(state.selected_combo(menu, data.file) == data.combos + 1);
+	state.seed_record(1, 1);
+	state.update(menu, data.file, Change::Team, 0, 0, 0, gameui, menutxt, kJo);
+	CHECK(menu.get_widget_items(combo) == (std::vector<std::string>{"HEAD_F - BODY_F"}));
+	// dfx2.exe's rows carry no text, its sprintf formatting the empty string; a row per combo all
+	// the same [orig: PlayerInfo_PopulateAvatarComboList @0x55e4d0 - the format @0x55e5b7, sprintf
+	// @0x55e5bd, CSpinListWnd_InsertItem @0x55e5d6 (dfx2.exe)].
+	state.seed_record(1, 0);
+	state.update(menu, data.file, Change::Team, 0, 0, 0, gameui, menutxt, kDfx2);
+	CHECK(menu.get_widget_items(combo) == (std::vector<std::string>{"", ""}));
+	menu.select_row(combo, 1, false);
+	CHECK(state.selected_combo(menu, data.file) == data.combos + 1);
+	// No record seeded: nothing to list.
+	PlayerInfoAvatars fresh;
+	fresh.update(menu, data.file, Change::Team, 0, 0, 0, gameui, menutxt, kJo);
+	CHECK(menu.item_count(combo) == 0 && fresh.selected_combo(menu, data.file) == nullptr);
+}
+// The COMBO_LIST callback hears its own control's value change: a combo box's select under
+// Jointops.exe, a spin list's step under dfx2.exe [orig: PlayerInfo_RegisterAllControls
+// @0x561597 (0x220); PlayerInfo_RegisterAllControls @0x55f847 (0x40) (dfx2.exe)], as the runtime
+// names each.
+void test_combo_list_event() {
+	CHECK(std::string(player_info_combo_list_event(kJo)) == "combo");
+	CHECK(std::string(player_info_combo_list_event(kDfx2)) == "spinlist");
+	Avatars data;
+	mnu::Document doc = document({"COMBO_LIST"});
+	doc.screens[0].roots[0].children[0].type = mnu::WindowType::SpinList;
+	MenuRuntime menu; menu.open_document(&doc, "player.mnu", "PLAYER_INFO");
+	std::vector<std::string> kinds;
+	menu.set_sink([&](const MenuEvent &event) {
+		if (event.kind == MenuEvent::Kind::ValueChanged) kinds.push_back(event.text2);
+	});
+	PlayerInfoAvatars state;
+	state.seed_record(1, 0);
+	state.update(menu, data.file, Change::Team, 0, 0, 0, gameui, menutxt, kDfx2);
+	menu.spin_cycle(menu.widget_id("COMBO_LIST"), 1);
+	CHECK(kinds == (std::vector<std::string>{player_info_combo_list_event(kDfx2)}));
 }
 // The preview's initial facing: the reseed, then rand() % 180 whole degrees at
 // 0xB60B60 BAM a degree, the draw stepping the CRT stream once
@@ -188,6 +265,8 @@ void test_preview_motion_steps_per_update() {
 int main() {
 	test_cascade_and_voice();
 	test_missing_stages_and_invalid_selections();
+	test_record_fills_a_lone_combo_spin_list();
+	test_combo_list_event();
 	test_preview_initial_yaw();
 	test_preview_motion_steps_per_update();
 	std::cout << "player_info_avatars: " << failures << " failures\n";

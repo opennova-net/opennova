@@ -1,14 +1,13 @@
 // opennova-extract: write named entries out of a mounted game root.
 //
-//   opennova-extract --game <dir> [/exp <name>] [/game <code>] [/d]
-//                    --out <dir> <name>...
+//   opennova-extract --game <dir> [/exp <name>] [/d] --out <dir> <name>...
 //
 // The root mounts exactly as a launch with those flags mounts it (mount_install,
 // the flags read by the runtime's own parser): the retail .pff table with the
 // optional expansion layered on top, `/d` selecting the loose-override policy
-// (retail's /d), `/game <code>` the title's SCR policy. Each named entry is
-// resolved through that mount — so the bytes written are the EFFECTIVE bytes the
-// runtime serves (base + expansion override), decoded as its loader is served them
+// (retail's /d). Each named entry is resolved through that mount — so the bytes
+// written are the EFFECTIVE bytes the runtime serves (base + expansion override),
+// decoded as its loader is served them
 // (vfs_read_served: a shader as stored, its loader unwrapping its own SCR form)
 // — and written to <out>/<basename>.
 // Exit 0 when every entry was written, 1 when any entry was missing, 2 on a usage,
@@ -34,10 +33,9 @@ namespace {
 int usage(const char *why) {
 	if (why != nullptr) std::fprintf(stderr, "opennova-extract: %s\n", why);
 	std::fprintf(stderr,
-			"usage: opennova-extract --game <dir> [/exp <name>] [/game <code>] [/d] --out <dir> <name>...\n"
+			"usage: opennova-extract --game <dir> [/exp <name>] [/d] --out <dir> <name>...\n"
 			"  --game <dir>   the retail install to mount (its .pff set, as the runtime does)\n"
 			"  /exp <name>    the expansion to layer on top (e.g. revx02)\n"
-			"  /game <code>   the title code selecting the SCR policy (default: version-detect)\n"
 			"  /d             loose files override archive entries (retail's /d)\n"
 			"  --out <dir>    where each entry is written, as <out>/<basename>\n"
 			"  <name>...      the entries to extract (e.g. weapon.def M82_1st.adm joAmmoHit.ptl)\n");
@@ -66,12 +64,12 @@ std::string basename_of(const std::string &name) {
 } // namespace
 
 int main(int argc, char **argv) {
-	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
+	opennova::games::install(); // every game's titles and protocols (games/games.h)
 	using opennova::strutil::iequals;
 	const std::vector<std::string> args(argv + 1, argv + argc);
 	std::string game_dir, out_dir;
 	std::vector<std::string> names;
-	// /d, /exp and /game are the runtime's launch flags: the walk gathers them, with
+	// /d and /exp are the runtime's launch flags: the walk gathers them, with
 	// their values, apart from this tool's own options and their values, and the
 	// runtime's parser reads them.
 	std::vector<std::string> launch;
@@ -94,8 +92,6 @@ int main(int argc, char **argv) {
 			if (!value(game_dir)) return usage("--game needs a directory");
 		} else if (iequals(arg, opennova::kLaunchFlagExpansion)) {
 			if (!launch_value()) return usage("/exp needs a name");
-		} else if (iequals(arg, opennova::kLaunchFlagGame)) {
-			if (!launch_value()) return usage("/game needs a code");
 		} else if (iequals(arg, opennova::kLaunchFlagLooseOverride)) {
 			launch.push_back(arg);
 		} else if (arg == "--out") {

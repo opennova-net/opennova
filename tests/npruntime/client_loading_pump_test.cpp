@@ -2226,6 +2226,36 @@ bool run_the_roster_outlives_a_reload() {
 			"roster: the next mission's list joins slot 0 and drops only the unbound slot 1");
 }
 
+// The S2C 0x80 / 0x82 score tracker across a map change's reload: its words are the session's,
+// which no mission start clears, and its entries the process's, which only the 0x82 writes, so
+// the reload keeps both and the process store holds the entries.
+// [orig: Client_ResetGameSessionState @0x42C9F0 - +0..+0x18 @0x42CA12..0x42CA36, called from
+//  Game_InitSubsystems @0x4A6D7B and CNapiGameSession_FullDestroy @0x4C9785;
+//  CineTracker_RecordTimeEntry @0x422410]
+bool run_the_score_tracker_outlives_a_reload() {
+	Harness h;
+	inmatch::ClientProcessState process;
+	h.client.use_process_state(&process);
+	if (!expect(drive_into_the_world_stream(h, 0), "tracker: the world stream runs"))
+		return false;
+	(void)h.frame({make_protocol_message(0x80, {0x07, 0x00, 0x00, 0x00}),
+			make_protocol_message(0x82, {0x64, 0x00, 0x00, 0x00})});
+	if (!expect(h.client.state().score_tracker.valid && h.client.state().score_tracker.time == 100 &&
+	                    process.score_tracker_entries.size() == 1,
+			"tracker: the 0x82 records node 7's entry in the process store"))
+		return false;
+	(void)h.frame({make_protocol_message(0x1A, {})});
+	std::vector<uint8_t> world_state(23, 0);
+	(void)h.frame({make_protocol_message(0x0F, world_state)});
+	(void)h.frame();
+	if (!expect(h.client.begin_mission_reload(), "tracker: the reload begins")) return false;
+	const replication::ClientScoreTracker &t = h.client.state().score_tracker;
+	return expect(t.valid && t.node == 7 && t.start == 100 && t.time == 100 &&
+	                      process.score_tracker_entries.size() == 1 &&
+	                      h.client.view().score_tracker_entries().size() == 1,
+			"tracker: the reload keeps the words and the process's entries");
+}
+
 // The joiner net readout (inmatch/joiner_net_trace.h, an instrument with no behaviour): one
 // record per client net frame run to its end. Each holds the send countdown ahead of the
 // frame's step, whether the block opened and the 0x0C left in it, the dictated period, the
@@ -2376,6 +2406,7 @@ int main() {
 	ok = run_the_net_frame_counter_steps_in_the_verification_wait() && ok;
 	ok = run_the_join_screen_follows_the_admission() && ok;
 	ok = run_the_roster_outlives_a_reload() && ok;
+	ok = run_the_score_tracker_outlives_a_reload() && ok;
 	if (ok) std::printf("client_loading_pump_test: OK\n");
 	return ok ? 0 : 1;
 }

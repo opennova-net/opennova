@@ -774,6 +774,10 @@ bool decoded_world_stream_materializes_exact_rows() {
 	vehicle.bone_byte = 0x7A;
 	vehicle.alert_byte = 0x17;
 	vehicle.action_byte = 0x33;
+	// The host brain's latch byte, which lands sign-extended at entity+0xB0
+	// [orig: NapiNPClientMsg_0x00D @0x4331B7..0x4331BA].
+	vehicle.has_sound_latch_byte = true;
+	vehicle.sound_latch_byte = 0x83;
 	vehicle.has_zone_number_rank = true;
 	vehicle.zone_number_rank = 0x22;
 	vehicle.zone_radius = 70;
@@ -847,6 +851,7 @@ bool decoded_world_stream_materializes_exact_rows() {
 			boat->flags == 0x01004020u && boat->engine_flags == 0x01004000u &&
 			boat->section_mask == 0x44u && boat->ammo_count == 0x7A &&
 			boat->ref_num == 0x17 && boat->sub_type == 0x33 &&
+			boat->veh.spawn_sound_latch == -125 &&
 			boat->zone_number == 2 && boat->zone_radius == 70 &&
 			std::fabs(boat->position.x - 2.0f) < 0.0001f &&
 			// The 0x0D record's Pitch / Roll dwords land raw (D-NET-923)
@@ -861,6 +866,10 @@ bool decoded_world_stream_materializes_exact_rows() {
 			"pool-1/pool-2 retail memset identity is normalized before materialization"))
 		return false;
 	const ns::ClientEntityState *boat_state = pipeline.state().find(0x1042);
+	if (!expect(boat_state->spawn_sound_latch == -125 &&
+				pipeline.state().find(0x2025)->spawn_sound_latch == 0,
+			"the 0x0D row keeps its latch byte sign-extended; a 0x10 row holds none"))
+		return false;
 	if (!expect(boat_state->spawn_mount_mask == 0x8Fu &&
 				boat_state->spawn_mount_handles[0] == 0x0001u &&
 				boat_state->spawn_mount_handles[1] == 0xFFFFu &&

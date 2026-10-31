@@ -53,10 +53,15 @@
             <dt class="text-ink-muted">{{ expansionName }}</dt>
             <dd>{{ versionText(server.data.expansion) }}</dd>
           </template>
+          <template v-if="server.build">
+            <dt class="text-ink-muted">Server build</dt>
+            <dd id="hosted-server-build"><BuildText :build="server.build" /></dd>
+          </template>
         </dl>
         <p v-if="server.update_requested"><Badge tone="info">Update requested</Badge></p>
         <p v-else-if="server.update_available" id="hosted-server-update" class="flex flex-wrap items-center gap-2 text-sm">
-          <Badge tone="info">{{ updateText }}</Badge>
+          <Badge v-if="contentUpdate" tone="info">{{ updateText }}</Badge>
+          <Badge v-if="buildUpdate" tone="info" class="hosted-server-build-update">{{ buildUpdateText }}</Badge>
           <button v-if="scope === 'owner' && server.live && server.state !== 'stopping'" type="button" class="btn-primary btn-sm" :disabled="busy" @click="update">
             {{ busy ? 'Updating…' : 'Update…' }}
           </button>
@@ -157,6 +162,7 @@
 // timeline. The live controls are the Console tab's; the stop is the page's.
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
+import BuildText from '../../components/BuildText.vue';
 import RelativeTime from '../../components/RelativeTime.vue';
 import Badge from '../../components/ui/Badge.vue';
 import LiveNotices from '../../components/ui/LiveNotices.vue';
@@ -178,6 +184,7 @@ import {
   stoppedBecauseText,
 } from '../../utils/hostedState';
 import { stripGameText } from '../../utils/gameText';
+import { buildUpdate as hasBuildUpdate, buildUpdateText as serverBuildUpdateText, contentUpdate as hasContentUpdate } from '../../utils/serverUpdate';
 
 const props = defineProps<{
   server: HostedServer;
@@ -253,6 +260,12 @@ const current = computed(() => {
   const versions = adminVersions.value;
   return versions ? { base: versions.get(productId ?? -1) ?? '', expansion: versions.get(expansionId ?? -1) ?? '' } : null;
 });
+
+// What the waiting update brings: newer data, a newer server build, or both
+// (utils/serverUpdate.ts).
+const contentUpdate = computed(() => hasContentUpdate(props.server));
+const buildUpdate = computed(() => hasBuildUpdate(props.server));
+const buildUpdateText = computed(() => serverBuildUpdateText(props.server));
 
 // "Joint Operations 1.0.9 available" (and the expansion's, when it is the
 // newer one); without the versions, "Update available".

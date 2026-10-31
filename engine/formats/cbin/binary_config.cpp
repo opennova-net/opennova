@@ -1,5 +1,5 @@
 // The CBIN form read and written exactly (binary_config.h): the layout the game's ConfigFile writer
-// lays out [orig: the writer @ 0x75e250: magic @ 0x75e311, the 20-byte header, the cipher loop
+// lays out [orig: the writer @ 0x75e170: magic @ 0x75e311, the 20-byte header, the cipher loop
 // @ 0x75e348], read here whatever the labels.
 #include <formats/cbin/binary_config.h>
 

@@ -223,7 +223,8 @@ import { keepInView } from '../../../utils/keepInView';
 import type { InfraCloudRead, InfraOverview, InfraService, InfraTask } from '../../../types/infra';
 import type { ProgramUsage, ProgramsResponse } from '../../../types/usage';
 import { SYSTEM_TABS } from '../../../utils/adminNav';
-import { countLabel, infraWarnings, listenerLabel, serviceState, targetLabel, targetTotals, taskStatusLabel, taskTotals } from '../../../utils/infraView';
+import { countLabel } from '../../../utils/format';
+import { infraWarnings, listenerLabel, serviceState, targetLabel, targetTotals, taskStatusLabel, taskTotals } from '../../../utils/infraView';
 import type { Tone } from '../../../utils/tone';
 
 const POLL_MS = 30_000;

@@ -2,6 +2,7 @@
 
 #include <formats/gamecfg/game_cfg.h>
 #include <formats/rtxt/rtxt.h>
+#include <net/admin/admin_protocol.h> // admin_log_redacted
 #include <runtime/hud/game_text_lookup.h> // kGameTextTable
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_config.h>   // host_screen_from_block (the joiner's applied settings)
@@ -60,9 +61,10 @@ uint16_t remote_admin_listen_port(const gamecfg::GameCfg &cfg) {
 
 std::string admin_log_file_text(std::string_view line) {
 	// [orig: CAdminServer_Construct @0x402C84, the text-mode fopen]
+	const std::string redacted = admin_log_redacted(line); // D-NET-1472
 	std::string text;
-	text.reserve(line.size() + 1);
-	for (const char c : line) {
+	text.reserve(redacted.size() + 1);
+	for (const char c : redacted) {
 		if (c == '\n') text += '\r';
 		text += c;
 	}

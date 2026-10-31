@@ -244,6 +244,20 @@ func test_runtime_portrait_hover_zooms_in_and_out() -> void:
 	assert_lt(_preview.zoom_blend(), 0.5, "un-hover relaxes the zoom blend toward 0")
 
 
+# DFX2-76: a portrait that never hovers (dfx2.exe's) spins at rest under the pointer and never
+# zooms (engine Title::player_info_preview_hover).
+func test_a_portrait_that_never_hovers_spins_under_the_pointer() -> void:
+	_preview.frame_menu_pose(_soldier_bounds())
+	_preview.hovers = false
+	_preview.set_hovered(true)
+	var before_angle: float = _preview.model_yaw()
+	for i in range(5):
+		_preview.advance(Simulation.tick_dt())
+	assert_almost_eq(wrapf(_preview.model_yaw() - before_angle, -PI, PI),
+			5 * 0x800000 * AvatarPreview.BAM_TO_RADIANS, 1e-4, "it spins as at rest")
+	assert_eq(_preview.zoom_blend(), 0.0, "and never zooms")
+
+
 # --- Skeletal idle (D-PLAYERINFO-1) -------------------------------------------
 # The composed parts share one skeletal idle (Dt1rst.bad rest + PI_Idle.BAD clip) when those
 # raw .bad assets resolve [orig: PlayerInfo_InitPreviewModel @ 0x5600d0]. Without them the

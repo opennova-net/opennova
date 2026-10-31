@@ -58,8 +58,8 @@ const opennova::inmatch::NapiNPServerCtx *Simulation::host_ctx() const {
 
 // What the role feeds (inmatch/role_feeds.h) read of the running role: the
 // kernel, the role's replica runtime, the authority's session context, the
-// joiner bit, the joiner's materializer, the staged host option word and the
-// session's frame-rate window.
+// joiner bit, the joiner's materializer and seat occupancy, the staged host option word
+// and the session's frame-rate window.
 opennova::inmatch::RoleView Simulation::role_view() const {
 	opennova::inmatch::RoleView view;
 	view.kernel = kernel_.get();
@@ -67,8 +67,10 @@ opennova::inmatch::RoleView Simulation::role_view() const {
 	view.host = host_ctx();
 	view.joiner = is_joiner();
 	view.materializer = joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr;
+	view.occupancy = is_joiner() ? joiner_role_ : nullptr;
 	view.staged_mp_attributes = net_.host_session_config.mp_attributes;
 	view.frame_rate = session_.frame_rate_stats();
+	view.title = &session_title(net_, assets_.root);
 	return view;
 }
 
@@ -84,6 +86,8 @@ void Simulation::apply_session_rules() {
 
 bool Simulation::adopt_role(std::unique_ptr<opennova::inmatch::Role> p_role,
 		opennova::inmatch::HostRole *p_host, opennova::inmatch::JoinerRole *p_joiner) {
+	// The session title's binding catalog: the dispatcher's head reads its rows' flags.
+	p_role->set_controls(opennova::controls::title_catalog(session_title(net_, assets_.root)));
 	const opennova::inmatch::TransitionResult out = session_.configure_role(*p_role);
 	if (out.code != opennova::inmatch::TransitionCode::Applied &&
 			out.code != opennova::inmatch::TransitionCode::NoOp) {
@@ -228,15 +232,15 @@ void Simulation::after_tick() {
 }
 
 bool Simulation::accept_tick(const opennova::inmatch::TickOutcome &p_tick) {
-	const bool profiling = runtime_profiling_enabled_;
-	last_net_tick_us_ = static_cast<uint64_t>(p_tick.net_us);
-	if (profiling) frame_sim_us_ += p_tick.tick_us;
+	const bool profiling = profiling_.runtime_profiling_enabled;
+	profiling_.last_net_tick_us = static_cast<uint64_t>(p_tick.net_us);
+	if (profiling) profiling_.frame_sim_us += p_tick.tick_us;
 	if (session_tick_sink_ == nullptr) return true;
 	const int64_t sink_start =
 			profiling ? Time::get_singleton()->get_ticks_usec() : 0;
 	const bool accepted = session_tick_sink_->on_session_tick(p_tick);
 	if (profiling)
-		frame_sink_us_ += Time::get_singleton()->get_ticks_usec() - sink_start;
+		profiling_.frame_sink_us += Time::get_singleton()->get_ticks_usec() - sink_start;
 	return accepted;
 }
 
@@ -246,8 +250,8 @@ bool Simulation::accept_tick(const opennova::inmatch::TickOutcome &p_tick) {
 opennova::inmatch::FrameInput Simulation::begin_session_frame(
 		const Ref<MissionFrameInput> &p_input) {
 	end_loaded_join_mission_start();
-	frame_sim_us_ = 0;
-	frame_sink_us_ = 0;
+	profiling_.frame_sim_us = 0;
+	profiling_.frame_sink_us = 0;
 	if (kernel_ != nullptr) kernel_->profile.reset();
 	opennova::inmatch::FrameInput input;
 	if (p_input.is_valid()) {
@@ -301,7 +305,7 @@ Ref<MissionFrameOutcome> Simulation::advance_session_frame(
 		const Ref<MissionFrameInput> &p_input) {
 	// The marshalling's two halves, timed for the board (fold_frame_phases): the typed input
 	// ahead of the session frame, the fold and the outcome after it.
-	const bool timing = runtime_profiling_enabled_ && frame_stats_.is_valid();
+	const bool timing = profiling_.runtime_profiling_enabled && profiling_.frame_stats.is_valid();
 	Time *time = timing ? Time::get_singleton() : nullptr;
 	const int64_t head_start = time != nullptr ? static_cast<int64_t>(time->get_ticks_usec()) : 0;
 	const opennova::inmatch::FrameInput input = begin_session_frame(p_input);

@@ -1233,6 +1233,33 @@ int main() {
 	// Retail forms the first writer refused: a percentage stored as a float, and the
 	// nameless region-0 timing that `particletesttime` authors.
 	failures += clean("items.def", "begin \"Hut\"\r\nid 101202\r\ntype building\r\ngraphic JHut1\r\nlight_transfer 35\r\nend\r\n");
+	// dfx2.exe's uiname lines, quoted in its catalog: the name at +0x40, a token past 15
+	// characters storing nothing [orig: ItemDef_ParseProperty @0x49eca4..0x49ecfc] [orig:
+	// @0x49ed14..0x49ed6c (dfx2.exe)].
+	failures += clean("items.def", "begin \"Heli\"\r\nuiname \"Ka-52\"\r\nend\r\n"
+	                               "begin \"Bird\"\r\nuiname \"Little Bird\"\r\nend\r\n");
+	{
+		const char *names = "begin \"Heli\"\r\nuiname \"Ka-52\"\r\nend\r\n"
+		                    "begin \"Long\"\r\nuiname SixteenCharsLong\r\nend\r\n";
+		DefItemsFile named{};
+		def_parse_items_memory(reinterpret_cast<const uint8_t *>(names), std::strlen(names), &named, nullptr);
+		if (named.count != 2 || std::strcmp(named.entries[0].ui_name, "Ka-52") != 0 ||
+		    named.entries[1].ui_name[0] != 0) {
+			std::printf("FAIL uiname parse\n");
+			++failures;
+		}
+		def_free_items(&named);
+		// The writer puts the name down from the model, unquoted where it holds no space.
+		const char *heli = "begin \"Heli\"\r\nuiname \"Ka-52\"\r\nend\r\n";
+		DefItemsFile one{};
+		def_parse_items_memory(reinterpret_cast<const uint8_t *>(heli), std::strlen(heli), &one, nullptr);
+		const DefWriteResult written = def_write_items(one);
+		if (!written.ok() || written.text.find("uiname Ka-52") == std::string::npos) {
+			std::printf("FAIL uiname write: %s\n", written.text.c_str());
+			++failures;
+		}
+		def_free_items(&one);
+	}
 	failures += clean("items.def", "begin \"Emit\"\r\nid 100059\r\ntype building\r\nai_function emit\r\n"
 	                               "particlefxw1 Effect_rocketAft FX00\r\nparticletesttime     90 0\r\nend\r\n");
 	// A number the game reads as another: a category past 0..11 and a rank past 0..64 as 0

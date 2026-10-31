@@ -53,7 +53,7 @@ using MissionMetadataBlob = std::array<uint8_t, 180>;
 // returned block for every chunk request. `mp_session_peer` is the host's
 // connection mode (false for a dedicated host, whose own slot +36 drops);
 // `protocol` the protocol the session speaks, whose rules-word bits the +44 word
-// takes (DFX2-18; null: JO's); `session_title` the mission start's session
+// takes (DFX2-18); `session_title` the mission start's session
 // title (NapiNPServerCtx::session_title), whose first 31 bytes +116 carries.
 // [orig: Client_BuildMissionDataRequestBlock (ex sub_51E880) @0x51E880 +
 // CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0 (g_SessionTitle into +0x74
@@ -99,14 +99,14 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 // for the owning connection; callers decide whether it is returned reactively
 // or staged on a transport.
 // `server_log` is the /PROFILE recorder (null = off), which marks the deploy;
-// `protocol` the protocol the session speaks (null: JO's), whose deploy writes its
-// own state byte (DFX2-11).
+// `protocol` the protocol the session speaks, whose deploy writes its own state
+// byte (DFX2-11).
 // [orig: Server_DeployPlayer deploy leg @0x517740, its handle argument
 //  tested @0x51786B]
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,
 		world::World &world, world::EntityHandle target_zone, uint16_t requested_handle,
-		ServerLogRecorder *server_log = nullptr, const Protocol *protocol = nullptr);
+		ServerLogRecorder *server_log, const Protocol *protocol);
 
 // Dispatch the decoded in-match gameplay `messages` for `conn` to their reply handlers and return the
 // reactive replies to frame onto the connection. Caches the joiner's pre-spawn C2S 0x0C pose into
@@ -183,11 +183,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 // arm, g_SessionTitle: the map file unless a [TITLE] override or a SetServerName
 // replaced it, inmatch::mission_session_title); every other mode the mission text's [info]/title (`mission_text_title`,
 // MissionText_GetString's, the override table searched first), or, when that
-// reads empty, the mission header's name (`header_name`, dword_A761D4: the
+// reads empty, the mission header's name (`header_name`, g_MissionHeaderName: the
 // session config's mission_name).
 // [orig: Game_SerializeMissionInfoToDataStream @0x523620 -- the coop arm
 //  @0x523758 (g_SessionTitle @0x52375A), TextResource_FindEntryBySectionAndKey(g_TextMission,
-//  "info", "title") @0x5237df, the strlen test and dword_A761D4 @0x5237f8..0x52380d]
+//  "info", "title") @0x5237df, the strlen test and g_MissionHeaderName @0x5237f8..0x52380d]
 std::string session_mission_name(uint32_t game_type, const std::string &session_title,
 		const std::string &mission_text_title, const std::string &header_name);
 

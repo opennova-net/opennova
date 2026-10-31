@@ -75,6 +75,7 @@ world::Entity seed_from(const ClientEntityState &row) {
 	seed.location_index = row.spawn_location_index;
 	seed.ref_num = row.spawn_ref_num;
 	seed.sub_type = row.spawn_sub_type;
+	seed.veh.spawn_sound_latch = row.spawn_sound_latch; // entity+0xB0
 	seed.owner_connection_id = row.spawn_owner_connection_id;
 	seed.player_class = row.spawn_player_class;
 	if (row.cls == EntityClass::Player || row.cls == EntityClass::Infantry) {

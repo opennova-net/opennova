@@ -546,11 +546,22 @@ struct DeathLightEvent {
     float radius = 0.0f;
 };
 
+// A row the draw's husk leg changed in a view collect (run_draw_husk_leg): its handle, its
+// husk bit and the six phases it now carries, so the embedder stamps the drawn model in the
+// same frame, as retail's draw publishes and then draws in one call [orig: Render_SectorEntity
+// @0x5C4190 - Entity_PublishSwapFadePhases @0x5C4200 ahead of the model's draw @0x5C4335].
+struct DrawFadeStamp {
+    uint16_t handle = EntityHandle::kInvalid;
+    bool husked = false;
+    std::array<int32_t, 6> phases_q16{};
+};
+
 struct DestructionEvents {
     std::vector<DestructionEffectEvent> effects;
     std::vector<DestructionSoundEvent> sounds;
     std::vector<HuskSwapEvent> husk_swaps;
     std::vector<DeathLightEvent> death_lights;
+    std::vector<DrawFadeStamp> draw_fades; // the view collects' (run_draw_husk_leg)
     // Diagnostic counters (probes assert the legs actually ran).
     int32_t explosions_processed = 0;
     int32_t items_destroyed = 0;
@@ -562,6 +573,7 @@ struct DestructionEvents {
         sounds.clear();
         husk_swaps.clear();
         death_lights.clear();
+        draw_fades.clear();
         debris_triangles = 0;
     }
 };
@@ -816,23 +828,42 @@ inline DestroyFadeClock destroy_fade_clock(int32_t since_death, int32_t delay) {
 inline int32_t destroy_fade_origin_tick(int32_t delay, int32_t husked_at) {
     return delay ? std::max(delay, husked_at) : 0;
 }
-// A row's swap fade on the entity walk's visit, every tick (a pool-1 row's own visit, the
-// pool-2/3 walks' fade list; a row Entity::needs_destroy_fade fails takes none): the draw's
-// own evaluation at the sim's cadence. An intact row zeroes its phases (and ends a pending
-// final husk); a husked one publishes them (publish_swap_fade_phases) and runs the swap
-// stage. The draw publishes the six CTRL slots only for a model its collect admits, under
-// Flags & 4 with a final husk held, before its sub-pixel reject; the present row carries the
-// phases and the presenter publishes them for each husked row it submits, every husked row
-// its own (a retained model reads only the slots written for it, D-3DI-2).
+// A drawn row's swap fade, the draw's own leg: each view's collect runs it for every row it
+// admits (inmatch::collect_view_verdicts, collect_building_verdicts, through
+// run_draw_husk_leg), so a row no view draws keeps its fade's clock, its delay and its husks
+// where they stand, as retail's do; the entity walks evaluate none. An intact row zeroes its
+// phases (and ends a pending final husk). A husked row holding its final husk (+0x38) runs
+// retail's publication (publish_swap_fade_phases: past the delay it spends it and restamps
+// the death tick) and the swap stage; retail publishes for no other row, so a husked row
+// holding none (none loaded, or promoted) spends nothing and restamps nothing (the death tick
+// the targeting window reads stands, Entity_ValidateWeaponTarget) and keeps the phases last
+// written for it (the upfx row's own tick publication, the last one before a promotion, or
+// zero when nothing was): retail's model there reads the process-wide bus's last value, and a
+// per-model array carries only what was written for that model (D-3DI-2). Returns whether the
+// row's phases, its husks or its swap events changed.
 // [orig: Render_SectorEntity @0x5C4190 - Flags & 4 @0x5C41F5, +0x38 @0x5C41F9,
-//  Entity_PublishSwapFadePhases @0x5C4200, the sub-pixel reject @0x5C42DE]
-void update_item_destroy_fade(World &world, Entity &entity);
+//  Entity_PublishSwapFadePhases @0x5C4200, the sub-pixel reject @0x5C42DE; its live callers
+//  Terrain_RenderSectorEntities @0x5C7B60 (@0x5C7D13), Terrain_RenderSectorModels @0x5C5D30
+//  (@0x5C603F) and the person walk Terrain_RenderSectorEntitiesBySide @0x5C7D50 (the head
+//  part @0x5C7FFC, the body part @0x5C8039, which the jmp @0x5C8020 reaches; from
+//  Terrain_RenderWorldScene @0x5C93A0 and Water_RenderReflectedWorldScene @0x5C8510); the
+//  other calls (@0x5C7C99 / @0x5C7CEA, @0x5C5F23 / @0x5C5FD1) sit behind
+//  RenderSlot_CollectReceiverSlots_Stub @0x5D7240, which returns 0]
+bool update_item_destroy_fade(World &world, Entity &entity);
+// The collects' call: update_item_destroy_fade, and a changed row's DrawFadeStamp onto
+// world.out.destruction.draw_fades for the embedder's same-frame stamp. The embedder takes the
+// output after each pass's collects, the main view's and the weapon Inset's alike, so each
+// pass draws what its own collect changed in the frame it ran, as each of retail's passes
+// publishes and then draws in one call [orig: Render_SectorEntity @0x5C4190 -
+// Entity_PublishSwapFadePhases @0x5C4200 ahead of the draw @0x5C4335; Render_WeaponInsetScene
+// @0x5C9740 - its Terrain_RenderWorldScene call @0x5C9DE9].
+void run_draw_husk_leg(World &world, Entity &entity);
 // The husk -> final-husk swap stage of a husked entity holding a final husk, after the
 // fade's publication: in the fade window it draws the final husk beside the husk, at
 // the window's end it promotes the final husk into the husk (the draw and the collision
 // both), by the destroy fade's share (husk_swap_at_sec 0) or by ticks. Only a peer that
-// draws its entities runs it (the render frame's own gate), at the sim's cadence, as the
-// fade's publication. [orig: Render_SectorEntity @0x5C4190 - the gate @0x5C41F5..0x5C41FD,
+// draws its entities runs it (the render frame's own gate), at the draw, after the fade's
+// publication. [orig: Render_SectorEntity @0x5C4190 - the gate @0x5C41F5..0x5C41FD,
 //  the share @0x5C4200, the share arms @0x5C420A..0x5C424B, the tick arms
 //  @0x5C428A..0x5C42D1, the pending draw @0x5C4232; GameLoop_RenderFrame @0x521310 (the
 //  session-peer test @0x52134E)]
@@ -907,8 +938,8 @@ void run_item_class_event(World &world, Entity &target, ItemDeathClass cls,
 
 // The pool-2/3 cohort walks: cb(entity, 0, 0) at slot&7 with positive-clock
 // -8 (pool 2), at slot&63 with -64 (pool 3), then the update callback; only the
-// cohort's slots are visited, plus every tick the registry's fade list's rows for
-// their swap fade (EntityRegistry::list_fade_row). Both peers run class callbacks;
+// cohort's slots are visited, and none runs the swap fade (the draw's,
+// update_item_destroy_fade). Both peers run class callbacks;
 // each callback owns its authority gates. Pool 1 is World::update_pool1_slot.
 // [orig: Entity_UpdateAllEntities @0x4C2100]
 void tick_item_event_pool(World &world, int pool);

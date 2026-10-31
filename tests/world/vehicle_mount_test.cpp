@@ -1350,15 +1350,41 @@ void test_best_seat_walks_vehicle_children() {
     CHECK(selected.seat_index == 1);
     CHECK(selected.type == SeatType::Controller);
 
-    // Child control seats are never eligible; command 123 also narrows the
-    // walk to passenger seats without changing root/child weighting.
+    // Child control seats are never eligible; the occupant's own command 123
+    // narrows the walk to passenger seats without changing root/child weighting
+    // [orig: Entity_FindBestSeatSlot @0x4351F0 - the AI slot's command +0x94
+    //  @0x4353C8..0x4353E6].
     w.registry.get(root_h)->seats[1].occupant = EntityHandle::make(0, 3);
+    AiEntity *brain = w.ai.at(w.ai.attach(player_h));
+    CHECK(brain != nullptr);
+    brain->slot.f[37] = kCommandAttachPassengerOnly;
     selected = {};
-    CHECK(find_best_vehicle_seat(
-            w, root_h, player_h, selected,
-            SeatSelectionMode::PassengerOnly));
+    CHECK(find_best_vehicle_seat(w, root_h, player_h, selected));
     CHECK(selected.vehicle == root_h);
     CHECK(selected.seat_index == 0);
+    // With the passenger seat taken too, command 123 finds no seat (the child's
+    // gun is no passenger seat), and so the board admission refuses the carrier:
+    // Entity_CanEnterVehicle's one search call passes the boarder [orig:
+    // Entity_CanEnterVehicle @0x435480 - the admitting arms' jumps to the call
+    // @0x4354FB]. Any other command takes the gun, and the admission with it.
+    w.registry.get(root_h)->seats[0].occupant = EntityHandle::make(0, 2);
+    w.registry.get(root_h)->graphic_model_userpoints = 1; // the admission's model gate
+    selected = {};
+    CHECK(!find_best_vehicle_seat(w, root_h, player_h, selected));
+    CHECK(!vehicle_can_enter(w, w.registry.get(player_h), *w.registry.get(root_h)));
+    brain->slot.f[37] = kCommandAttachAnySeat;
+    CHECK(vehicle_can_enter(w, w.registry.get(player_h), *w.registry.get(root_h)));
+    // Command 124 refuses the controller seat alone: with the root's controller
+    // free, its 0x2000 would win over the gun's 0x20000, and 124 leaves the gun.
+    w.registry.get(root_h)->seats[1].occupant = {};
+    brain->slot.f[37] = kCommandAttachSkipController;
+    selected = {};
+    CHECK(find_best_vehicle_seat(w, root_h, player_h, selected));
+    CHECK(selected.vehicle == child_h && selected.type == SeatType::Gunner);
+    brain->slot.f[37] = kCommandAttachAnySeat;
+    selected = {};
+    CHECK(find_best_vehicle_seat(w, root_h, player_h, selected));
+    CHECK(selected.vehicle == root_h && selected.type == SeatType::Controller);
 }
 
 // The root's proximity slice bounds the seat search; equal-weight child guns
@@ -4183,7 +4209,7 @@ struct HeloRig {
         ve->self->position.z.q16 = to_fixed(r.veh().position.z);
         r.veh().spawn_position = r.veh().position;
         r.veh().bound_radius = 6.0f;
-        if (rotor_full) rotor_spawn_full(r.veh().veh.part_spin);
+        if (rotor_full) rotor_spawn_full(r.veh().veh.part_spin, PartSpinRates{});
         Entity npc;
         npc.kind = EntityKind::Organic;
         npc.item_id = 2072;

@@ -1,7 +1,6 @@
 #include "document_base.h"
 
 #include <base/io/hash.h>
-#include <base/title/title.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/model/core_finding.h>
@@ -150,7 +149,7 @@ bool DocumentBase::decode_and_read(std::vector<uint8_t> bytes, bool adopt,
 	// A file whose loader takes the SCR form under its own key (a shader) is read by its type from
 	// the bytes as stored (base/vfs vfs_loader_takes_stored).
 	if (!opennova::vfs_loader_takes_stored(relative_path_) &&
-			!opennova::vfs_decode_payload(bytes, title_scr_policy_for_code(game_.c_str())))
+			!opennova::vfs_decode_payload(bytes))
 		return fail_with(error, relative_path_, CoreFinding::DocumentDecode, "The file could not be decoded.");
 	return read_source(bytes, adopt, issues, error);
 }

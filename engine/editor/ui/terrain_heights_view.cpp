@@ -2,11 +2,15 @@
 
 #include <cstdio>
 #include <string>
+#include <utility>
 
 #include <imgui.h>
 
 #include <editor/documents/terrain_heights_document.h>
 #include <editor/project/project_files.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/view/session_view.h>
+#include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 
 namespace opennova::editor {
@@ -22,7 +26,6 @@ std::string units(uint16_t raw) {
 class TerrainHeightsView final : public DocumentView {
 public:
 	void draw(Workspace &workspace, const DocumentBase &document) override {
-		(void)workspace;
 		// The heights hold no records: a reveal sent to them shows nothing more than the tab itself.
 		take_events();
 		const auto *heights = dynamic_cast<const TerrainHeightsDocument *>(&document);
@@ -58,6 +61,15 @@ public:
 		if (facts_.unbaked)
 			ui_kit::quiet_text(std::to_string(facts_.unbaked) + " regions wait for their bake",
 			                   "The ground there is drawn from the sculpted heights until it lands.");
+		if (state.form != HeightsForm::Cpt) return;
+		ui_kit::WrapRow tools;
+		if (ui_kit::tool(tools, "Export heights...", workspace.view().allows(EditorRequestKind::ExportHeights),
+		                 "Writes these heights, unsaved changes included, to a 16-bit .raw outside the project, which a "
+		                 "terrain import reads.")) {
+			EditorRequest pick = request::pick_file(PickPurpose::HeightsRaw);
+			pick.path = document.path();
+			workspace.request(std::move(pick));
+		}
 	}
 
 private:

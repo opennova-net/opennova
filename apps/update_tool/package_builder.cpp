@@ -100,6 +100,20 @@ bool read_archive(
 	}, error);
 }
 
+// Whether the product-relative path `rel` is one the build leaves out: an excluded path, or a path
+// under an excluded directory ("cache/"), without case.
+bool excluded_path(const std::vector<std::string> &excludes, const std::string &rel) {
+	const std::string rel_lower = strutil::to_lower(rel);
+	for (const std::string &ex : excludes) {
+		const std::string ex_lower = strutil::to_lower(ex);
+		if (rel_lower == ex_lower ||
+				(!ex_lower.empty() && ex_lower.back() == '/' &&
+						(rel_lower + "/").rfind(ex_lower, 0) == 0))
+			return true;
+	}
+	return false;
+}
+
 // The product root's plain files (not archives), by lower-cased name, and its subdirectories'
 // files as product-relative paths in `nested`.
 void list_tree(const fs::path &root, const std::vector<std::string> &excludes, bool skip_expansions,
@@ -111,14 +125,8 @@ void list_tree(const fs::path &root, const std::vector<std::string> &excludes, b
 	for (fs::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
 		const std::string rel = io::utf8_generic_path(fs::relative(it->path(), root, ec));
 		const std::string rel_lower = strutil::to_lower(rel);
-		bool excluded = rel_lower == "update" || (skip_expansions && rel_lower == "expansion");
-		for (const std::string &ex : excludes) {
-			const std::string ex_lower = strutil::to_lower(ex);
-			if (rel_lower == ex_lower ||
-					(!ex_lower.empty() && ex_lower.back() == '/' &&
-							(rel_lower + "/").rfind(ex_lower, 0) == 0))
-				excluded = true;
-		}
+		const bool excluded = rel_lower == "update" ||
+				(skip_expansions && rel_lower == "expansion") || excluded_path(excludes, rel);
 		if (excluded) {
 			if (it->is_directory(ec))
 				it.disable_recursion_pending();
@@ -160,10 +168,14 @@ bool claim_name(std::set<std::string> &names, const std::string &name, std::stri
 }
 
 // Carry the preceding complete package's removals and any names that disappeared from
-// it. The package itself is the history; there is no install ownership database.
+// it. The package itself is the history; there is no install ownership database. A loose name the
+// build excludes is not the package's to own, so no REMOVE for it comes forward: the precheck
+// counts a REMOVE of a file that exists as needed work, and a carried one for a file the game
+// writes (its NovaWorld cookie jar) would find an update at every check.
+// [orig: Cupdate2Dlg_PrecheckCommands @ 0x407820 (UPDATE.EXE)]
 bool carry_previous(const BuildSpec &spec, const ProductSpec &product,
-		const std::map<std::string, fs::path> &archives, CommandFile &cmd,
-		ProductReport &report, std::string &error) {
+		const std::vector<std::string> &excludes, const std::map<std::string, fs::path> &archives,
+		CommandFile &cmd, ProductReport &report, std::string &error) {
 	if (!spec.previous || !spec.removes) return true;
 	const update::SfsEntry *previous = nullptr;
 	for (const auto &section : spec.previous->sections) {
@@ -195,6 +207,7 @@ bool carry_previous(const BuildSpec &spec, const ProductSpec &product,
 		// remove its former members. Removing members of a missing archive is a no-op.
 		if (is_pff(target) && !archives.count(target) && !removed.count({".", target}))
 			carry[{".", target}] = {"REMOVE", CommandType::Remove, target, 0, 0, std::nullopt};
+		if (key.first == "." && excluded_path(excludes, row.name)) continue;
 		if (!present.count(key) && !removed.count(key))
 			carry[key] = {"REMOVE", CommandType::Remove, row.name, 0, 0, std::nullopt};
 	}
@@ -375,14 +388,16 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 			}
 		}
 	}
-	if (!carry_previous(spec, product, to_archives, cmd, report, error)) return false;
-	const std::string text = update::write_command_file(cmd);
-	if (text.empty()) {
+	if (!carry_previous(spec, product, excludes, to_archives, cmd, report, error)) return false;
+	// The value or the row UPDATE.EXE would not read back, named with what it would read: the
+	// editor's build gate refuses the same names by the same rule (build.update_name).
+	const update::CommandFileProblem problem = update::command_file_problem(cmd);
+	if (!problem.ok()) {
 		error = "the command file " + product.command_file +
-				" cannot be written (a name or value "
-				"the updater cannot read back)";
+				" cannot be written: " + update::command_file_problem_words(problem);
 		return false;
 	}
+	const std::string text = update::write_command_file(cmd);
 	if (!claim_name(names, product.command_file, error))
 		return false;
 	section.expansion = product.expansion;

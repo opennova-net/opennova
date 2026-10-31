@@ -10,6 +10,7 @@
 #include <cstring>
 #include <string>
 
+#include <base/title/title.h>
 #include <runtime/hud/hud_map_view.h>
 
 using namespace opennova::hud;
@@ -374,6 +375,23 @@ void test_death_compile() {
         CHECK(out.over_lines[1].x0 == 295.0f);
         CHECK(out.over_lines[0].color == 0x704040FFu);
     }
+    // A pane with a frame (dfx2.exe's, its title's colour) draws it after the crosshair: top,
+    // right, bottom, left round the rect [orig: CMap_OverlayInputHandler @0x550ff9..0x551052
+    //  (dfx2.exe)].
+    {
+        DeathMapFrame framed = frame;
+        framed.frame_color = 0xFFE1DF4Bu;
+        HudMapWindowPass with_frame;
+        compiler.compile(in, framed, facts, with_frame);
+        CHECK(with_frame.over_lines.size() == 6);
+        if (with_frame.over_lines.size() == 6) {
+            const HudMapLine &top = with_frame.over_lines[2];
+            const HudMapLine &left = with_frame.over_lines[5];
+            CHECK(top.x0 == 30.0f && top.y0 == 30.0f && top.x1 == 560.0f && top.y1 == 30.0f);
+            CHECK(left.x0 == 30.0f && left.y0 == 490.0f && left.x1 == 30.0f && left.y1 == 30.0f);
+            CHECK(top.color == 0xFFE1DF4Bu && with_frame.over_lines[4].y0 == 490.0f);
+        }
+    }
     // The hold: own zones gain "%ld" a cell above; other zones stop
     // brightening.
     facts.hold_seconds = 9;
@@ -629,7 +647,222 @@ void test_command_waypoints() {
 
 } // namespace
 
+// The zoom ease: the SPAWNPOINTS_TABLE press sets the pan target and the ease's word, under
+// which a zoom above 0.8 takes x0.96 a frame; the right drag, the wheel and a fit landing on the
+// ceiling clear the word.
+// [orig: DeathScreen_UpdateShroudReveal @0x5547b9..0x5547d8; CMap_OverlayInputHandler
+//  @0x5544cb / @0x5545ce; DeathScreen_UpdateUI @0x55340c] [orig: sub_550CF0 @0x550e9f..0x550eb1;
+//  DeathScreen_UpdateShroudReveal @0x552820..0x552845 (dfx2.exe)]
+void test_death_zoom_ease() {
+    DeathMapView v;
+    v.on_load();
+    v.ease_frame();
+    CHECK(v.view.zoom == 4.0f && !v.zoom_ease); // no word, no ease
+    v.table_pan(8 * kWu, -16 * kWu);
+    CHECK(v.zoom_ease && v.target_x == 8 * kWu && v.target_y == -16 * kWu);
+    v.ease_frame();
+    CHECK(v.view.zoom == static_cast<float>(4.0 * static_cast<double>(0.96f)));
+    CHECK(v.view.pan_x == (8 * kWu >> 3) && v.view.pan_y == (-16 * kWu >> 3));
+    for (int i = 0; i < 200; ++i) v.ease_frame();
+    CHECK(v.view.zoom <= 0.8f && v.view.zoom > 0.8f * 0.96f);
+    v.on_event(MapViewEvent::kWheel, 0, 0, 0, 1);
+    CHECK(!v.zoom_ease);
+    v.table_pan(0, 0);
+    v.render(death_rect(), 800, 0, 0);
+    v.on_event(MapViewEvent::kRightDown, 100, 100, 0, 0);
+    v.on_event(MapViewEvent::kMove, 101, 100, kMapViewButtonRight, 0);
+    CHECK(!v.zoom_ease);
+    v.table_pan(0, 0);
+    v.view.zoom = 10.0f;
+    v.fit(DeathMapFitInput{});
+    CHECK(!v.zoom_ease);
+}
+
+// The title's pane: dfx2.exe's ceiling 6.0 for the right drag, the wheel and the fit (a fit
+// landing on it resets the pan and the target), and its frame colour on the render.
+// [orig: CMap_OverlayInputHandler @0x551178; DeathScreen_ZoomStep @0x550ca6; sub_550690 @0x550922 /
+//  @0x550974 (dfx2.exe)]
+void test_death_title_pane() {
+    opennova::Title dfx2;
+    dfx2.map_view_zoom_max = 6.0f;
+    dfx2.death_map_frame_color = 0xFFE1DF4Bu;
+    DeathMapView v;
+    v.apply_title(dfx2);
+    v.on_load();
+    CHECK(v.render(death_rect(), 800, 0, 0).frame_color == 0xFFE1DF4Bu);
+    v.on_event(MapViewEvent::kRightDown, 100, 100, 0, 0);
+    v.on_event(MapViewEvent::kMove, -2000, 100, kMapViewButtonRight, 0);
+    CHECK(v.view.zoom == 6.0f);
+    v.view.zoom = 5.5f;
+    v.on_event(MapViewEvent::kWheel, 0, 0, 0, -1);
+    CHECK(v.view.zoom == 6.0f);
+    DeathMapFitInput wide;
+    wide.shroud_present = true;
+    wide.shroud_w = 760;
+    wide.shroud_h = 525;
+    wide.bounds_min_x = -100 * kWu;
+    wide.bounds_max_x = 30000 * kWu;
+    v.target_x = 77;
+    v.fit(wide);
+    CHECK(v.view.zoom == 6.0f && v.view.pan_x == 0 && v.target_x == 0);
+    // Jointops.exe's: no frame, the 10.0 ceiling.
+    DeathMapView jo;
+    jo.apply_title(opennova::Title{});
+    jo.on_load();
+    CHECK(jo.render(death_rect(), 800, 0, 0).frame_color == 0u && jo.view.zoom_max == 10.0f);
+}
+
+// DFX2-50: dfx2.exe's DEATH map walks pool 3 twice more: the capture-zone rings ahead of the
+// marker layers, and past the labels the KOTH ring and the location labels, no mask test;
+// Jointops.exe's walks it never.
+// [orig: MapOverlay_DrawView @0x5a58e0] [orig: the twin @0x5a48a0 - @0x5a49c2..0x5a4a0d,
+//  @0x5a4a62..0x5a4aba (dfx2.exe)]
+void test_death_zone_markers() {
+    DeathMapView v;
+    v.on_load();
+    const int32_t cx = 100 * kWu;
+    const int32_t cy = 200 * kWu;
+    const DeathMapFrame frame = v.render(death_rect(), 800, cx, cy);
+    DeathMapFacts facts;
+    facts.player_present = true;
+    facts.player_x = cx;
+    facts.player_y = cy;
+    HudMinimapOverlays ov;
+    ov.location_names = {"Hill 60"};
+    ov.zone_score_delta = 3;
+    HudMinimapPoolEntity capture;
+    capture.def_id = 6027;
+    capture.x = cx;
+    capture.y = cy;
+    HudMinimapPoolEntity koth;
+    koth.def_id = 6006;
+    koth.x = cx;
+    koth.y = cy;
+    koth.radius_q16 = 20 * kWu;
+    HudMinimapPoolEntity loc;
+    loc.def_id = 2044;
+    loc.x = cx;
+    loc.y = cy;
+    ov.pool3 = {capture, koth, loc};
+    HudMinimapInput in;
+    in.surface_w = 1024.0f;
+    in.surface_h = 768.0f;
+    in.overlays = &ov;
+    DeathMapCompiler compiler;
+    HudMapWindowPass out;
+    const auto ring = [&](uint32_t color) {
+        int n = 0;
+        for (const HudMapSprite &s : out.map.sprites)
+            if (s.texture == kHudMapTextureNone && s.color == color) ++n;
+        return n;
+    };
+    compiler.compile(in, frame, facts, out);
+    CHECK(out.map.visible);
+    CHECK(ring(0xFFFF2020u) == 0 && ring(0xFF4060FFu) == 0 && out.map.labels.empty());
+    ov.death_map_zone_markers = true;
+    compiler.compile(in, frame, facts, out);
+    CHECK(ring(0xFFFF2020u) == 1); // the capture ring, under the layers
+    CHECK(ring(0xFF4060FFu) == 1); // the KOTH ring, team 1 ahead
+    bool label = false;
+    for (const HudMapLabel &l : out.map.labels)
+        if (std::strcmp(l.text, "Hill 60") == 0 && l.color == 0xFF9F9F9Fu) label = true;
+    CHECK(label);
+}
+
+// DFX2-115: the DEATH map's labels pass names a player slot (Jointops.exe's flag 1), and draws
+// its marker alone where the title's map view passes 0 (dfx2.exe's).
+// [orig: MapOverlay_DrawView @0x5a58e0 - @0x5a5a1b..0x5a5a29; HUD_DrawEntityLabelsAndMarkers
+//  @0x5a49e0 - the names gate @0x5a4dbb] [orig: the twin @0x5a48a0 - `push 0` @0x5a4a30;
+//  HUD_DrawEntityLabelsAndMarkers @0x5a3850 - @0x5a3c31 (dfx2.exe)]
+void test_death_map_names() {
+    DeathMapView v;
+    v.on_load();
+    const int32_t cx = 100 * kWu;
+    const int32_t cy = 200 * kWu;
+    const DeathMapFrame frame = v.render(death_rect(), 800, cx, cy);
+    DeathMapFacts facts;
+    facts.player_present = true;
+    facts.player_x = cx;
+    facts.player_y = cy;
+    HudMinimapOverlays ov;
+    ov.hud_present = true;
+    ov.hud_team = 1;
+    HudMinimapPlayerSlot slot;
+    slot.active = true;
+    slot.name_slot = true;
+    slot.name = "Kilo";
+    slot.blip.bank = static_cast<uint8_t>(HudMinimapBank::kTransient);
+    slot.blip.handle = 0x0002;
+    slot.blip.team = 1;
+    slot.blip.def_type = 3;
+    slot.blip.icon = 3;
+    slot.blip.color = 0xFF304080u;
+    slot.blip.entity_known = 1;
+    slot.blip.entity_bits = kMarkerEntityHasModel;
+    slot.blip.x = slot.blip.anchor_x = slot.blip.entity_x = cx;
+    slot.blip.y = slot.blip.anchor_y = slot.blip.entity_y = cy;
+    ov.player_slots = {slot};
+    HudMinimapInput in;
+    in.surface_w = 1024.0f;
+    in.surface_h = 768.0f;
+    in.overlays = &ov;
+    DeathMapCompiler compiler;
+    HudMapWindowPass out;
+    const auto named = [&]() {
+        for (const HudMapLabel &l : out.map.labels)
+            if (std::strcmp(l.text, "Kilo") == 0) return true;
+        return false;
+    };
+    const auto markers = [&]() {
+        int n = 0;
+        for (const HudMapSprite &s : out.map.sprites)
+            if (s.texture != kHudMapTextureNone) ++n;
+        return n;
+    };
+    compiler.compile(in, frame, facts, out);
+    CHECK(out.map.visible);
+    CHECK(named());
+    const int jo_markers = markers();
+    CHECK(jo_markers > 0);
+    CHECK(opennova::title_by_code("dfx2")->death_map_no_names &&
+            !opennova::title_by_code("jo")->death_map_no_names);
+    ov.death_map_no_names = true;
+    compiler.compile(in, frame, facts, out);
+    CHECK(!named());
+    CHECK(markers() == jo_markers);
+}
+
+// DFX2-58: the CMAP window's ceiling is the title's too: dfx2.exe's 6.0 for the right drag and
+// the ZOOMIN / ZOOMOUT step, Jointops.exe's 10.0; the titles' rows carry 10.0 and 6.0.
+// [orig: CMapWindow_HandleEvent @0x5497f0 - @0x548276, @0x549d5c] [orig: CMapWindow_HandleEvent
+//  @0x546a60 - @0x5454e6, @0x546fcc (dfx2.exe)]
+void test_command_title_zoom() {
+    CHECK(opennova::title_by_code("jo")->map_view_zoom_max == 10.0f);
+    CHECK(opennova::title_by_code("dfx2")->map_view_zoom_max == 6.0f);
+    CommandMapView v;
+    v.apply_title(*opennova::title_by_code("dfx2"));
+    v.on_load();
+    v.on_event(MapViewEvent::kRightDown, 100, 100, 0, 0);
+    v.on_event(MapViewEvent::kMove, -2000, 100, kMapViewButtonRight, 0);
+    CHECK(v.view.zoom == 6.0f);
+    v.on_event(MapViewEvent::kRightUp, -2000, 100, 0, 0);
+    v.view.zoom = 5.5f;
+    v.zoom_button(-1);
+    CHECK(v.view.zoom == 6.0f);
+    CommandMapView jo;
+    jo.apply_title(*opennova::title_by_code("jo"));
+    jo.on_load();
+    jo.view.zoom = 9.5f;
+    jo.zoom_button(-1);
+    CHECK(jo.view.zoom == 10.0f);
+}
+
 int main() {
+    test_command_title_zoom();
+    test_death_title_pane();
+    test_death_zoom_ease();
+    test_death_zone_markers();
+    test_death_map_names();
     test_integer_pow();
     test_design_to_device();
     test_death_load();

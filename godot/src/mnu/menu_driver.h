@@ -15,6 +15,7 @@
 #include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/vector2.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <runtime/menu/menu_runtime.h>
@@ -43,6 +44,7 @@ class RtxtStringFile;
 class AvatarDatabase;
 class AvatarComboRow;
 class DeployListRow;
+class Simulation;
 class EndRoundColumn;
 class EndRoundRow;
 
@@ -98,6 +100,7 @@ class MenuDriver : public RefCounted {
 	Ref<MnsStyleSheet> style_;
 	// The expansion's string table every menu lookup tries first.
 	Ref<RtxtStringFile> override_text_;
+	Ref<RtxtStringFile> sp_menu_text_; // the campaign reader's menu table (set_single_player_source)
 	// The pointer the driver last made the OS cursor (the claim's CURSOR, or the
 	// transparent no-pointer image), by id: the frame's texture stays the frame's
 	// to release; and that image (D-MNU-26).
@@ -162,7 +165,20 @@ public:
 	void select_mission(int p_id, int p_row, const String &p_fallback);
 	void activate_mission(int p_id, int p_row) { flow_.activate_mission(p_id, p_row); }
 	String get_selected_mission() const;
+	// The picked mission's campaign words, (campaign, its place): (-1, 0) for none
+	// (engine MenuFlow::selected_campaign).
+	Vector2i get_selected_campaign() const;
 	void clear_selected_mission() { flow_.clear_selected_mission(); }
+	// The single-player screen's inputs ahead of its populate: the bound root's title, and under
+	// one with the campaign tabs the mount's campaign.def, `p_menu_text` (the shell's gameui
+	// table, Game.bin, not menutxt.bin; kept while the flow reads it) and the current profile's
+	// completion bytes (engine MenuFlow::set_title, set_campaign_source).
+	void set_single_player_source(const Ref<PlayerProfiles> &p_profiles,
+			const Ref<RtxtStringFile> &p_menu_text);
+	// A CA_LIST pick, true when the campaign tabs took it (engine MenuFlow::select_campaign).
+	bool select_campaign(int p_id, int p_row) { return flow_.select_campaign(runtime_, p_id, p_row); }
+	// A control's activation, true when it was a campaign-tab radio (engine MenuFlow::activate_tab).
+	bool activate_single_player_tab(const String &p_name);
 	// The Mods list (engine menu::ModList): the descriptions a pick fills (the shell's
 	// ModDescriptions names); the list filled with the base game's row and the expansion records of
 	// the bound root's folder (scanned once per folder, as the game scans once at boot), the one
@@ -203,6 +219,9 @@ public:
 	// as it is now), as its token ("apply_loadout", "cancel_loadout", ...;
 	// menu_commands.h menu_command_token); "" for none.
 	String screen_command(const String &p_screen, const String &p_name, bool p_in_mission) const;
+	// The open document is the character screen's: it holds a screen named PLAYER_INFO (engine
+	// menu_commands.h is_player_info_document).
+	bool is_player_info_document() const;
 	// The front-end OPTIONS screen, whose every show re-runs the options
 	// preparation (engine OptionsScreen::is_front_screen).
 	static bool is_front_options_screen(const String &p_screen);
@@ -234,6 +253,17 @@ public:
 	int update_player_info_avatars(const Ref<AvatarDatabase> &p_db, int p_change,
 			int p_value, int p_team, int p_voice, const Ref<RtxtStringFile> &p_gameui,
 			const Ref<RtxtStringFile> &p_menutxt);
+	// The shown side's record ahead of a team populate, which a stage the screen holds no list for
+	// keeps (engine PlayerInfoAvatars::seed_record).
+	void seed_player_info_avatars(int p_nationality, int p_division) {
+		avatars_.seed_record(p_nationality, p_division);
+	}
+	// The value change kind the COMBO_LIST callback hears under the session's title (engine
+	// player_info_combo_list_event): "combo" or "spinlist".
+	String player_info_combo_list_event() const;
+	// Whether the PLAYER_INFO portrait hovers at all under the session's title (engine
+	// Title::player_info_preview_hover).
+	bool player_info_preview_hovers() const;
 	PackedInt32Array player_info_nationality_rows() const;
 	int player_info_avatar_nationality() const { return avatars_.nationality; }
 	int player_info_avatar_division() const { return avatars_.division; }
@@ -346,9 +376,40 @@ public:
 	// A stat tab's filter over the filled table: the rows shown or hidden by their team
 	// (inmatch stat_screen_feed.h stat_screen_filter_rows carries the witness).
 	void filter_stat_results(int p_id, int p_tab);
-	// The death screen's SPAWNPOINTS_LIST items from its compiled rows (engine
-	// world deploy_screen_feed.h deploy_list_items), in the menu's code page.
+	// DFX2-97: the STAT screen's DONE under `sim`'s title (engine inmatch/stat_screen_feed.h
+	// stat_screen_hide_done, stat_screen_show_done and stat_screen_done_pressed carry the
+	// witness): the show's hide, a frame's show while the role's round-reset hold is up, and a
+	// press, which acts on a joiner alone. Each false when it did nothing.
+	bool hide_stat_done(const Ref<Simulation> &p_sim);
+	bool show_stat_done(const Ref<Simulation> &p_sim);
+	bool stat_done_pressed(const Ref<Simulation> &p_sim);
+	// The death screen's SPAWNPOINTS_LIST refill from its compiled rows: the list and its
+	// title shown, then its items in the menu's code page (engine world
+	// fill_deploy_spawn_list).
 	void set_deploy_list_items(int p_id, const TypedArray<DeployListRow> &p_rows);
+	// DFX2-41: the DEATH screen's SPAWNPOINTS_TABLE refilled from `sim`'s zones (engine
+	// inmatch/role_feeds.h deploy_table_zones, world/deploy_screen_feed.h build_deploy_table_rows
+	// and fill_deploy_spawn_table carry the witnesses), the health colours over `hud`'s stance
+	// colours (the defaults without a HudOverlay). False when the screen has no table.
+	bool fill_deploy_spawn_table(const Ref<Simulation> &p_sim, Object *p_hud,
+			const Ref<RtxtStringFile> &p_gametext);
+	// That table's cell event (table_cell_clicked's row, state and form): x the SpawnZoneList
+	// index the map pans to, y the deploy pick to send, -1 each for none (engine
+	// world/deploy_screen_feed.h deploy_table_click carries the witness).
+	Vector2i deploy_table_click(int p_id, int p_row, int p_state, bool p_double_click) const;
+	// The DEATH map's move: that table's rows deselected (engine world::deploy_map_moved).
+	bool deploy_map_moved();
+	// DFX2-41: the DEATH screen's team lists written from `sim`'s Tab board, for a title with
+	// them (engine inmatch/role_feeds.h deploy_team_list_players and world/deploy_screen_feed.h
+	// deploy_team_lists carry the witnesses). False for any other title.
+	bool fill_deploy_team_lists(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext);
+	// The DEATH screen's show writes from `sim` (engine inmatch/role_feeds.h deploy_activation and
+	// world/deploy_screen_feed.h apply_deploy_activation carry the witnesses).
+	void apply_deploy_activation(const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext);
+	// The DEATH SPAWNPOINTS_TABLE's custom draw installed on this driver's frame, its labels the
+	// zones' uinames in `sim` (engine world/deploy_screen_feed.h deploy_table_paint and
+	// deploy_table_zone_name carry the witness); false without the table.
+	bool install_deploy_table_painter(const Ref<Simulation> &p_sim);
 	// The CTableWnd reads (engine menu_table_row.h).
 	int table_cell_value(int p_id, int p_row, int p_col) const;
 	PackedInt32Array table_selected_rows(int p_id) const;
@@ -356,6 +417,9 @@ public:
 	void set_widget_clip_rect(int p_id, const Rect2i &p_rect);
 	// The engine runtime, for native screen companions (C++ only).
 	opennova::menu::MenuRuntime &runtime() { return runtime_; }
+	// The host screen's mission rotation and START gate (C++ only: the cfg block's restriction
+	// lists, GameConfigBlock).
+	opennova::menu::HostDialog &host_dialog() { return host_dialog_; }
 
 	// --- activation / actions ---
 	void activate(int p_id);

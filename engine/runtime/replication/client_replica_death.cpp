@@ -171,11 +171,8 @@ void ClientReplicaPipeline::apply_spawn_wave_status(
 
 void ClientReplicaPipeline::apply_score_delta_sound(
 		const std::vector<uint8_t> &body) {
-	ScoreDeltaSound sample;
-	if (!decode_score_delta_sound(body.data(), body.size(), sample)) {
-		++malformed_bodies_;
-		return;
-	}
+	ScoreDeltaSound sample; // every body reads (the decode carries the witness)
+	(void)decode_score_delta_sound(body.data(), body.size(), sample);
 	ClientScoreFeedback &feedback = state_.score_feedback;
 	if (sample.score == feedback.score) return;
 	feedback.delta = static_cast<int32_t>(
@@ -183,6 +180,79 @@ void ClientReplicaPipeline::apply_score_delta_sound(
 			static_cast<uint32_t>(feedback.score));
 	feedback.score = sample.score;
 	++feedback.updates;
+	// The fanfare's arm (ClientScoreFeedback::fanfare_arms carries the witness).
+	const hud::ScoreTone tone = hud::score_delta_tone(feedback.delta, state_.exp_fanfare);
+	if (tone != hud::ScoreTone::None) {
+		feedback.fanfare_tone = tone;
+		++feedback.fanfare_arms;
+	}
+	state_.mark_changed();
+}
+
+namespace {
+
+// The one i32 the 0x80 and 0x82 handlers read: the body's first four bytes, 0 when the body is
+// shorter [orig: NapiNPClientMsg_0x080 @0x42A07D..0x42A089; NapiNPClientMsg_0x082
+// @0x42A0E4..0x42A0F9].
+int32_t score_tracker_value(const std::vector<uint8_t> &body) {
+	if (body.size() < 4) return 0;
+	return static_cast<int32_t>(static_cast<uint32_t>(body[0]) |
+			(static_cast<uint32_t>(body[1]) << 8) | (static_cast<uint32_t>(body[2]) << 16) |
+			(static_cast<uint32_t>(body[3]) << 24));
+}
+
+} // namespace
+
+void ClientReplicaPipeline::apply_score_tracker_reset(const std::vector<uint8_t> &body) {
+	// [orig: NapiNPClientMsg_0x080 @0x42A070; ClientScoreTracker carries the witness]
+	ClientScoreTracker &tracker = state_.score_tracker;
+	tracker.node = score_tracker_value(body);
+	tracker.valid = false;
+	tracker.start = 0;
+	tracker.elapsed = 0;
+	state_.mark_changed();
+}
+
+void ClientReplicaPipeline::apply_game_start_signal(const std::vector<uint8_t> &body) {
+	// A nonzero game-start flag clears the tracker's node, its valid word, its start and its
+	// elapsed (not its time, nor the entries), as the 0x80 does; a short body reads 0. The
+	// handler's other legs (the clan roster's walk kick, C2S 0x4E) are the joiner connection's.
+	// [orig: NapiNPClientMsg_HandleGameStart @0x42E180 - the flag @0x42E18E..0x42E198, its test
+	//  @0x42E1A4, the clears @0x42E1DE..0x42E1F0] [orig: the twin's @0x42FCCE..0x42FCE0 (dfx2.exe)]
+	if (body.empty() || body[0] == 0) return;
+	ClientScoreTracker &tracker = state_.score_tracker;
+	tracker.node = 0;
+	tracker.valid = false;
+	tracker.start = 0;
+	tracker.elapsed = 0;
+	state_.mark_changed();
+}
+
+void ClientReplicaPipeline::apply_score_tracker_time(const std::vector<uint8_t> &body) {
+	// [orig: NapiNPClientMsg_0x082 @0x42A0E0 -> CineTracker_RecordTimeEntry @0x422410;
+	//  ClientScoreTracker carries the witness]
+	ClientScoreTracker &tracker = state_.score_tracker;
+	if (tracker.node == 0) return;
+	const int32_t time = score_tracker_value(body);
+	std::vector<ClientScoreTrackerEntry> &entries = score_tracker_entries();
+	ClientScoreTrackerEntry *entry = nullptr;
+	for (ClientScoreTrackerEntry &each : entries)
+		if (each.node == tracker.node) {
+			entry = &each;
+			break;
+		}
+	if (entry != nullptr) {
+		entry->elapsed = static_cast<int32_t>(
+				static_cast<uint32_t>(time) - static_cast<uint32_t>(entry->start));
+	} else {
+		entries.push_back({tracker.node, time, 0, 0});
+		entry = &entries.back();
+	}
+	entry->time = time;
+	tracker.valid = true;
+	tracker.start = entry->start;
+	tracker.time = entry->time;
+	tracker.elapsed = entry->elapsed;
 	state_.mark_changed();
 }
 

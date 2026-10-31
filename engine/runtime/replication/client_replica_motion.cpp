@@ -742,7 +742,8 @@ void row_gradient_slide(ClientEntityState &es, const terrain::TerrainHeightField
 	es.rm_entity_flags &= ~0x10000u;
 }
 
-void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
+void row_root_motion_tick(ClientEntityState &es, const world::TitleRules &rules,
+                          world::IRootMotionSource &src,
                           world::AnimVariantRings *rings,
                           const terrain::TerrainHeightField *terrain,
                           const RowConformIo &conform_io,
@@ -774,6 +775,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		sound.type_id = es.type_id;
 		sound.character_id = es.cls == EntityClass::Player
 				? static_cast<uint16_t>(es.net_id) : 0;
+		sound.team = es.team_known ? es.team : uint8_t{0};
 		sound.slot = slot;
 		sound.pos[0] = x;
 		sound.pos[1] = y;
@@ -920,6 +922,7 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		word.handle = es.handle;
 		word.type_id = es.type_id;
 		word.character_id = es.cls == EntityClass::Player ? static_cast<uint16_t>(es.net_id) : 0;
+		word.team = es.team_known ? es.team : uint8_t{0};
 		word.on_entity = es.carrier_handle != wire_handle::kInvalid ||
 				es.resolved_ground != wire_handle::kInvalid;
 		word.events = frame.events;
@@ -954,16 +957,36 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	    (es.rm_entity_flags & 0x2000u) != 0) {
 		if ((es.move_input & 0x08u) != 0) {
 			const int32_t dirpad = static_cast<int32_t>(es.move_input & 0x07u);
+			const double pad = static_cast<double>(dirpad) * 0.7853975; // [orig: dbl_7C9BB0]
 			const double ang =
 					static_cast<double>(
 							static_cast<int16_t>(es.heading_bam >> 16)) *
 							9.587371826171875e-05 + // [orig: dbl_7C9BC0]
-					static_cast<double>(dirpad) * 0.7853975; // [orig: dbl_7C9BB0]
+					pad;
 			const int32_t nx =
 					static_cast<int32_t>(std::cos(ang) * -64.0); // flt_7C9BD8
 			const int32_t ny = static_cast<int32_t>(std::sin(ang) * -64.0);
-			es.rm_vel_xy[0] -= nx;
-			es.rm_vel_xy[1] -= ny;
+			if (rules.airborne_steer_glide) {
+				// dfx2.exe's glide (DFX2-112): the pair also takes the fall's (-vz) >> 7 along
+				// the angle, and the steer turns savedLivePitch (+0x90) and Roll (+0x18) by the
+				// pad angle's cosine and sine at 2^22.
+				// [orig: the twin of Entity_UpdateInfantryPlayerBody @0x4B4140 - Q
+				//  @0x4B794B..0x4B7956, the pair's adds @0x4B7990 / @0x4B79B4, +0x90
+				//  @0x4B79D3, Roll @0x4B79E2 (dfx2.exe)]
+				const double q = static_cast<double>(
+						static_cast<int32_t>(0u - static_cast<uint32_t>(es.rm_vel_z)) >> 7);
+				const int32_t qx = static_cast<int32_t>(q * std::cos(ang));
+				const int32_t qy = static_cast<int32_t>(q * std::sin(ang));
+				es.rm_vel_xy[0] = io::bam_add(es.rm_vel_xy[0], io::bam_sub(qx, nx));
+				es.rm_vel_xy[1] = io::bam_add(es.rm_vel_xy[1], io::bam_sub(qy, ny));
+				const int32_t turn_pitch = static_cast<int32_t>(std::cos(pad) * 4194304.0);
+				const int32_t turn_roll = static_cast<int32_t>(std::sin(pad) * 4194304.0);
+				es.rm_body_pitch = io::bam_add(es.rm_body_pitch, turn_pitch);
+				es.roll_bam = io::bam_add(es.roll_bam, turn_roll);
+			} else {
+				es.rm_vel_xy[0] -= nx;
+				es.rm_vel_xy[1] -= ny;
+			}
 			if ((es.rm_entity_flags & 0x20u) != 0 && es.rm_vel_z <= -14336 &&
 			    dirpad == 0) {
 				es.rm_vel_xy[0] -= nx;
@@ -1058,7 +1081,8 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
             // [orig: @0x4b7b18..0x4b7b70 (the edges), @0x4b7bcd..0x4b7be4
             //  (the flap), @0x4b7c4c..0x4b7c6f (the free fall)]
             const world::ParachuteEvents chute = world::parachute_tick(es.rm_parachute,
-                    es.rm_entity_flags, es.rm_chute_carry_flags, es.rm_vel_z, false, tick);
+                    es.rm_entity_flags, es.rm_chute_carry_flags, es.rm_vel_z, false, tick,
+                    rules.parachute_opens_on_jump, false);
             const auto chute_slot = [&](uint8_t slot) {
                 play_slot_at(slot, pre_integrate[0], pre_integrate[1], pre_integrate[2]);
             };
@@ -1677,7 +1701,8 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		// The own row's channel shadows the World body's, which serves the rings
 		// for that body: a second serve would double its plays (D-NET-196).
 		if (root_motion_ != nullptr)
-			row_root_motion_tick(row, *root_motion_, is_self ? nullptr : anim_rings_,
+			row_root_motion_tick(row, world::require_title_rules(rules_, "ClientReplicaPipeline"),
+			                     *root_motion_, is_self ? nullptr : anim_rings_,
 			                     remote_motion_terrain_, conform_io,
 			                     rm_key, is_self, starved, death_state,
 			                     player_pass ? &player_io : nullptr, &replica_contact_resolver_,

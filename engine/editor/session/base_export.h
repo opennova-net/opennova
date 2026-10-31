@@ -30,6 +30,7 @@ struct BuildAfterBase {
 	bool panel = true;
 	std::string gate_tag_file;
 	std::string version_file; // the expansion's own, never the base's export's
+	bool release = false; // an export a release packs (BuildTarget::release), never the base's export
 };
 
 // An expansion of a project's base game (ADR 0046 T5) plays over that project's export, so the editor

@@ -27,6 +27,7 @@
 #include <net/npwire/session_keys.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/joiner_connection.h>
+#include <runtime/world/weapon_table.h>
 
 #include "enumerated_join.h"
 
@@ -121,6 +122,58 @@ void loadout_class_byte() {
 	expect(resubmit_class(dfx2(), 0) == 8, "DFX2-12: a DFX2 joiner sends 8 whatever its kit");
 	expect(resubmit_class(dfx2(), 1) == 8, "DFX2-12: 8 in a mission of type 1");
 	expect(resubmit_class(dfx2(), 2) == 7, "DFX2-12: 7 in a mission of type 2");
+}
+
+// The kit names of the 0x2F a kitless joiner running as `title` and speaking `protocol`
+// re-submits when an S2C 0x50 moves its own entity onto team 2: its fresh profile's page
+// (JoinerConnection::set_title), each name resolved through a table holding these.
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - the reselect @0x431a35..0x431a9a, the submit
+//  @0x431AAD]
+std::vector<std::string> fresh_resubmit_names(const Title &title, const Protocol *protocol) {
+	world::WeaponTable table;
+	for (const char *name : {"null", "WPN_M4AUTO", "WPN_MK23", "WPN_SATCHEL_CHARGE", "WPN_KNIFE"}) {
+		world::WeaponTableEntry entry;
+		entry.name = name;
+		entry.valid = true;
+		table.entries.push_back(entry);
+	}
+	inmatch::JoinerConnection joiner("Dfx2Fresh");
+	joiner.set_protocol(protocol);
+	joiner.set_title(&title);
+	joiner.set_weapon_table(&table);
+	joiner.seed_in_match(1, kClientKey, kClientScrk, kServerScrk, 1, 0, 0x0001, 0x14B9);
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	TeamAssign assign;
+	assign.entity_handle = 0x0001;
+	assign.team = 2;
+	const std::vector<uint8_t> dg = frame_s2c(seq,
+			{make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign))}, kServerScrk,
+			kClientKey);
+	const joiner_receive::Received result = joiner_receive::receive(joiner, dg.data(), dg.size());
+	std::vector<std::string> names;
+	for (const ProtocolMessage &m : result.queued_send_messages) {
+		if (m.tag != 0x2F) continue;
+		LoadoutSubmit submit;
+		if (!decode_loadout_submit(m.payload.data(), m.payload.size(), submit)) continue;
+		for (const LoadoutSubmitEntry &e : submit.entries)
+			names.push_back(table.entries[e.adm_index].name);
+	}
+	return names;
+}
+
+// DFX2-29: a fresh DFX2 profile's class-8 page is dfx2.exe's own (M4AUTO, MK23, the satchel), the
+// session title's, never the protocol's; Jointops.exe's red class-8 page is its own (AK47AUTO,
+// colt45, the satchel, KNIFE2), of which the table holds the satchel alone.
+// [orig: PlayerProfile_InitDefaults @0x548db0 - the class-8 pages @0x548fd6 / @0x54903b;
+//  NapiNPClientMsg_TeamAssign - g_CharSelClass @0x432d94 (dfx2.exe)]
+void fresh_profile_pages() {
+	expect(fresh_resubmit_names(*title_by_code("dfx2"), dfx2()) ==
+					(std::vector<std::string>{
+							"WPN_M4AUTO", "WPN_MK23", "WPN_SATCHEL_CHARGE", "WPN_KNIFE"}),
+			"DFX2-29: a fresh DFX2 joiner sends dfx2.exe's class-8 page");
+	expect(fresh_resubmit_names(*title_by_code("jo"), jo()) ==
+					(std::vector<std::string>{"WPN_SATCHEL_CHARGE"}),
+			"a fresh JO joiner sends its own class-8 page");
 }
 
 // Drive a joiner speaking `protocol` from its hello to its JOIN and return the JOIN's TLV names, its
@@ -260,6 +313,7 @@ void join_carries_the_glsvss_request() {
 
 int main() {
 	loadout_class_byte();
+	fresh_profile_pages();
 	join_carries_the_cd_key();
 	join_carries_the_glsvss_request();
 	if (g_failures == 0) {

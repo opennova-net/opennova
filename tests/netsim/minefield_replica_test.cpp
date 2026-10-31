@@ -4,6 +4,7 @@
 #include <runtime/world/world.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h> // title_protocol (the 0x0F fold reads its protocol)
 #include <cstdio>
 #include <memory>
 
@@ -13,6 +14,7 @@ static int failures = 0;
 
 int main() {
     replication::ClientReplicaPipeline pipeline;
+    pipeline.set_protocol(title_protocol("jo"));
     std::vector<uint8_t> load(23 + kWorldStateAmmoPoolCount * 4 + 4);
     load[22] = 8;
     pipeline.apply(s2c::WORLD_STATE_LOAD, load);

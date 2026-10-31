@@ -1,5 +1,6 @@
 #pragma once
 
+#include <runtime/controls/controls.h> // Catalog (the head's row flags)
 #include <runtime/controls/input_event_queue.h>
 #include <runtime/hud/hud_minimap.h> // HudMinimapRadar
 #include <runtime/world/local_player_view.h>
@@ -427,6 +428,11 @@ public:
 	virtual RoleKind kind() const = 0;
 	virtual void bind(mission::MissionKernel &kernel) { kernel_ = &kernel; }
 	mission::MissionKernel *kernel() const { return kernel_; }
+	// The binding catalog of the title the role runs as (controls::title_catalog), whose row
+	// flags the dispatcher's head reads by a code (action_head_admits): Jointops.exe's until
+	// the embedder names its session title's. `catalog` outlives the role.
+	void set_controls(const controls::Catalog &catalog) { controls_ = &catalog; }
+	const controls::Catalog &controls() const { return *controls_; }
 	// The dead player's medic call (C2S 0x2E) for this role; the entity, dead
 	// and cooldown gates are the shared prologue's. False = nothing sent.
 	virtual bool send_medic_request() { return false; }
@@ -559,8 +565,9 @@ public:
 	// for a dead local player and under the round-over gate, 0x40 for a live one, 0x400
 	// while the local client's pre-round timer runs, 0x8000000 under the deploy overlay,
 	// 0x10 in a session. A key row's event and a console-queued one alike (the Respawn
-	// row 68, the stance rows 9..11 and the seat rows 17..26, 0x0C000C01; the scope row
-	// 105, 0x4C000C01; the mouse look rows, 0x0C100425 / 0x0C200425). True = the event
+	// row, code 55, the stance rows 169 / 170 / 172 and the seat rows 182..191, 0x0C000C01;
+	// the scope row, code 6, 0x4C000C01; the mouse look rows 164 / 166, 0x0C100425 /
+	// 0x0C200425), the row the role's catalog (controls()) carries. True = the event
 	// reaches its arm.
 	bool action_head_admits(int32_t code);
 	// The Respawn key (dispatch 55) past the row's head gates: the local
@@ -637,6 +644,7 @@ public:
 
 protected:
 	mission::MissionKernel *kernel_ = nullptr;
+	const controls::Catalog *controls_ = &controls::default_catalog();
 	bool input_reset_pending_ = false; // take_input_reset
 	controls::InputEventQueue input_events_; // input_events
 	// A reset ran in this input frame's drain (Input_ResetAllState's queue memset): the

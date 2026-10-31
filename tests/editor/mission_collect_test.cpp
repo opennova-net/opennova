@@ -6,7 +6,9 @@
 //
 // Pinned: a crate ahead of the camera is admitted and one behind it dropped, each verdict naming its record's row; a
 // record moved under a gesture is collected where it stands now (a crate brought in front is admitted, one taken
-// behind the eye dropped); a load over no records collects nothing; a closed collect drops nothing.
+// behind the eye dropped); a load over no records collects nothing; a closed collect drops nothing. The world a load
+// over a project's files makes runs the project's target game's rules (MissionFiles::game): a DFX2 project's holds
+// DFX2's TitleRules, a JO project's JO's.
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -21,6 +23,7 @@
 #include <editor/preview/mission_world.h>
 #include <formats/mission/bms.h>
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/world/title_rules.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
@@ -133,7 +136,7 @@ struct CollectRig {
 		eye[1] = (marks[0].y + marks[1].y) / 2.0;
 		eye[2] = height(eye[0], eye[1]) + 40.0;
 	}
-	void load() { collect.load(std::make_shared<MissionFiles>(files), mission, ground, marks); }
+	void load() { collect.load(std::make_shared<MissionFiles>(files, "jo"), mission, ground, marks); }
 	// The view over the eye looking west and 30 degrees down, in the presentation frame (x, z up, -y).
 	opennova::world::OcclusionViewSpec view() const {
 		opennova::world::OcclusionViewSpec spec;
@@ -223,12 +226,27 @@ int test_empty_and_closed() {
 	return 0;
 }
 
+// The world loaded over a project's files runs that project's target game's rules, never another title's: a DFX2
+// project's holds DFX2's (its own TitleRules row, not Joint Operations').
+int test_project_game_rules() {
+	namespace world = opennova::world;
+	CollectRig rig;
+	TEST_EXPECT(&world::title_rules("dfx2") != &world::title_rules("jo"));
+	for (const char *game : {"dfx2", "jo"}) {
+		MissionWorld loaded;
+		loaded.load(std::make_shared<MissionFiles>(rig.files, game), rig.mission, rig.ground);
+		TEST_EXPECT(loaded.world.rules.title_rules == &world::title_rules(game));
+	}
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	TEST_EXPECT(test_ahead_and_behind() == 0);
 	TEST_EXPECT(test_moves() == 0);
 	TEST_EXPECT(test_empty_and_closed() == 0);
+	TEST_EXPECT(test_project_game_rules() == 0);
 	std::printf("editor_mission_collect OK\n");
 	return 0;
 }

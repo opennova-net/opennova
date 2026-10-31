@@ -2,7 +2,10 @@
 
 #include <base/title/title.h>
 #include <net/protocol/protocol.h>
-#include <runtime/world/title_rules.h>
+
+namespace opennova::world {
+struct TitleRules; // runtime/world/title_rules.h (opennova_games_rules)
+}
 
 namespace opennova::games {
 

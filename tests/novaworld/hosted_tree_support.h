@@ -109,7 +109,7 @@ inline std::vector<hosted::TreeMission> missions_of(const fs::path &dir, hosted:
 	const bool have_texts = opennova::pff::pff_open(&texts, (dir / pair.texts).u8string().c_str()) == 0;
 	std::vector<opennova::mission_catalog::Row> rows =
 			opennova::mission_catalog::archive_rows(missions, have_texts ? &texts : nullptr, nullptr);
-	opennova::mission_catalog::sort_rows(rows);
+	opennova::mission_catalog::sort_rows(rows, opennova::MissionListOrder::FileName);
 	for (const opennova::mission_catalog::Row &row : rows) {
 		if (row.game_mode == 0) continue;
 		out.push_back({ row.file, row.title });

@@ -11,7 +11,9 @@
 // saved game.cfg at each map change. The run happens in a temp working directory, where
 // the server writes its game.cfg and activesrvr.txt (ADR 0051 d2; the files
 // themselves are opennova_serve_game_cfg's).
+#include "lister.h" // serve::machine_tokens (the CD-key read's fingerprint)
 #include "server.h"
+#include <net/novacrypto/cdkey.h>
 #include <net/protocol/protocol.h>
 #include "serve_test_support.h"
 #include "../npruntime/joiner_mission_start.h" // the harness's end of a released mission start
@@ -129,6 +131,15 @@ int main() {
 		serve::ServeOptions dfx2;
 		CHECK(parse_options(0, dfx2) == 0);
 		dfx2.game = "dfx2";
+#ifndef _WIN32
+		// The server's own CD key: with no registry, the working directory's cdkiid.dat stands in
+		// for the value, this machine's activation of a wire key (Windows reads the registry's).
+		const cdkey::KeyChains &chains = *title_protocol("dfx2")->cd_key;
+		const std::string own_wire = cdkey::make_wire_key(chains, "OPENNOVA-0001");
+		const std::string nwact = cdkey::make_activation(chains, own_wire,
+				serve::machine_tokens(*title_protocol("dfx2")->nwpssk_mix).nwpssk);
+		CHECK(write_bytes(work / "cdkiid.dat", std::vector<uint8_t>(nwact.begin(), nwact.end())));
+#endif
 		serve::Server served(dfx2);
 		std::string why;
 		CHECK(served.start(why));
@@ -147,6 +158,15 @@ int main() {
 		CHECK(session.config.effective_send_holdoff_ticks() == 12);
 		CHECK(session.config.entity_send_budget == 600);
 		CHECK(replication::entity_send_budget() == 600);
+#ifndef _WIN32
+		// The boot read decoded it, and the session holds the wire key as the host's own, the id
+		// its LAN join check refuses a joiner sending (code 12).
+		CHECK(cdkey::process_key_info().status == 1 &&
+				cdkey::process_key_info().keys.cdkiid == own_wire);
+		CHECK(session.host_cd_keys.cdkiid == own_wire && session.host_cd_keys.exp1.empty());
+		std::error_code removed;
+		fs::remove(work / "cdkiid.dat", removed);
+#endif
 		served.stop();
 		serve::ServeOptions bhd;
 		CHECK(parse_options(0, bhd) == 0);
@@ -223,6 +243,9 @@ int main() {
 	CHECK(tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
 	CHECK(!tables.class_has_attribute(1, world::MissionTables::kCharAttrMedic));
 	CHECK(tables.class_attribute_flags[0] == 0x1u); // CHARACTER1: AutoScope
+	// The server draws nothing: the mission's models keep what the simulation reads alone
+	// (assets::ModelData), which holds a JO:TAC server under its slot's memory.
+	CHECK(server.kernel().assets().model_data() == assets::ModelData::Simulation);
 	// Serve Only: the dedicated role, no local client; the host's own slot 0's hidden body,
 	// owned by connection 0, is its local player (D-NET-352) [orig:
 	//  Server_InitAllPlayerEntitiesForRound @0x516B56..0x516B72; Game_StartMission

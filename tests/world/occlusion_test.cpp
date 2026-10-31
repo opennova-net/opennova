@@ -23,6 +23,7 @@
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/destruction.h> // the draw's husk leg
 #include <runtime/world/occlusion.h>
 #include <runtime/world/occlusion_camera.h>
 #include <runtime/world/occlusion_feed.h>
@@ -1762,6 +1763,58 @@ void test_building_verdicts_walk_the_table() {
     }
 }
 
+// A visible building is drawn, so its draw runs the husk leg; one no batch holds is not:
+// of two husked buildings holding their final husk past their destroy delay, the visible
+// one spends the delay, restamps its death tick and fades, and the hidden one keeps all
+// three. [orig: Terrain_RenderSectorModels @ 0x5c5d30 - Render_SectorEntity @ 0x5c603f
+//  over g_VisibleBuildingBatch; Render_SectorEntity @ 0x5c4190 - +0x38 @ 0x5c41f9,
+//  Entity_PublishSwapFadePhases @ 0x5c4200]
+void test_a_visible_building_runs_the_husk_leg() {
+    Rig rig;
+    Entity placeholder;
+    placeholder.kind = EntityKind::Marker;
+    const EntityHandle hole = rig.world.registry.spawn(2, placeholder);
+    const EntityHandle a =
+        rig.add_building(20.0, 10.0, building_collision(2, 2, 3), one_room_window());
+    rig.world.registry.get(a)->bms_id = 81;
+    rig.rebuild();
+    rig.ow.init_mission(rig.world, rig.cw);
+    rig.world.registry.despawn(hole);
+    const EntityHandle c =
+        rig.add_building(25.0, 10.0, building_collision(2, 2, 3), one_room_window());
+    rig.world.registry.get(c)->bms_id = 82; // spawned past the table's build: in no batch
+    ItemDeathTraits traits; // the default fade: 50 + 4 x 25 ticks
+    rig.world.tables.item_death_traits.set(901, traits);
+    for (const EntityHandle h : {a, c}) {
+        Entity &e = *rig.world.registry.get(h);
+        e.item_id = 901;
+        e.engine_flags |= kEntityFlagDead | kEntityFlagHusk;
+        e.final_husk_loaded = true;
+        e.destroy_timer = 10;
+        e.death_tick = 100;
+    }
+    const OcclusionFrameCamera cam = rig.camera(5.0, 10.0, 1.5);
+    std::vector<opennova::inmatch::BuildingVerdict> verdicts;
+    const auto collect = [&](uint32_t tick) {
+        rig.world.logic_tick = tick;
+        rig.ow.build_frame(rig.world, rig.cw, cam);
+        opennova::inmatch::collect_building_verdicts(rig.world, rig.cw, rig.ow, verdicts);
+    };
+    collect(200);
+    CHECK(verdicts.size() == 2);
+    if (verdicts.size() == 2) {
+        CHECK(verdicts[0].bms_id == 81 && building_visibility_visible(verdicts[0].packed));
+        CHECK(verdicts[1].bms_id == 82 && !building_visibility_visible(verdicts[1].packed));
+    }
+    const Entity &shown = *rig.world.registry.get(a);
+    const Entity &hidden = *rig.world.registry.get(c);
+    CHECK(shown.destroy_timer == 0 && shown.death_tick == 200);
+    CHECK(hidden.destroy_timer == 10 && hidden.death_tick == 100);
+    collect(250);
+    CHECK(shown.destroy_phases_q16[1] == 65536 && shown.destroy_phases_q16[0] != 0);
+    CHECK(hidden.destroy_phases_q16 == (std::array<int32_t, 6>{}));
+}
+
 // The reflected subscene draws from the eye mirrored in the water plane at or
 // above it (yaw kept, pitch and roll negated), from the live eye below it.
 // [orig: Render_MainScene @ 0x5c1240 - the side test @ 0x5c1367..0x5c1370,
@@ -2111,6 +2164,7 @@ int main() {
     test_the_mirror_collect_walks_the_entities_under_its_match();
     test_the_mirror_building_verdicts();
     test_building_verdicts_walk_the_table();
+    test_a_visible_building_runs_the_husk_leg();
     test_the_mirror_reflected_view();
     test_round_restart_keeps_the_first_weld();
     test_eye_in_front_of_a_window_keeps_the_exterior();

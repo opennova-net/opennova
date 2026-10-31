@@ -1,7 +1,8 @@
-// The loading screen's background pick and the two rules that read its custom
+// The loading screen's background pick and the splash gate that reads its custom
 // flag (runtime/hud/loading_background.h): the sidecar when the probe finds it,
-// else loadscrn.pcx; the band's right edge; the SP splash gate.
-// [orig: Render_LoadingScreen @0x521db5..0x521e94, @0x521e20, @0x521fec..0x522006;
+// else loadscrn.pcx; the SP splash gate (the band's edge, the flag's other
+// reader, is the title's: loading_screen_test).
+// [orig: Render_LoadingScreen @0x521db5..0x521e94, @0x521e20;
 //  Game_StartMission @0x525d38..0x525d48]
 
 #include <runtime/hud/loading_background.h>
@@ -41,9 +42,6 @@ int main() {
 	bg = hud::loading_background("", has_00trg);
 	expect(bg.image == "loadscrn.pcx" && !bg.custom && probed.count(".pcx") == 1,
 			"no mission file probes the bare extension, then falls back");
-
-	expect(hud::loading_band_right(true) == 661, "a custom background's band ends at 661");
-	expect(hud::loading_band_right(false) == 782, "the stock background's band ends at 782");
 
 	expect(hud::start_mission_splash_due(false, true), "SP over a custom background splashes");
 	expect(!hud::start_mission_splash_due(true, true), "a session load never splashes");

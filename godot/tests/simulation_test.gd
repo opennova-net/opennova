@@ -3614,9 +3614,17 @@ func test_view_actions_set_the_input_action_bits() -> void:
 	sim.apply_local_player_view_action(Simulation.VIEW_ACTION_WITH_GUN)
 	assert_eq(sim.debug_input_action_bits(), 0x8000000 | 0x4000000 | 0x10000000,
 			"viewwithgun sets 0x10000000")
-	sim.apply_local_player_view_action(412)
+	sim.apply_local_player_view_action(411)
 	assert_eq(sim.debug_input_action_bits(), 0x8000000 | 0x4000000 | 0x10000000,
-			"an unbound action writes nothing")
+			"an action without a view case writes nothing")
+	# The 1st Person Toggle (dfx2.exe's F1): the third-person bit set -> it and the cockpit bit
+	# cleared, the cockpit bit set, first person, the FP gun bit on.
+	assert_true(sim.apply_local_player_view_action(Simulation.VIEW_ACTION_TOGGLE),
+			"the toggle's first-person arm turns the FP gun bit on")
+	assert_eq(sim.debug_input_action_bits(), 0x4000000 | 0x10000000, "the toggle's first-person arm")
+	assert_false(sim.apply_local_player_view_action(Simulation.VIEW_ACTION_TOGGLE),
+			"the chase arm leaves the FP gun bit")
+	assert_eq(sim.debug_input_action_bits(), 0x4000000 | 0x8000000, "the toggle's chase arm")
 
 
 # --- Def-backed and rig tests moved from the retired retail half ------------

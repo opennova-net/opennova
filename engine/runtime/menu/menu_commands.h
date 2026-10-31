@@ -15,7 +15,7 @@
 //   binds on whatever document it opens (godot/game/menu_shell.gd's defaults read them through
 //   MenuDriver.command_names), and the shell's delegates that own a whole document by the
 //   controls it holds (the LAN multiplayer screens [orig: UI_RegisterLANMultiplayerCallbacks
-//   @ 0x558d20], PLAYER_INFO [orig: PlayerInfo_InitProfileSelector @ 0x5611b0]).
+//   @ 0x558d20]) or by its screen's name (PLAYER_INFO, is_player_info_document).
 // The editor's menu preview in Try mode (ADR 0046 DI-35) says from these what the game would do,
 // where the game would leave the menu.
 
@@ -89,12 +89,24 @@ bool is_mission_menu_file(const std::string &file);
 // What the game does with an APPMSG row's message, on any screen: the row raises scene event 10
 // with its text, and the game's handler starts the updater on "UPDATE" (without case, untrimmed)
 // and does nothing with another [orig: CUIWidget_HandleScriptedAction @ 0x6497f0 case 13
-// @ 0x649b88..0x649b99 (the row's text +0x1C) -> sub_63B5C0 @ 0x63b5c0 (CUIScene_RaiseEvent(10));
+// @ 0x649b88..0x649b99 (the row's text +0x1C) -> CUIScene_RaiseAppMessage @ 0x63b5c0 (CUIScene_RaiseEvent(10));
 // UI_DispatchScreenEvent @ 0x54e6a0 case 10 - the _stricmp with "UPDATE" @ 0x54f3a4..0x54f3b4,
 // UI_LaunchUpdateProcess @ 0x54f3c1]. No availability gates it: the launch runs update.exe and
 // the game quits once the process started (UI_LaunchUpdateProcess @ 0x55b0b0, the CreateProcessA
 // test @ 0x55b181, the quit @ 0x55b194..0x55b1a2).
 MenuCommand app_message_command(const std::string &message);
+
+// The character screen's document: one holding a screen named PLAYER_INFO (without case). Both
+// executables know the screen by its name alone: their screen dispatch runs the screen's one-time
+// registration on its init and its populate on its activation for the screen of that name, whatever
+// controls it holds, each fill then finding its controls by name and skipping one the screen lacks
+// [orig: UI_DispatchScreenEvent @ 0x54e6a0 - _stricmp(.., "PLAYER_INFO") @ 0x54e9d4 ->
+// UI_InitPlayerInfoOnce @ 0x54e9e0 (PlayerInfo_RegisterAllControls @ 0x561470), @ 0x54eec1 ->
+// PlayerInfo_InitProfileSelector @ 0x5611b0 (called @ 0x54eecd)] [orig: UI_DispatchScreenEvent
+// @ 0x54b920 - @ 0x54bc2d -> UI_InitPlayerInfoOnce @ 0x54bc39 (PlayerInfo_RegisterAllControls
+// @ 0x55f720), @ 0x54c11a -> PlayerInfo_InitProfileSelector @ 0x54c126 (dfx2.exe)]. dfx2.exe's
+// player.mnu holds no NATIONALITY or DIVISION.
+bool is_player_info_document(const MenuRuntime &menu);
 
 // The commands the game binds on a document as the runtime holds it now (after each open), by
 // control NAME: on a screen a mission opens (in a mission) or the SINGLE_PLAYER, STARTUP and

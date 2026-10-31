@@ -53,6 +53,7 @@ func test_initialize_handshake() -> void:
 	var result: Dictionary = envelope["result"]
 	assert_eq(result["protocolVersion"], "2025-03-26", "Known older version echoes.")
 	assert_eq(result["serverInfo"]["name"], "opennova")
+	assert_eq(result["serverInfo"]["version"], LaunchFlags.one_version(), "ONE's build, the program's own")
 	assert_eq(result["instructions"], "test instructions")
 	assert_eq(result["capabilities"]["tools"]["listChanged"], false)
 	assert_eq(int(result["_meta"]["pid"]), OS.get_process_id(), "The endpoint names the process serving it.")

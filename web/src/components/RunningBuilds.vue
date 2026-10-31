@@ -78,7 +78,7 @@ import {
   serveBuilds,
   type PartBuilds,
 } from '../utils/buildView';
-import { countLabel } from '../utils/infraView';
+import { countLabel } from '../utils/format';
 
 const props = defineProps<{
   overview: InfraOverview;

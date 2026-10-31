@@ -7,6 +7,7 @@
 // (MenuTextureDecoder): the game's frame decodes and uploads them (the tests read only the
 // size from the header). Witness record: docs/mnu/menu-re.md ("Menu textures and fonts").
 
+#include <base/title/title.h>
 #include <base/vfs/file_source.h>
 #include <formats/fnt/fnt.h>
 #include <formats/mnu/mnu.h>
@@ -75,6 +76,20 @@ public:
 	// A font named after the configure (a marquee's node fonts), loaded and registered the
 	// same way; false when it does not load.
 	bool add_font(MenuFrameCompiler &compiler, const std::string &name, const FileSource &files);
+	// Every texture slot `compiler` interned past the ones this loader reported (a widget's
+	// run-time image, MenuFrameCompiler::add_runtime_texture), loaded and its size reported, its
+	// key kept with the configure's (slot_keys); returns how many it added.
+	int load_added_textures(MenuFrameCompiler &compiler, const FileSource &files, MenuTextureDecoder &decoder);
+	// The HUD label face a table painter draws with (MenuTableCellCanvas::hud_label): the
+	// HUD's g_HUDLabelFont as `title` loads it for a `surface_w` wide screen
+	// (hud::hud_label_font_choice: the tier's normal .fnt at its slot scale), read through
+	// `files` and registered under kMenuHudLabelFontName now and at every configure after,
+	// its scale set on `compiler`. A call naming the file already held reads nothing; false
+	// when the face does not load (the painter's labels then draw nothing).
+	// [orig: HUD_InitAllFonts @0x51bd70 - HUD_LoadFontIntoSlot(FullPath, &g_HUDLabelFont,
+	//  (w << 16) / divisor) @0x51beee; sub_550CF0 draws g_HUDLabelFont @0x550dc8 (dfx2.exe)]
+	bool set_hud_label_face(MenuFrameCompiler &compiler, const Title &title, int surface_w,
+	                        const FileSource &files);
 	// Whether a texture name loads (retail's dispatch, then a decode), kept like the
 	// screen's own.
 	bool texture_loads(const std::string &name, const FileSource &files, MenuTextureDecoder &decoder);
@@ -128,7 +143,9 @@ private:
 	// when it loaded.
 	LoadResult load_texture_(const std::string &name, const FileSource &files, MenuTextureDecoder &decoder,
 	                         std::string &key, const TextureEntry **out);
-	LoadResult load_font_(MenuFrameCompiler &compiler, const std::string &name, const FileSource &files);
+	// `name` registers the font `file` holds.
+	LoadResult load_font_(MenuFrameCompiler &compiler, const std::string &name, const std::string &file,
+	                      const FileSource &files);
 	// True when the name was not noted yet.
 	bool note_unresolved_(const std::string &name, LoadResult result);
 	void sweep_(MenuTextureDecoder &decoder);
@@ -146,6 +163,7 @@ private:
 	std::vector<std::string> missing_tables_;
 	std::vector<std::string> unreadable_tables_;
 	std::vector<MenuDependency> dependencies_;
+	std::string hud_label_file_; // the HUD label face's .fnt (set_hud_label_face), "" none
 };
 
 // The names a configure could not load, split into the files the source lacks and the files it

@@ -1,6 +1,7 @@
 #include "options_screen.h"
 #include "options_policy.h"
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <runtime/profile/profile_controls.h>
 
 #include <cstdlib>
@@ -128,9 +129,11 @@ int OptionsScreen::control_table(const MenuRuntime &menu) const {
 // Presence gates keep same-named controls on SP/session screens out of the
 // options handlers. The in-game dialog is the document authoring OPT_ACCEPT.
 // [orig: UI_PopulateControlMappingList @0x55c0c0; UI_OptionsScreenInit @0x554800]
-void OptionsScreen::prepare(MenuRuntime &menu, const playersav::ProfileRecord *record) {
+void OptionsScreen::prepare(MenuRuntime &menu, const playersav::ProfileRecord *record,
+		const controls::Catalog &catalog) {
 	end_remap(menu, false);
-	bindings_ = record != nullptr ? profile::options_bindings(*record) : controls::BindingSet();
+	bindings_ = record != nullptr ? profile::options_bindings(*record, catalog)
+	                              : controls::BindingSet(catalog);
 	const int table = control_table(menu);
 	has_table_ = table >= 0;
 	is_surface_ = has_table_;
@@ -197,6 +200,16 @@ void OptionsScreen::apply_policy(MenuRuntime &menu) const {
 	}
 }
 
+// [orig: sub_55AB20 @0x55ab20 (dfx2.exe) - UI_FindScreenControl("OPTIONS", "ADVANCED_OUTLINE")
+//  @0x55b833 and CWnd_SetShown(0) @0x55b840; "ADVANCED_TAB" @0x55b855, CWnd_SetShown(0) @0x55b862]
+void OptionsScreen::apply_title(MenuRuntime &menu, const Title &title) const {
+	if (!is_surface_ || !title.options_hides_advanced) return;
+	for (const char *name : { "ADVANCED_OUTLINE", "ADVANCED_TAB" }) {
+		const int id = menu.widget_id(name);
+		if (id >= 0) menu.set_widget_shown(id, false);
+	}
+}
+
 void OptionsScreen::seed_profile(MenuRuntime &menu, const playersav::ProfileRecord *record) const {
 	if (!is_surface_ || record == nullptr) return;
 	seed_mouse_and_joystick(menu, *record);
@@ -257,7 +270,7 @@ void OptionsScreen::fill(MenuRuntime &menu, int table, int blank) {
 // shown again, and the press arms the row only when it leaves no row selected
 // (the selected row compared with the capture's row, which the end reset)
 // (D-CTRL-3). [orig: UI_ControlsRemapArmHandler @0x55d560 - the end
-// @0x55d583..0x55d585, the first selected row (sub_63F550 @0x63f550) and its
+// @0x55d583..0x55d585, the first selected row (CTableWnd_GetFirstSelectedRow @0x63f550) and its
 // compare @0x55d58c..0x55d591; UI_UpdateControlMappingDisplay @0x55b700 (the
 // reset @0x55b9ad..0x55b9b3); CTableWnd_HandleNamedEvent @0x642400 - the
 // selection write @0x64259d, the row event @0x64261a]
@@ -314,7 +327,7 @@ int OptionsScreen::activate(MenuRuntime &menu, playersav::ProfileRecord *record,
 	if (upper == "OPT_CANCEL") {
 		// Cancel re-runs the screen's init over the record, which the dialog
 		// left untouched [orig: @0x5553a7 -> UI_OptionsScreenInit @0x554800].
-		prepare(menu, record);
+		prepare(menu, record, bindings_.catalog());
 		seed_profile(menu, record);
 		return RestorePreview;
 	}

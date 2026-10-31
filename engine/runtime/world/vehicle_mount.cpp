@@ -15,6 +15,7 @@
 #include <runtime/world/mount_controls.h> // emplaced_gun_frame_heading, emplaced_word_bam
 #include <runtime/world/mounted_pose.h> // seat_bone_pose_on_carrier_matrix
 #include <runtime/world/vehicle_attach.h>
+#include <runtime/world/vehicle_part_anim.h> // rotor_spawn_full, the joiner's aircraft init
 #include <runtime/world/weapon_fire_gate.h> // entity_in_friendly_farp
 #include <runtime/world/weapon_inventory.h> // weapon_slot_initial_zoom, the seat's pool reads
 
@@ -244,7 +245,8 @@ void VehicleSystem::run_weapon_slot_class_init(Entity &entity) {
             tick_emplaced_weapon_class_update(world, entity);
         return;
     }
-    if (row->air_class_init && (entity.item_attrib & kItemAttribEweap) != 0) {
+    if (!row->air_class_init) return;
+    if ((entity.item_attrib & kItemAttribEweap) != 0) {
         // The CHel / cpln init's tail, under the def's EWeap bit: the +0x474 slot bound, then
         // its startrounds split with no model test.
         // [orig: Entity_InitHelicopterAIFromDef @0x4683C0 -> Entity_InitAircraftWeaponBones (the
@@ -257,6 +259,35 @@ void VehicleSystem::run_weapon_slot_class_init(Entity &entity) {
             split_weapon_slot_ammo(entity,
                     world.tables.weapons.by_index(entity.primary_weapon_slot_adm)->startrounds);
     }
+    // Then, on a joiner alone (an in-session peer that is not the authority), the row's +0xB0,
+    // the 0x0D's copy of the host brain's latch byte, comes back: the brain takes its low two
+    // bits (the claimant-engine and movement-direction latches; the byte store clears the
+    // other six), and with its bit 7, set while the host's rotor turned, the rotor starts at
+    // the title's full rate and at full speed. The init hands over the brain on its brain leg
+    // alone; its no-AI-slot leg hands over a stack word it never wrote, which ours, with no
+    // brain to hold the bits, writes nowhere. A 0x18 row's +0xB0 is 0, and a respawn drops
+    // the rotor words after this (respawn).
+    // [orig: Entity_InitAircraftWeaponBones @0x490160 - the authority test @0x4902BB, the
+    //  session test @0x4902C4, the brain test @0x4902CD..0x4902D3, +0x318 = +0xB0 & 3
+    //  @0x4902D5..0x4902DE, the bit-7 test @0x4902E4, +0x468 = 0x2D82D @0x4902ED, +0x460 =
+    //  0x0CCCCCC0 @0x4902F7; Entity_InitHelicopterAIFromDef @0x4683C0 - the brain pushed
+    //  @0x4686A0, the unwritten word @0x46869C]
+    // [orig: sub_490170 @0x490170 - the same tail @0x4902CB..0x490307, +0x468 = 0x5B05B
+    //  @0x4902FD (dfx2.exe)]
+    if (!world.rules.mp_session || world.rules.projectile_authority) return;
+    Entity::VehicleMotorState &m = entity.veh;
+    if (world.ai.for_handle(entity.handle) != nullptr) {
+        const uint32_t bits = static_cast<uint32_t>(m.spawn_sound_latch) & 3u;
+        m.engine_sound_latched = (bits & 1u) != 0;
+        m.reverse_sound_latched = (bits & 2u) != 0;
+        m.light_sound_latched = m.flare_latched = false;
+        m.skid_sound_latched = false;
+        m.collision_sound_latched = false;
+        m.pivot_sound_latched = false;
+        m.tumble_hard_latched = m.tumble_med_latched = false;
+    }
+    if ((m.spawn_sound_latch & 0x80) != 0)
+        rotor_spawn_full(m.part_spin, world.rules.title().part_spin);
 }
 
 void VehicleSystem::run_weapon_slot_class_inits() {

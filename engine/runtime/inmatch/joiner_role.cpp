@@ -42,6 +42,7 @@
 #include <runtime/inmatch/loadout_submit.h> // apply_weapon_loadout_name_list (the 0x5A name list)
 #include <runtime/world/player_spawn.h> // rebind_player_camouflage_row (the 0x5A row), the replica re-pick
 #include <runtime/world/infantry.h>      // kAnimStanceFlag* (the witnessed stance bits)
+#include <runtime/world/infantry_sound.h> // player_blip_character (the replica bodies' sound sex)
 #include <runtime/world/local_player_view.h> // local_player_view_refresh (the mount-change edge)
 #include <runtime/world/player_view.h>   // the fullscreen damage-feedback words + the shake arm
 #include <runtime/world/player_weapon.h>
@@ -88,6 +89,7 @@ ClientRuntime &JoinerRole::create_runtime(const std::string &player_name, JoinRo
 	runtime->set_host_address(host_addr_);
 	runtime->set_protocol(protocol_);
 	runtime->set_rules(rules_);
+	runtime->set_title(title_);
 	runtime->use_process_state(client_process_);
 	return *runtime;
 }
@@ -398,7 +400,8 @@ world::VehicleSeatOccupancy JoinerRole::seat_occupancy(
 	const world::Entity *local = kernel_->local.player();
 	if (local != nullptr && local->mounted && local->mount_target == carrier.handle &&
 			local->mount_bone == seat.bone_index) {
-		return {true, local->handle == requester, local->health, local->health_max, true, true};
+		return {true, local->handle == requester, local->health, local->health_max, true, true,
+				local->handle};
 	}
 	const auto &state = runtime->state();
 	const replication::ClientEntityState *rider = nullptr;
@@ -427,11 +430,13 @@ world::VehicleSeatOccupancy JoinerRole::seat_occupancy(
 		// reconciles it to L; retail reads the one local entity either way.
 		if (local != nullptr && runtime->has_self_handle() &&
 				rider->handle == runtime->self_handle())
-			return {true, local->handle == requester, local->health, local->health_max, true, true};
+			return {true, local->handle == requester, local->health, local->health_max, true, true,
+					local->handle};
 	}
 	if (rider == nullptr) return {};
 
-	world::VehicleSeatOccupancy result{true, false, 1, 1, true, rider->cls == EntityClass::Player};
+	world::VehicleSeatOccupancy result{true, false, 1, 1, true, rider->cls == EntityClass::Player,
+			world::EntityHandle{rider->handle}};
 	const def::DefItemsFile *items = kernel_->items_table();
 	const def::DefItemDef *item = items != nullptr
 			? mission::find_item_def(*items,
@@ -1347,11 +1352,15 @@ void JoinerRole::pump() {
 	rt.view().tick_remote_motion_after_self();
 	// Every replica body's sound block this tick, in walk order: its event word's foley at the
 	// body, its feet at foot level through the slot pick (one source per body: the wire
-	// presenter plays none on a joiner).
+	// presenter plays none on a joiner), a player's in the sex of the character its avatar blip
+	// names (the title's viewer-side pick, DFX2-53).
 	for (const replication::ClientReplicaPipeline::ReplicaBodySoundWord &word :
 			rt.view().drain_body_sound_words())
 		world::wire_body_slot_sounds(world, &word.events, 1, word.capsule_bottom, word.type_id,
-				word.character_id, word.handle, word.on_entity, word.pos);
+				word.character_id != 0
+						? world::player_blip_character(world, word.character_id, word.team)
+						: uint16_t{0},
+				word.handle, word.on_entity, word.pos);
 	lap.mark(devtools::Slot::SIM_CLIENT_WORLD);
 	// The door callback's C2S 0x1A requests this tick raised, queued in raise
 	// order for the next send boundary (world/doors.cpp carries the witness).

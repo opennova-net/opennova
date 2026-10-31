@@ -14,6 +14,10 @@
 
 #include <runtime/hud/hud_minimap.h>
 
+namespace opennova {
+struct Title; // base/title/title.h
+} // namespace opennova
+
 #include <array>
 #include <cstdint>
 #include <string>
@@ -91,6 +95,9 @@ struct MapViewPan {
 	int32_t window_w = 0;
 	int32_t window_h = 0;
 	float pixel_ratio = 0.0f;
+	// The zoom ceiling the drag, the wheel, the CMAP step and the DEATH fit clamp to: 10.0, each
+	// view's by its title (Title::map_view_zoom_max; CommandMapView / DeathMapView::apply_title).
+	float zoom_max = kMapViewZoomMax;
 
 	// The render-pass stamps: the window size and the menu's device ratio,
 	// scaled(800) x 0.00125 [orig: @0x554336..0x55437f; flt_7D2294 = 0.00125].
@@ -104,10 +111,10 @@ struct MapViewPan {
 	//  x product through flt_7C32B8 = -65536)]
 	void drag_pan(int32_t x, int32_t y, int32_t &out_dx, int32_t &out_dy);
 	// A right-drag move: zoom x= 1.005^(-dx), stored before the clamp to
-	// [0.1, 10] [orig: @0x55447d..0x554504 (DEATH); @0x549cfe..0x549d72 (CMAP)].
+	// [0.1, zoom_max] [orig: @0x55447d..0x554504 (DEATH); @0x549cfe..0x549d72 (CMAP)].
 	void drag_zoom(int32_t x, int32_t y);
 	// One zoom step: direction > 0 zooms in (x0.85, floor 0.1), < 0 out
-	// (x1.1764705, ceiling 10), 0 nothing [orig: DeathScreen_ZoomStep @0x5535d0 (the
+	// (x1.1764705, ceiling zoom_max), 0 nothing [orig: DeathScreen_ZoomStep @0x5535d0 (the
 	// DEATH wheel); CMap_ZoomStep @0x548230 (the CMAP buttons and wheel)].
 	void zoom_step(int direction);
 };
@@ -121,6 +128,8 @@ struct DeathMapFrame {
 	int32_t center_x = 0;
 	int32_t center_y = 0;
 	float scale = 1.0f;
+	// The frame the pane draws round the rect after the map (0: none; DeathMapView::frame_color).
+	uint32_t frame_color = 0;
 };
 
 // DeathScreen_UpdateUI's zoom fit: the spawn-zone AABB (retail's swapped-name
@@ -140,14 +149,27 @@ struct DeathMapFitInput {
 
 // The DEATH map's state machine (the 0x25A39xx globals).
 // [orig: flt_25A39B8 zoom; dword_25A39B0/B4 pan; dword_25A3990/398C the pan
-//  target; byte_25A39A4/A5 the drag latches; dword_25A39A8/AC the last mouse
-//  point; dword_25A3998/399C the window size; flt_25A3994 the pixel ratio;
-//  dword_25A39BC the init latch]
+//  target; dword_25A3988 the zoom ease; byte_25A39A4/A5 the drag latches;
+//  dword_25A39A8/AC the last mouse point; dword_25A3998/399C the window size;
+//  flt_25A3994 the pixel ratio; dword_25A39BC the init latch. dfx2.exe's
+//  twins: g_DeathMapZoom, g_DeathMapPanX/Y, g_DeathMapTargetX/Y, g_DeathMapZoomEase,
+//  g_DeathMapLeftDrag/RightDrag, dword_25A1F58/5C, dword_25A1F48/4C, flt_25A1F44,
+//  g_DeathScreenLoaded (dfx2.exe)]
 struct DeathMapView {
 	MapViewPan view;
 	int32_t target_x = 0;
 	int32_t target_y = 0;
+	// The zoom ease's word: the SPAWNPOINTS_TABLE press sets it (table_pan); the right drag,
+	// the wheel and a fit that lands on the ceiling clear it. Jointops.exe's has no setter:
+	// its DEATH screen registers no table handler, so its ease never runs.
+	bool zoom_ease = false;
 	bool initialized = false;
+	// The title's pane: the frame colour its render hands the pass (0: none).
+	uint32_t frame_color = 0;
+
+	// The pane the title's executable draws: its zoom ceiling and its frame
+	// (Title::map_view_zoom_max / death_map_frame_color).
+	void apply_title(const Title &title);
 
 	// The screen's load event: once per load, the first-ever load seeds zoom
 	// 4.0 and a zero pan (a later load keeps the zoom). The three bytes the
@@ -168,21 +190,26 @@ struct DeathMapView {
 	//  @0x54efd8]
 	void fit(const DeathMapFitInput &in);
 	// The per-main-frame ease: the pan moves one eighth of the way to the
-	// target (arithmetic shift) every frame the menu scene runs. The zoom
-	// ease beside it keys on dword_25A3988, which every writer sets to 0 —
-	// dead code, not ported.
+	// target (arithmetic shift) every frame the menu scene runs; while the
+	// zoom ease's word is set, a zoom above 0.8 takes x0.96 a frame.
 	// [orig: DeathScreen_UpdateShroudReveal @0x554730 — @0x554784..0x5547b4,
-	//  the dead zoom ease @0x5547ad..0x5547d8; per frame from
-	//  UI_ProcessMenuScreenFrame @0x54e67c]
+	//  the zoom ease @0x5547ad..0x5547d8; per frame from
+	//  UI_ProcessMenuScreenFrame @0x54e67c] [orig: DeathScreen_UpdateShroudReveal
+	//  @0x5527eb..0x552845, flt_7C5DCC 0.8, flt_7D3EF0 0.96 (dfx2.exe)]
 	void ease_frame();
+	// The SPAWNPOINTS_TABLE press on a zone's row: the pan target is the zone less the local
+	// player (world::deploy_table_pan_target) and the zoom ease's word is set.
+	// [orig: sub_550CF0 @0x550e9f..0x550eb1 (dfx2.exe)]
+	void table_pan(int32_t dx, int32_t dy);
 	// Event 1: stamp the window and hand back the view the pass draws.
 	// [orig: CMap_OverlayInputHandler @0x554332..0x5543b7]
 	DeathMapFrame render(const MapViewRect &rect, int32_t scaled_800, int32_t player_x,
 			int32_t player_y);
 	// The mouse-class events. Returns true when the event is a move — the
 	// handler then looks up DEATH/SPAWNPOINTS_TABLE and deselects every row
-	// (CTableWnd_SetRowSelected(-1, 0)); the shipped death.mnu authors no
-	// SPAWNPOINTS_TABLE (its list is SPAWNPOINTS_LIST), so the lookup fails.
+	// (world::deploy_map_moved); Jointops.exe's death.mnu authors no
+	// SPAWNPOINTS_TABLE (its list is SPAWNPOINTS_LIST), so there the lookup
+	// fails, dfx2.exe's does [orig: CMap_OverlayInputHandler @0x5511c7..0x5511da (dfx2.exe)].
 	// A move with neither drag armed by its button clears both latches.
 	// `wheel` is the wheel remainder for kWheel (> 0 forward).
 	// [orig: CMap_OverlayInputHandler @0x554310 — the down/up cases
@@ -195,7 +222,7 @@ struct DeathMapView {
 // a waypoint instead of panning).
 // [orig: byte_252DD60 GRID CMap_OnGridCheckbox @0x547ff0; byte_252DD61 TEXT
 //  CMap_OnTextCheckbox @0x5481a0; byte_252DD62 WAYPOINTS CMap_OnWaypointsCheckbox @0x548080;
-//  byte_252DD63 CREATE_WAYPOINTS Settings_BuildDefaultProfile @0x548180]
+//  byte_252DD63 CREATE_WAYPOINTS CMap_OnCreateWaypointsCheckbox @0x548180]
 struct CommandMapToggles {
 	bool grid = true;
 	bool text = true;
@@ -225,6 +252,10 @@ struct CommandMapView {
 	// per mission) and allocates the orders list (the presenter's).
 	// [orig: CMap_InitScreenOnce @0x54b280]
 	void on_load();
+	// The window the title's executable draws: its zoom ceiling (Title::map_view_zoom_max,
+	// DFX2-58), the right drag's and the step's [orig: CMapWindow_HandleEvent @0x5497f0 -
+	// @0x548276, @0x549d5c] [orig: @0x5454e6, @0x546fcc in its twin @0x546a60 (dfx2.exe)].
+	void apply_title(const Title &title);
 	// The mouse-class events. A left press with CREATE_WAYPOINTS set asks for
 	// the waypoint-name dialog instead of panning (kPlaceWaypoint: the
 	// embedder runs the dialog leg and stores the click point); the wheel is
@@ -242,7 +273,7 @@ struct CommandMapView {
 	// WAYPOINTS store the control's checked state (the embedder then checks
 	// both twins from the byte); CREATE_WAYPOINTS flips its byte.
 	// [orig: CMap_OnGridCheckbox @0x548000..0x548011; CMap_OnTextCheckbox @0x5481b0..0x5481c1;
-	//  CMap_OnWaypointsCheckbox @0x548090..0x5480a1; Settings_BuildDefaultProfile @0x548180
+	//  CMap_OnWaypointsCheckbox @0x548090..0x5480a1; CMap_OnCreateWaypointsCheckbox @0x548180
 	//  (`byte_252DD63 = byte_252DD63 == 0`)]
 	void toggle_changed(int which, bool checked);
 	bool toggle(int which) const;
@@ -467,6 +498,11 @@ void map_view_crosshair(const HudMinimapInput &view, const MapViewRect &rect,
 //  0x40000000, 1, 1, 0xFF) @0x5a5a29, Render_LaserSightEffect(rect, 0, 0.0,
 //  0) @0x5a5a40]
 inline constexpr uint32_t kDeathMapMask = 0x2022u;
+// The names bit of that mask, the labels call's 4th argument: dfx2.exe's DEATH view passes 0
+// (HudMinimapOverlays::death_map_no_names, DFX2-115).
+// [orig: the twin of MapOverlay_DrawView @0x5a48a0 - `push 0` @0x5a4a30 into
+//  HUD_DrawEntityLabelsAndMarkers @0x5a4a3e (dfx2.exe)]
+inline constexpr uint32_t kDeathMapNamesBit = 0x2000u;
 
 // Compiles the DEATH MAP window: the terrain + marker walk through the
 // spinmap compiler's windowed mode (the device rect, north-up, the caller's

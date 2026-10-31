@@ -16,6 +16,7 @@ namespace {
 std::string manifest_words(const std::string &role) {
 	if (role == "player_sav" || role == "weapon_sav") return "the player's saved profiles";
 	if (role == "epass_bin" || role == "passgen_bin") return "the player's stored NovaWorld credentials";
+	if (role == "nw_cdata") return "the player's NovaWorld cookies";
 	if (role == "hiscore_txt") return "the high scores the game writes";
 	if (role == "admin_cfg") return "the admin server's configuration";
 	return "this machine's configuration of the game";
@@ -40,6 +41,10 @@ constexpr Written kWritten[] = {
 	{"hello2.bin", "the chunk file test's output", "[orig: ChunkFile_TestWriteAndReload @ 0x56f810]"},
 	{"activesrvr.txt", "a hosted session's marker",
 	 "[orig: Game_HostMultiplayerSession @ 0x4a65a0; deleted by Game_Run @ 0x4a7fb0]"},
+	// OpenNova's stand-in for DFX2's registry value CDKIID where the platform has none
+	// (Protocol::cd_key's stand_in_file, net/novacrypto/cdkey.h machine_key_store).
+	{"cdkiid.dat", "this machine's CD-key activation",
+	 "[orig: CDKey_WriteActivationFromNWACT @0x411e30 (dfx2.exe)]"},
 };
 
 // "SS" and five digits, then a dot: a screenshot [orig: Screenshot_CaptureToFile @ 0x5221a0, "SS%0.5d.%s"].

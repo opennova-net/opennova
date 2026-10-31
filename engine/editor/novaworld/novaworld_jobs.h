@@ -59,8 +59,8 @@ inline std::string transfer_text(
 
 // Why the account may not push the project `key` (the service's can_push for it): a push's refusal,
 // the job's and the session's alike.
-inline std::string novaworld_push_refusal(const std::string &key) {
-	return "Only its owner and NovaWorld's admins push " + key + ".";
+inline std::string novaworld_push_refusal() {
+	return "Only its owner and NovaWorld's admins push this project.";
 }
 
 enum class NovaWorldJobState : uint8_t {
@@ -107,6 +107,7 @@ private:
 struct NovaWorldAccountUpdate {
 	bool changed = false;
 	NovaWorldAccount account;
+	std::string from_cookie; // the session a job started on, which what it settled is about
 };
 
 class NovaWorldJob {
@@ -149,7 +150,7 @@ public:
 
 protected:
 	NovaWorldJob(NovaWorldTransport &transport, NovaWorldAccount account) :
-			transport_(transport), account_(std::move(account)) {}
+			transport_(transport), account_(std::move(account)), started_cookie_(account_.cookie) {}
 	// A reply's word on the session: a renewed cookie kept, a 401 signing out. False for a 401.
 	bool note_session(const NovaWorldResponse &reply);
 	NovaWorldJobState fail(std::string error);
@@ -162,6 +163,7 @@ protected:
 
 	NovaWorldTransport &transport_;
 	NovaWorldAccount account_;
+	std::string started_cookie_;
 	size_t batch_files_ = 0;
 	uint64_t batch_bytes_ = kSignedBatchBytes;
 	bool account_changed_ = false;
@@ -297,8 +299,11 @@ private:
 // its first push.
 class NovaWorldTrack : public NovaWorldJob {
 public:
+	// `keep_folder`: the head taken as the folder's base whatever it holds, each difference a change
+	// to push, as the author asked (the identical-files test is what stops an old copy undoing later
+	// revisions, so only the author asks past it).
 	NovaWorldTrack(NovaWorldTransport &transport, NovaWorldAccount account, ProjectPaths paths,
-			std::string export_dir, std::string key);
+			std::string export_dir, std::string key, bool keep_folder = false);
 
 	NovaWorldJobState step(uint64_t budget) override;
 	NovaWorldJobProgress progress() const override;
@@ -308,6 +313,7 @@ public:
 	// (remote().head), the working copy then at no revision.
 	const NovaWorldWorkingCopy &copy() const { return copy_; }
 	bool differs() const { return differs_; }
+	bool keeps_folder() const { return keep_folder_; }
 
 private:
 	enum class Phase : uint8_t { AskHead, ReadManifest, Scan, Done };
@@ -323,6 +329,7 @@ private:
 	std::vector<project::ProjectFile> theirs_; // the head's files
 	std::unique_ptr<NovaWorldScan> scan_;
 	bool differs_ = false;
+	bool keep_folder_ = false;
 };
 
 // What a push came to.

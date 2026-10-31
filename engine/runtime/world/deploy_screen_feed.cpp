@@ -2,7 +2,12 @@
 
 #include <base/io/cp1252.h>
 #include <runtime/hud/feed_format.h>
+#include <runtime/hud/hud_vehicle_panel.h>
 #include <runtime/menu/list_sort.h>
+#include <runtime/menu/menu_frame.h>
+#include <runtime/menu/menu_runtime.h>
+#include <runtime/world/spawn_select.h>
+#include <runtime/world/world.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -97,6 +102,14 @@ std::vector<std::string> deploy_list_items(const std::vector<DeployListRow> &row
     for (const DeployListRow &row : rows)
         items.push_back(hud::strip_inline_tags(row.text));
     return items;
+}
+
+void fill_deploy_spawn_list(menu::MenuRuntime &menu, int list, const std::vector<DeployListRow> &rows) {
+    if (list < 0) return;
+    menu.set_widget_shown(list, true);
+    const int list_title = menu.find_screen_control("DEATH", "STATIC_LIST_TITLE");
+    if (list_title >= 0) menu.set_widget_shown(list_title, true);
+    menu.set_widget_items(list, deploy_list_items(rows));
 }
 
 DeployStatusLine build_deploy_status(const DeployStatusInput &in) {
@@ -250,10 +263,30 @@ DeployInstructions build_deploy_instructions(
     }
     const char *key = "STROVER_RESPAWN1";
     if (!in.has_spawn_zones) {
-        if (in.team == 0) key = "STROVER_SPECTATORSPAWN";
-        else if (!assault) key = "STROVER_RESPAWN3";
-        else key = (in.game_type & 0x20000u) != 0 || !in.dead
-                ? "STROVER_RESPAWN4" : "STROVER_RESPAWN5";
+        if (in.team == 0) {
+            key = "STROVER_SPECTATORSPAWN";
+        } else if (in.penalty_line) {
+            // [orig: sub_551E10 - the test @0x5526a5, the penalty line @0x5526b8..0x552708,
+            //  RESPAWN4 @0x552711..0x55272f, RESPAWN3 @0x552733, RESPAWN4 @0x5526a9 (dfx2.exe)]
+            if (!assault || ((in.game_type & 0x20000u) != 0 && in.dead)) {
+                if (in.dead && in.penalty_seconds != 0) {
+                    char line[256];
+                    std::snprintf(line, sizeof line, "%s <cFF4040>%i<co> %s.",
+                            text("STROVER_PENALTYTIMER").c_str(), in.penalty_seconds,
+                            text("SECONDS").c_str());
+                    out.second_text = line;
+                    return out;
+                }
+                key = (in.game_type & 0x20000u) != 0 ? "STROVER_RESPAWN4" : "STROVER_RESPAWN3";
+            } else {
+                key = "STROVER_RESPAWN4";
+            }
+        } else if (!assault) {
+            key = "STROVER_RESPAWN3";
+        } else {
+            key = (in.game_type & 0x20000u) != 0 || !in.dead
+                    ? "STROVER_RESPAWN4" : "STROVER_RESPAWN5";
+        }
     }
     out.second_text = text(key);
     return out;
@@ -261,6 +294,290 @@ DeployInstructions build_deploy_instructions(
 
 const char *deploy_list_team_color_tag(int team) {
     return team == 2 ? "<cFF2020>" : "<c4040FF>";
+}
+
+int deploy_table_icon(uint8_t vehicle_category, int32_t class_id) {
+	int icon = 1;
+	switch (vehicle_category) {
+		case 1:
+		case 2:
+		case 0xC:
+			icon = 2;
+			break;
+		case 3:
+		case 4:
+			icon = 4;
+			break;
+		case 5:
+		case 6:
+		case 7:
+		case 8:
+			icon = 3;
+			break;
+		default:
+			break;
+	}
+	switch (class_id) {
+		case 0x210:
+			icon = 13;
+			break; // Ka-52
+		case 0x211:
+			icon = 6;
+			break; // Apache
+		case 0x212:
+			icon = 14;
+			break; // M1A1 Tank
+		case 0x213:
+			icon = 19;
+			break; // T80
+		case 0x214:
+		case 0x215:
+		case 0x216:
+			icon = 8;
+			break; // Little Bird
+		case 0x217:
+			icon = 10;
+			break; // Chinook
+		case 0x218:
+			icon = 20;
+			break; // Super Puma
+		case 0x219:
+			icon = 11;
+			break; // Blackhawk
+		case 0x21A:
+		case 0x21B:
+			icon = 18;
+			break;
+		case 0x21E:
+		case 0x21F:
+			icon = 7;
+			break;
+		case 0x220:
+			icon = 16;
+			break; // Mark V
+		case 0x222:
+			icon = 9;
+			break; // BTR-80
+		case 0x223:
+			icon = 17;
+			break; // Stryker
+		case 0x224:
+			icon = 15;
+			break; // Mil-26 Helo
+		case 0x225:
+		case 0x226:
+		case 0x227:
+			icon = 5;
+			break; // Nb0-105 Helo
+		case 0x228:
+		case 0x229:
+			icon = 12;
+			break; // Assault Boat
+		default:
+			break;
+	}
+	return icon;
+}
+
+std::string deploy_table_seat_line(const std::string &name, int slot, bool is_driver) {
+	std::string line = name;
+	if (slot == 8 || is_driver)
+		line += "  <i>(Driver)<-i>";
+	if (slot == 9)
+		line += "  <i>(Gunner)<-i>";
+	return line + "\r\n";
+}
+
+std::string deploy_table_gunner_line(const std::string &name, const std::string *seat_weapon) {
+	return name +
+			(seat_weapon == nullptr ? std::string("  <i>(Gunner)<-i>")
+									: "  <i>(" + *seat_weapon + ")<-i>") +
+			"\r\n";
+}
+
+uint32_t deploy_table_health_color(int32_t health, int32_t max_health, uint32_t stance_middle,
+		uint32_t stance_bad) {
+	switch (hud::seat_health_band(health, max_health)) {
+		case hud::SeatHealthBand::Good:
+			return 0xFFDDDDDDu; // the argument stands for the good colour
+		case hud::SeatHealthBand::Middle:
+			return stance_middle;
+		default:
+			return stance_bad;
+	}
+}
+
+std::string deploy_table_waiting_line(const std::string &name, bool self) {
+	return (self ? "<b><cC0FFFF>** " + name + " **<-b> <i>waiting</i>"
+				 : "<cC0F0F0>" + name + " <i>waiting</i>") +
+			"\r\n";
+}
+
+std::vector<DeployTableRow> build_deploy_table_rows(
+		int local_team, const std::vector<DeployTableZone> &zones) {
+	std::vector<DeployTableRow> rows;
+	DeployTableRow def;
+	def.cells[0] = "' '";
+	def.cells[1] = "0";
+	def.cells[2] = "\r\nDefault";
+	// The team's colour, then 0xFFDDDDDD over it: the second write is the one that stands.
+	def.color = local_team == 0 ? 0xFF00FF00u : local_team == 2 ? 0xFFFF0000u : 0xFF00AFFFu;
+	def.color = 0xFFDDDDDDu;
+	rows.push_back(def);
+	for (const DeployTableZone &zone : zones) {
+		DeployTableRow row;
+		row.value = zone.index + 1;
+		row.cell1_value = zone.index + 1;
+		row.cells[0] = std::string("'") + static_cast<char>('A' + zone.index) + "'";
+		row.cells[1] = std::to_string(deploy_table_icon(zone.vehicle_category, zone.class_id));
+		row.cells[2] = "\r\n";
+		for (const std::string &line : zone.lines)
+			row.cells[2] += line;
+		row.color = zone.greyed ? 0xFF404040u : zone.health_color;
+		row.zone = true;
+		row.state1_color = zone.greyed;
+		rows.push_back(std::move(row));
+	}
+	return rows;
+}
+
+bool fill_deploy_spawn_table(menu::MenuRuntime &menu, const std::vector<DeployTableRow> &rows) {
+	const int table = menu.find_screen_control("DEATH", "SPAWNPOINTS_TABLE");
+	if (table < 0) return false;
+	const int scroll_top = menu.scroll_row(table);
+	const std::vector<int> selected = menu.table_selected_rows(table);
+	const int selected_row = selected.empty() ? -1 : selected.front();
+	menu.table_clear_rows(table);
+	menu.set_widget_shown(table, true);
+	const int list_title = menu.find_screen_control("DEATH", "STATIC_LIST_TITLE");
+	if (list_title >= 0) menu.set_widget_shown(list_title, true);
+	for (const DeployTableRow &row : rows) {
+		const int at = menu.table_insert_row(table, row.zone ? "" : "0", row.value, 0, -1);
+		menu.table_set_cell_value(table, at, 1, row.cell1_value);
+		for (int column = 0; column < 3; ++column)
+			menu.table_set_cell_text(table, at, column, row.cells[column]);
+		menu.table_set_row_color(table, at, true, row.color);
+		if (row.zone) menu.table_set_row_state1_color(table, at, row.state1_color);
+	}
+	menu.table_set_column_ascending(table, 0, true);
+	menu.table_sort_by_column(table, 0);
+	if (scroll_top >= 0 && scroll_top < menu.table_row_count(table))
+		menu.set_scroll_row(table, scroll_top);
+	if (selected_row >= 0) menu.table_set_row_selected(table, selected_row, true);
+	return true;
+}
+
+DeployTableClick deploy_table_click(const menu::MenuRuntime &menu, int table, int row,
+		int32_t row_state, bool double_click) {
+	DeployTableClick click;
+	if (row_state == menu::kTableRowLocked) return click;
+	const std::optional<int32_t> value = menu.table_cell_record(table, row, 1);
+	if (!value.has_value()) return click;
+	if (!double_click) {
+		if (*value - 1 >= 0) click.pan_zone_index = *value - 1;
+	} else if (*value != -1) {
+		click.pick_value = *value;
+	}
+	return click;
+}
+
+DeployTeamLists deploy_team_lists(const std::vector<DeployTeamListPlayer> &players, int local_team,
+		const hud::GameTextLookup &gametext) {
+	DeployTeamLists out;
+	for (const DeployTeamListPlayer &player : players) {
+		std::string &list = player.team == 1 ? out.blue : out.red;
+		if (player.local) list += player.team == 1 ? "<cC0C0FF>" : "<cFFC0C0>";
+		list += player.name;
+		list += "\r\n";
+	}
+	const uint32_t color = local_team == 0 ? 0xFF00FF00u
+			: local_team == 2 ? 0xFFFF0000u : 0xFF00AFFFu;
+	const char *key = "STRCLI01";
+	switch (static_cast<int8_t>(local_team)) {
+		case 0: key = "STRCLI19"; break;
+		case 1: key = "STRCLI05"; break;
+		case 2: key = "STRCLI06"; break;
+		case 3: key = "STRCLI17"; break;
+		case 4: key = "STRCLI18"; break;
+		default: break;
+	}
+	char head[32];
+	std::snprintf(head, sizeof(head), "Team: <c%08X>", color);
+	out.team = head + hud::game_text(gametext, hud::kGameTextClient, key, "");
+	return out;
+}
+
+void fill_deploy_team_lists(menu::MenuRuntime &menu, const DeployTeamLists &lists) {
+	const int blue = menu.find_screen_control("DEATH", "TEAMBLUE");
+	const int red = menu.find_screen_control("DEATH", "TEAMRED");
+	if (blue >= 0) menu.set_widget_text(blue, lists.blue);
+	if (red >= 0) menu.set_widget_text(red, lists.red);
+	const int team = menu.find_screen_control("DEATH", "STATIC_TEAM");
+	if (team >= 0) menu.set_widget_text(team, lists.team);
+}
+
+void apply_deploy_activation(menu::MenuRuntime &menu, const DeployActivation &activation) {
+	const auto find = [&menu](const char *name) { return menu.find_screen_control("DEATH", name); };
+	if (activation.permanent_dead) {
+		for (const char *name : { "STATIC_MEDIC_MSG1", "STATIC_CALLMEDIC_MSG",
+					 "STATIC_INSTRUCTIONS2_MSG", "STATIC_LIST_TITLE", "SPAWNPOINTS_LIST" }) {
+			const int id = find(name);
+			if (id >= 0) menu.set_widget_shown(id, false);
+		}
+		const int table = activation.table ? find("SPAWNPOINTS_TABLE") : -1;
+		if (table >= 0) menu.set_widget_shown(table, false);
+	}
+	const int briefing = activation.has_briefing ? find("BRIEFING") : -1;
+	if (briefing >= 0) menu.set_widget_text(briefing, activation.briefing);
+	const int game_type = activation.game_type_line ? find("STATIC_GAMETYPE") : -1;
+	if (game_type >= 0) menu.set_widget_text(game_type, "Gametype: <cFFFF40>" + activation.game_type_label);
+}
+
+void deploy_table_paint(const menu::MenuTableCellEvent &event, menu::MenuTableCellCanvas &canvas,
+		const std::string &zone_name) {
+	const float l = event.left, t = event.top, r = event.right, b = event.bottom;
+	if (event.row != -1) {
+		canvas.draw_cell(event.row, event.column, 1);
+		if (event.column == 1 && !zone_name.empty()) {
+			const float x = static_cast<float>((static_cast<int>(l) + static_cast<int>(r)) >> 1);
+			canvas.hud_label(zone_name, x, b - 2.0f, event.state == 1 ? 0xFF404040u : 0xFFDDDDDDu);
+		}
+	}
+	canvas.draw_cell(event.row, event.column, 2);
+	if (event.state == 2) {
+		const uint32_t frame = 0xFF7F7F7Fu;
+		canvas.line(frame, l, t, r, t);
+		canvas.line(frame, r, t, r, b);
+		canvas.line(frame, r, b, l, b);
+		canvas.line(frame, l, b, l, t);
+	}
+}
+
+std::string deploy_table_zone_name(const World &world, const SpawnZoneRegistry &zones,
+		int32_t cell1_value) {
+	const int index = cell1_value - 1;
+	if (index < 0 || index >= static_cast<int>(zones.entries.size())) return std::string();
+	const Entity *zone = world.registry.get(zones.entries[static_cast<size_t>(index)]);
+	if (zone == nullptr || !zone->has_item_def) return std::string();
+	return zone->item_ui_name;
+}
+
+bool deploy_map_moved(menu::MenuRuntime &menu) {
+	const int table = menu.find_screen_control("DEATH", "SPAWNPOINTS_TABLE");
+	if (table < 0) return false;
+	menu.table_set_row_selected(table, -1, false);
+	return true;
+}
+
+bool deploy_table_pan_target(const World &world, const SpawnZoneRegistry &zones, int index,
+		int32_t &dx, int32_t &dy) {
+	if (index < 0 || index >= static_cast<int>(zones.entries.size())) return false;
+	const Entity *zone = world.registry.get(zones.entries[static_cast<size_t>(index)]);
+	const Entity *local = world.registry.get(world.cached.local_player);
+	if (zone == nullptr || local == nullptr) return false;
+	dx = io::bam_sub(zone->position.x.q16, local->position.x.q16);
+	dy = io::bam_sub(zone->position.y.q16, local->position.y.q16);
+	return true;
 }
 
 } // namespace opennova::world

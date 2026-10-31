@@ -9,10 +9,16 @@
 #include <string>
 #include <vector>
 
+#include <base/title/title.h>
+#include <formats/mnu/mnu.h>
+#include <runtime/hud/game_text_lookup.h>
+#include <runtime/menu/menu_frame.h>
+#include <runtime/menu/menu_runtime.h>
 #include <runtime/world/deploy_screen_feed.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/world.h>
 
+using namespace opennova;
 using namespace opennova::world;
 
 static int failures = 0;
@@ -286,13 +292,18 @@ void test_instruction_branches() {
 }
 
 // The DEATH_SHROUD reveal: at once under the deploy overlay, else only past
-// 240 ticks since the death stamp (a signed difference); the refresh runs on
-// each tick whose low four bits are zero.
+// the title's ticks since the death stamp (a signed difference): Jointops.exe's
+// 240, dfx2.exe's 360; the refresh runs on each tick whose low four bits are
+// zero. [orig: DeathScreen_UpdateShroudReveal @0x554752] [orig: DeathScreen_UpdateShroudReveal
+// @0x552792 (dfx2.exe)]
 void test_shroud_reveal_and_refresh() {
-	CHECK(death_shroud_revealed(true, 0));
-	CHECK(!death_shroud_revealed(false, 240));
-	CHECK(death_shroud_revealed(false, 241));
-	CHECK(!death_shroud_revealed(false, -5));
+	const int32_t jo = opennova::Title().death_shroud_reveal_ticks;
+	CHECK(jo == 240);
+	CHECK(death_shroud_revealed(true, 0, jo));
+	CHECK(!death_shroud_revealed(false, 240, jo));
+	CHECK(death_shroud_revealed(false, 241, jo));
+	CHECK(!death_shroud_revealed(false, -5, jo));
+	CHECK(!death_shroud_revealed(false, 360, 360) && death_shroud_revealed(false, 361, 360));
 	CHECK(deploy_refresh_due(15, 16));
 	CHECK(!deploy_refresh_due(16, 16));
 	CHECK(!deploy_refresh_due(16, 31));
@@ -369,7 +380,432 @@ void test_rows_are_the_page_bytes_past_z() {
 	}
 }
 
+// DFX2-41: the DEATH screen's loadout picker shows and fills for a player on a team, not for a
+// team-0 player, nor for one lying dead under permanent death (alive under it, it shows).
+// [orig: sub_550690 @0x550690 - the gate @0x550a3d..0x550a53 (dfx2.exe)]
+void test_loadout_picker_gate() {
+	CHECK(deploy_loadout_shown(1, false, true));
+	CHECK(deploy_loadout_shown(2, true, false));
+	CHECK(!deploy_loadout_shown(0, false, false));
+	CHECK(!deploy_loadout_shown(2, true, true));
+	// RESTART_LEVEL: an assault game (the 0x20000 bit aside), out of a session, the local
+	// player dead [orig: DeathScreen_OnRestartLevel @0x550bff..0x550c1e (dfx2.exe)].
+	CHECK(deploy_restart_level_allowed(0x10020u, false, true));
+	CHECK(deploy_restart_level_allowed(0x30020u, false, true));
+	CHECK(!deploy_restart_level_allowed(0x10020u, true, true));
+	CHECK(!deploy_restart_level_allowed(0x10020u, false, false));
+	CHECK(!deploy_restart_level_allowed(0x10010u, false, true));
+}
+
+// DFX2-41: the SPAWNPOINTS_TABLE rows: the Default row (its team colour overwritten by
+// 0xFFDDDDDD), a zone's letter, icon (the category's, the class id's over it) and its text
+// column, a blank head then its lines, its health colour or the greyed pair.
+// [orig: sub_551450 @0x551450 - @0x5514de..0x551568, @0x55170a, @0x551771, @0x5518a4,
+//  @0x551cbf..0x551cfc (dfx2.exe)]
+void test_spawn_table_rows() {
+	CHECK(deploy_table_icon(0, 0) == 1);
+	CHECK(deploy_table_icon(3, 0) == 4 && deploy_table_icon(7, 0) == 3 &&
+			deploy_table_icon(0xC, 0) == 2);
+	CHECK(deploy_table_icon(3, 0x210) == 13 && deploy_table_icon(1, 0x228) == 12);
+	CHECK(deploy_table_icon(2, 0x221) == 2); // a class no case names keeps the category's
+	CHECK(deploy_table_seat_line("Ace", 8, false) == "Ace  <i>(Driver)<-i>\r\n");
+	CHECK(deploy_table_seat_line("Bo", 9, true) == "Bo  <i>(Driver)<-i>  <i>(Gunner)<-i>\r\n");
+	CHECK(deploy_table_seat_line("Cy", 0, false) == "Cy\r\n");
+	const std::string m2 = "M2";
+	const std::string missed;
+	CHECK(deploy_table_gunner_line("Di", &m2) == "Di  <i>(M2)<-i>\r\n");
+	CHECK(deploy_table_gunner_line("Di", nullptr) == "Di  <i>(Gunner)<-i>\r\n");
+	CHECK(deploy_table_gunner_line("Di", &missed) == "Di  <i>()<-i>\r\n");
+	CHECK(deploy_table_waiting_line("Me", true) == "<b><cC0FFFF>** Me **<-b> <i>waiting</i>\r\n");
+	CHECK(deploy_table_waiting_line("You", false) == "<cC0F0F0>You <i>waiting</i>\r\n");
+	DeployTableZone heli;
+	heli.index = 2;
+	heli.vehicle_category = 3;
+	heli.class_id = 0x219;
+	heli.health_color = 0xFF20FF20u;
+	heli.lines = { deploy_table_seat_line("Ace", 8, true) };
+	DeployTableZone empty;
+	empty.index = 0;
+	empty.greyed = true;
+	const std::vector<DeployTableRow> rows = build_deploy_table_rows(2, { heli, empty });
+	CHECK(rows.size() == 3);
+	CHECK(rows[0].cells[0] == "' '" && rows[0].cells[1] == "0" &&
+			rows[0].cells[2] == "\r\nDefault");
+	CHECK(rows[0].value == 0 && rows[0].cell1_value == 0 && rows[0].color == 0xFFDDDDDDu);
+	CHECK(rows[1].cells[0] == "'C'" && rows[1].cells[1] == "11" && rows[1].value == 3);
+	CHECK(rows[1].cell1_value == 3 && rows[1].color == 0xFF20FF20u && !rows[1].state1_color);
+	CHECK(rows[1].cells[2] == "\r\nAce  <i>(Driver)<-i>\r\n");
+	CHECK(rows[2].cells[0] == "'A'" && rows[2].cells[1] == "1" && rows[2].cells[2] == "\r\n");
+	CHECK(rows[2].color == 0xFF404040u && rows[2].state1_color);
+	CHECK(!rows[0].zone && rows[1].zone && rows[2].zone);
+	// The health colour: the band rule, the fill's own colour standing for the good band
+	// [orig: sub_5A19D0 @0x5a19d0 (dfx2.exe)].
+	CHECK(deploy_table_health_color(100, 100, 1, 2) == 0xFFDDDDDDu);
+	CHECK(deploy_table_health_color(50, 100, 1, 2) == 1u);
+	CHECK(deploy_table_health_color(10, 100, 1, 2) == 2u);
+	CHECK(deploy_table_health_color(-5, 100, 1, 2) == 0xFFDDDDDDu); // the unsigned first test
+	CHECK(deploy_table_health_color(50, 0, 1, 2) == 0xFFDDDDDDu); // a zero ceiling taken as 1
+}
+
+// DFX2-41: the table's refill over the menu: the rows sorted by column 0 (the Default row's
+// "' '" first), each with its value, column 1's value, its cells, its colour and a zone's state-1
+// bit; the table and STATIC_LIST_TITLE shown; the selected row kept BY INDEX, whatever row now
+// stands there, and the scroll top put back while it is under the row count. A screen without
+// the table is not filled.
+// [orig: sub_551450 @0x551450 - @0x55149d..0x5514d9, @0x551d28..0x551d53 (dfx2.exe)]
+mnu::Document death_document() {
+	mnu::Document doc;
+	mnu::Screen death;
+	death.name = "DEATH";
+	mnu::Window root;
+	root.name = "MAIN";
+	root.type = mnu::WindowType::Window;
+	mnu::Window table;
+	table.name = "SPAWNPOINTS_TABLE";
+	table.type = mnu::WindowType::Table;
+	table.hidden = true;
+	table.table_data.column.has_count = true;
+	table.table_data.column.count = 3;
+	mnu::Window title;
+	title.name = "STATIC_LIST_TITLE";
+	title.type = mnu::WindowType::Static;
+	title.hidden = true;
+	root.children.push_back(table);
+	root.children.push_back(title);
+	death.roots.push_back(root);
+	doc.screens.push_back(death);
+	return doc;
+}
+
+void test_spawn_table_fill() {
+	const mnu::Document doc = death_document();
+	menu::MenuRuntime rt;
+	rt.open_document(&doc, "death.mnu", "");
+	const int table = rt.widget_id("SPAWNPOINTS_TABLE");
+	const int title = rt.widget_id("STATIC_LIST_TITLE");
+	CHECK(table >= 0 && title >= 0);
+	DeployTableZone c;
+	c.index = 2;
+	c.health_color = 0xFF123456u;
+	DeployTableZone a;
+	a.index = 0;
+	a.greyed = true;
+	const std::vector<DeployTableRow> rows = build_deploy_table_rows(1, { c, a });
+	CHECK(fill_deploy_spawn_table(rt, rows));
+	CHECK(rt.is_widget_shown(table) && rt.is_widget_shown(title));
+	CHECK(rt.table_row_count(table) == 3);
+	CHECK(rt.table_cell_text(table, 0, 0) == "' '" && rt.table_cell_text(table, 1, 0) == "'A'" &&
+			rt.table_cell_text(table, 2, 0) == "'C'");
+	CHECK(rt.table_row_value(table, 0) == 0 && rt.table_row_value(table, 1) == 1 &&
+			rt.table_row_value(table, 2) == 3);
+	CHECK(rt.table_cell_value(table, 2, 1) == 3 && rt.table_cell_text(table, 2, 1) == "1");
+	uint32_t color = 0;
+	CHECK(rt.table_row_colored(table, 2, &color) && color == 0xFF123456u);
+	CHECK(rt.table_row_colored(table, 0, &color) && color == 0xFFDDDDDDu);
+	CHECK(rt.table_row_colored(table, 1, &color) && color == 0xFF404040u);
+	// The pick and the scroll ride the refill by index: the second row selected, the first
+	// visible row 1.
+	rt.table_set_row_selected(table, 1, true);
+	rt.set_scroll_row(table, 1);
+	DeployTableZone b;
+	b.index = 1;
+	CHECK(fill_deploy_spawn_table(rt, build_deploy_table_rows(1, { c, a, b })));
+	CHECK(rt.table_row_count(table) == 4 && rt.table_cell_text(table, 2, 0) == "'B'");
+	CHECK(rt.table_selected_rows(table) == std::vector<int>{ 1 } && rt.scroll_row(table) == 1);
+	// A scroll top past the new count is not put back (the clear left 0).
+	rt.set_scroll_row(table, 9);
+	CHECK(fill_deploy_spawn_table(rt, rows) && rt.scroll_row(table) == 0);
+	// The cell event: a press on a zone's row pans to its index, on the Default row nothing; a
+	// double click picks the row's column-1 value, 0 for the Default row; a locked row does
+	// nothing, nor a row with no column-1 record.
+	// [orig: sub_550CF0 @0x550cf0 - @0x550e5d..0x550ee2 (dfx2.exe)]
+	CHECK(fill_deploy_spawn_table(rt, rows));
+	DeployTableClick click = deploy_table_click(rt, table, 2, menu::kTableRowDefault, false);
+	CHECK(click.pan_zone_index == 2 && click.pick_value == -1);
+	click = deploy_table_click(rt, table, 0, menu::kTableRowSelected, false);
+	CHECK(click.pan_zone_index == -1 && click.pick_value == -1);
+	click = deploy_table_click(rt, table, 0, menu::kTableRowSelected, true);
+	CHECK(click.pan_zone_index == -1 && click.pick_value == 0);
+	click = deploy_table_click(rt, table, 1, menu::kTableRowDefault, true);
+	CHECK(click.pan_zone_index == -1 && click.pick_value == 1);
+	click = deploy_table_click(rt, table, 1, menu::kTableRowLocked, true);
+	CHECK(click.pan_zone_index == -1 && click.pick_value == -1);
+	click = deploy_table_click(rt, table, 9, menu::kTableRowDefault, true);
+	CHECK(click.pan_zone_index == -1 && click.pick_value == -1);
+	// The map's move deselects every row [orig: CMap_OverlayInputHandler @0x5511c7..0x5511da
+	//  (dfx2.exe)].
+	rt.table_set_row_selected(table, 2, true);
+	CHECK(!rt.table_selected_rows(table).empty() && deploy_map_moved(rt) &&
+			rt.table_selected_rows(table).empty());
+	mnu::Document none = death_document();
+	none.screens[0].roots[0].children.erase(none.screens[0].roots[0].children.begin());
+	menu::MenuRuntime other;
+	other.open_document(&none, "death.mnu", "");
+	CHECK(!fill_deploy_spawn_table(other, rows) && !deploy_map_moved(other));
+}
+
+// The press's pan target: the zone entity's position less the local player's, x and y; none
+// past the list or without the local player [orig: sub_550CF0 @0x550e87..0x550eb1 (dfx2.exe)].
+void test_spawn_table_pan_target() {
+	World w;
+	w.registry.configure_pool(0, 2);
+	w.registry.configure_pool(2, 2);
+	Entity zone;
+	zone.position.x.q16 = 50 << 16;
+	zone.position.y.q16 = 70 << 16;
+	SpawnZoneRegistry reg;
+	reg.entries.push_back(w.registry.spawn(2, zone));
+	int32_t dx = 0, dy = 0;
+	CHECK(!deploy_table_pan_target(w, reg, 0, dx, dy)); // no local player
+	Entity body;
+	body.position.x.q16 = 10 << 16;
+	body.position.y.q16 = 90 << 16;
+	w.cached.local_player = w.registry.spawn(0, body);
+	CHECK(deploy_table_pan_target(w, reg, 0, dx, dy) && dx == (40 << 16) && dy == -(20 << 16));
+	CHECK(!deploy_table_pan_target(w, reg, 1, dx, dy) && !deploy_table_pan_target(w, reg, -1, dx, dy));
+}
+
+// DFX2-41: the team lists: a team-1 entity's name in the blue list, any other's in the red, the
+// local player's behind its list's colour, each line ending CR LF; STATIC_TEAM the local team's
+// colour and name; the three written where the screen has them.
+// [orig: DeathScreen_UpdateTeamLists @0x5503a0 - @0x550466..0x55059a, @0x55060f..0x55066d;
+//  HUD_GetTeamName @0x5b6820 (dfx2.exe)]
+void test_team_lists() {
+	const hud::GameTextLookup names = [](const char *, const char *key, const char *fallback) {
+		const std::string k = key;
+		return k == "STRCLI05" ? std::string("Blue") : k == "STRCLI06" ? std::string("Red")
+				: k == "STRCLI19" ? std::string("None") : std::string(fallback);
+	};
+	const std::vector<DeployTeamListPlayer> players = {
+		{ 1, false, "Ace" }, { 2, true, "Me" }, { 1, true, "Self" }, { 0, false, "Spec" } };
+	DeployTeamLists lists = deploy_team_lists(players, 2, names);
+	CHECK(lists.blue == "Ace\r\n<cC0C0FF>Self\r\n");
+	CHECK(lists.red == "<cFFC0C0>Me\r\nSpec\r\n");
+	CHECK(lists.team == "Team: <cFFFF0000>Red");
+	CHECK(deploy_team_lists({}, 1, names).team == "Team: <cFF00AFFF>Blue");
+	CHECK(deploy_team_lists({}, 0, names).team == "Team: <cFF00FF00>None");
+	CHECK(deploy_team_lists({}, 9, names).team == "Team: <cFF00AFFF>");
+	mnu::Document doc;
+	mnu::Screen death;
+	death.name = "DEATH";
+	mnu::Window root;
+	root.name = "MAIN";
+	root.type = mnu::WindowType::Window;
+	for (const char *name : { "TEAMBLUE", "TEAMRED", "STATIC_TEAM" }) {
+		mnu::Window w;
+		w.name = name;
+		w.type = std::string(name) == "STATIC_TEAM" ? mnu::WindowType::Static
+				: mnu::WindowType::MultilineEdit;
+		root.children.push_back(w);
+	}
+	death.roots.push_back(root);
+	doc.screens.push_back(death);
+	menu::MenuRuntime rt;
+	rt.open_document(&doc, "death.mnu", "");
+	fill_deploy_team_lists(rt, lists);
+	CHECK(rt.get_widget_text(rt.widget_id("TEAMBLUE")) == lists.blue);
+	CHECK(rt.get_widget_text(rt.widget_id("TEAMRED")) == lists.red);
+	CHECK(rt.get_widget_text(rt.widget_id("STATIC_TEAM")) == lists.team);
+}
+
+// DFX2-41: the no-zone second instruction, dfx2.exe's: a dead player under a penalty outside
+// assault reads the penalty line; assault reads RESPAWN4 where Jointops.exe's dead player reads
+// RESPAWN5 [orig: sub_551E10 @0x55266f..0x55274f (dfx2.exe); UI_UpdateDeathScreenContent
+// @0x554271..0x5542ef].
+void test_penalty_line_instruction() {
+	const hud::GameTextLookup keys = [](const char *, const char *key, const char *) {
+		return std::string(key);
+	};
+	DeployInstructionsInput in;
+	in.team = 1;
+	in.dead = true;
+	in.game_type = 0x10001u;
+	in.penalty_seconds = 7;
+	CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN3");
+	in.penalty_line = true;
+	CHECK(build_deploy_instructions(in, keys).second_text ==
+			"STROVER_PENALTYTIMER <cFF4040>7<co> SECONDS.");
+	in.penalty_seconds = 0;
+	CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN3");
+	in.game_type = 0x10020u; // assault, out of 0x20000, dead
+	CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN4");
+	in.penalty_line = false;
+	CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN5");
+	in.penalty_line = true;
+	in.game_type = 0x30020u;
+	in.penalty_seconds = 3;
+	CHECK(build_deploy_instructions(in, keys).second_text ==
+			"STROVER_PENALTYTIMER <cFF4040>3<co> SECONDS.");
+	in.penalty_seconds = 0;
+	CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN4");
+	in.has_spawn_zones = true;
+	CHECK(build_deploy_instructions(in, keys).second_text == "STROVER_RESPAWN1");
+}
+
+// The show's writes: the permanent-death hides (the table for a title with one), BRIEFING's
+// text, a title's STATIC_GAMETYPE line [orig: DeathScreen_UpdateUI @0x55318c..0x553234,
+// @0x5534bf..0x5534eb] [orig: sub_550690 @0x5506ca..0x550793, @0x550af0..0x550b77 (dfx2.exe)].
+void test_deploy_activation() {
+	mnu::Document doc;
+	mnu::Screen death;
+	death.name = "DEATH";
+	mnu::Window root;
+	root.name = "MAIN";
+	root.type = mnu::WindowType::Window;
+	for (const char *name : { "STATIC_MEDIC_MSG1", "STATIC_CALLMEDIC_MSG", "STATIC_INSTRUCTIONS2_MSG",
+				 "STATIC_LIST_TITLE", "SPAWNPOINTS_TABLE", "BRIEFING", "STATIC_GAMETYPE" }) {
+		mnu::Window w;
+		w.name = name;
+		w.type = std::string(name) == "SPAWNPOINTS_TABLE" ? mnu::WindowType::Table
+				: std::string(name) == "BRIEFING" ? mnu::WindowType::MultilineEdit
+				: mnu::WindowType::Static;
+		root.children.push_back(w);
+	}
+	death.roots.push_back(root);
+	doc.screens.push_back(death);
+	menu::MenuRuntime rt;
+	rt.open_document(&doc, "death.mnu", "");
+	DeployActivation a;
+	a.has_briefing = true;
+	a.briefing = "Rules";
+	a.game_type_label = "Co-op";
+	apply_deploy_activation(rt, a);
+	CHECK(rt.get_widget_text(rt.widget_id("BRIEFING")) == "Rules");
+	CHECK(rt.get_widget_text(rt.widget_id("STATIC_GAMETYPE")).empty()); // no line for JO
+	CHECK(rt.is_widget_shown(rt.widget_id("STATIC_MEDIC_MSG1")));
+	a.game_type_line = true;
+	a.permanent_dead = true;
+	apply_deploy_activation(rt, a);
+	CHECK(rt.get_widget_text(rt.widget_id("STATIC_GAMETYPE")) == "Gametype: <cFFFF40>Co-op");
+	CHECK(!rt.is_widget_shown(rt.widget_id("STATIC_MEDIC_MSG1")) &&
+			!rt.is_widget_shown(rt.widget_id("STATIC_LIST_TITLE")));
+	CHECK(rt.is_widget_shown(rt.widget_id("SPAWNPOINTS_TABLE"))); // no table for JO's code
+	a.table = true;
+	apply_deploy_activation(rt, a);
+	CHECK(!rt.is_widget_shown(rt.widget_id("SPAWNPOINTS_TABLE")));
+}
+
+// Jointops.exe's list refill: every refresh past the content's permanent-death return shows
+// SPAWNPOINTS_LIST and STATIC_LIST_TITLE again, so the show's hides under permanent death do not
+// outlast it; then the rows' stripped texts [orig: UI_UpdateDeathScreenContent @0x5536a0 -
+// CWnd_SetShown(SPAWNPOINTS_LIST, 1) @0x553aa0, CWnd_SetShown(STATIC_LIST_TITLE, 1) @0x553ac2].
+void test_spawn_list_refill_shows_the_list() {
+	mnu::Document doc;
+	mnu::Screen death;
+	death.name = "DEATH";
+	mnu::Window root;
+	root.name = "MAIN";
+	root.type = mnu::WindowType::Window;
+	for (const char *name : { "STATIC_LIST_TITLE", "SPAWNPOINTS_LIST" }) {
+		mnu::Window w;
+		w.name = name;
+		w.type = std::string(name) == "SPAWNPOINTS_LIST" ? mnu::WindowType::List
+				: mnu::WindowType::Static;
+		root.children.push_back(w);
+	}
+	death.roots.push_back(root);
+	doc.screens.push_back(death);
+	menu::MenuRuntime rt;
+	rt.open_document(&doc, "death.mnu", "");
+	DeployActivation a;
+	a.permanent_dead = true;
+	apply_deploy_activation(rt, a);
+	const int list = rt.widget_id("SPAWNPOINTS_LIST");
+	const int title = rt.widget_id("STATIC_LIST_TITLE");
+	CHECK(!rt.is_widget_shown(list) && !rt.is_widget_shown(title));
+	fill_deploy_spawn_list(rt, list, { { "<cFF2020>'D' Default", 0 }, { "<cFF2020>'A' Hill", 1 } });
+	CHECK(rt.is_widget_shown(list) && rt.is_widget_shown(title));
+	CHECK(rt.get_widget_items(list) == (std::vector<std::string>{ "'D' Default", "'A' Hill" }));
+	// No list: nothing.
+	apply_deploy_activation(rt, a);
+	fill_deploy_spawn_list(rt, -1, {});
+	CHECK(!rt.is_widget_shown(title));
+}
+
+// The SPAWNPOINTS_TABLE's custom draw: a data cell's flags-1 pass, column 1's name in the HUD
+// label face at the cell's foot (0xFF404040 on a locked row), the content, a state-2 cell's
+// four-line frame; the header only its content [orig: sub_550CF0 @0x550d29..0x550e37
+// (dfx2.exe)].
+struct RecordingCanvas : menu::MenuTableCellCanvas {
+	std::vector<std::string> ops;
+	void draw_cell(int row, int column, int flags) override {
+		ops.push_back("cell " + std::to_string(row) + " " + std::to_string(column) + " " +
+				std::to_string(flags));
+	}
+	void clear_rect(uint32_t, float, float, float, float) override { ops.push_back("clear"); }
+	void line(uint32_t argb, float x0, float y0, float x1, float y1) override {
+		char buf[96];
+		std::snprintf(buf, sizeof buf, "line %08X %g %g %g %g", argb, x0, y0, x1, y1);
+		ops.push_back(buf);
+	}
+	void hud_label(const std::string &text, float x, float foot, uint32_t argb) override {
+		char buf[96];
+		std::snprintf(buf, sizeof buf, "label %s %g %g %08X", text.c_str(), x, foot, argb);
+		ops.push_back(buf);
+	}
+};
+
+// The label's text: the SpawnZoneList zone at the row's column-1 value less one, its uiname
+// [orig: sub_550CF0 @0x550d55..0x550d86 (dfx2.exe)].
+void test_spawn_table_zone_name() {
+	World w;
+	w.registry.configure_pool(1, 2);
+	Entity heli;
+	heli.has_item_def = true;
+	heli.item_ui_name = "Ka-52";
+	SpawnZoneRegistry reg;
+	reg.entries.push_back(w.registry.spawn(1, heli));
+	CHECK(deploy_table_zone_name(w, reg, 1) == "Ka-52");
+	CHECK(deploy_table_zone_name(w, reg, 0).empty() && deploy_table_zone_name(w, reg, 2).empty());
+	w.registry.get(reg.entries[0])->has_item_def = false;
+	CHECK(deploy_table_zone_name(w, reg, 1).empty());
+}
+
+void test_spawn_table_paint() {
+	menu::MenuTableCellEvent cell;
+	cell.row = 2;
+	cell.column = 1;
+	cell.state = 2;
+	cell.left = 10;
+	cell.top = 20;
+	cell.right = 85;
+	cell.bottom = 68;
+	RecordingCanvas canvas;
+	deploy_table_paint(cell, canvas, "Blackhawk");
+	CHECK(canvas.ops.size() == 7);
+	if (canvas.ops.size() == 7) {
+		CHECK(canvas.ops[0] == "cell 2 1 1");
+		CHECK(canvas.ops[1] == "label Blackhawk 47 66 FFDDDDDD");
+		CHECK(canvas.ops[2] == "cell 2 1 2");
+		CHECK(canvas.ops[3] == "line FF7F7F7F 10 20 85 20");
+		CHECK(canvas.ops[6] == "line FF7F7F7F 10 68 10 20");
+	}
+	RecordingCanvas locked;
+	cell.state = 1;
+	deploy_table_paint(cell, locked, "Blackhawk");
+	CHECK(locked.ops.size() == 3 && locked.ops[1] == "label Blackhawk 47 66 FF404040");
+	RecordingCanvas other;
+	cell.column = 2;
+	deploy_table_paint(cell, other, "Blackhawk");
+	CHECK(other.ops.size() == 2 && other.ops[0] == "cell 2 2 1" && other.ops[1] == "cell 2 2 2");
+	RecordingCanvas header;
+	cell.row = -1;
+	cell.state = 0;
+	deploy_table_paint(cell, header, "");
+	CHECK(header.ops.size() == 1 && header.ops[0] == "cell -1 2 2");
+}
+
 int main() {
+	test_spawn_table_zone_name();
+	test_spawn_table_paint();
+	test_deploy_activation();
+	test_spawn_list_refill_shows_the_list();
+	test_penalty_line_instruction();
+	test_team_lists();
+	test_loadout_picker_gate();
+	test_spawn_table_rows();
+	test_spawn_table_fill();
+	test_spawn_table_pan_target();
 	test_list_items_are_the_page_bytes();
 	test_rows_are_the_page_bytes_past_z();
 	test_shroud_reveal_and_refresh();

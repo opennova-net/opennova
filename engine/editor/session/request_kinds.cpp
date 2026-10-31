@@ -11,6 +11,7 @@
 #include <editor/session/disk_watch.h>
 #include <editor/session/document_set.h>
 #include <editor/session/file_chores.h>
+#include <editor/session/heights_export.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/navigation_controller.h>
 #include <editor/session/novaworld_controller.h>
@@ -117,7 +118,7 @@ void serve_play(SessionCore &core, const EditorRequest &request) {
 void serve_export(SessionCore &core, const EditorRequest &request) {
 	if (project_needed(core, "export it"))
 		core.start_build(PlayIntent(), std::string(), request.rehash, ExportIntent{ true, request.export_dir }, true, false, request.gate_tag_file,
-		                 request.version_file);
+		                 request.version_file, request.release);
 }
 void serve_stop_play(SessionCore &core, const EditorRequest &) {
 	core.play().stop();
@@ -268,6 +269,9 @@ void serve_wave_operation(SessionCore &core, const EditorRequest &request) {
 void serve_music_stream_audio(SessionCore &core, const EditorRequest &request) {
 	core.documents().music_stream_audio(request);
 }
+void serve_export_heights(SessionCore &core, const EditorRequest &request) {
+	if (project_needed(core, "export heights")) export_heights(core, request);
+}
 void serve_correct_line(SessionCore &core, const EditorRequest &request) {
 	correct_source_line(core, request);
 }
@@ -281,8 +285,8 @@ void serve_novaworld_sign_out(SessionCore &core, const EditorRequest &) {
 void serve_novaworld_check(SessionCore &core, const EditorRequest &) {
 	core.novaworld().check();
 }
-void serve_novaworld_get(SessionCore &core, const EditorRequest &request) {
-	core.novaworld().get(request);
+void serve_novaworld_sync(SessionCore &core, const EditorRequest &request) {
+	core.novaworld().sync(request);
 }
 void serve_novaworld_put(SessionCore &core, const EditorRequest &request) {
 	core.novaworld().put(request);
@@ -313,6 +317,12 @@ void serve_novaworld_open_site(SessionCore &core, const EditorRequest &request) 
 }
 void serve_novaworld_make_own(SessionCore &core, const EditorRequest &) {
 	core.novaworld().make_own();
+}
+void serve_novaworld_rejoin(SessionCore &core, const EditorRequest &) {
+	core.novaworld().rejoin();
+}
+void serve_novaworld_keep_folder(SessionCore &core, const EditorRequest &) {
+	core.novaworld().keep_folder();
 }
 void serve_novaworld_submit(SessionCore &core, const EditorRequest &request) {
 	core.novaworld().submit(request);
@@ -669,8 +679,9 @@ constexpr RequestKindRow kRows[] = {
 			"stamp of its files the build was planned on (sources). The "
 			"folder is replaced only when missing, empty or an export of this project (export.folder). "
 			"An operation (the outcome names it); a build running already serves it and exports once it "
-			"lands. rehash: every file read again.")
-			.takes(request_params({}, { F::ExportDir, F::Rehash, F::GateTagFile, F::VersionFile }))
+			"lands. rehash: every file read again. release: the export a release packs, refused for a file whose "
+			"name its command file cannot carry (build.update_name).")
+			.takes(request_params({}, { F::ExportDir, F::Rehash, F::GateTagFile, F::VersionFile, F::Release }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Export", "Save all and export")
 			.acts_on_saved()
@@ -1527,17 +1538,19 @@ constexpr RequestKindRow kRows[] = {
 			"lists are in. Refused where the editor reaches no NovaWorld service.")
 			.holds(kFiles, kSlot)
 			.row,
-	Request(K::NovaWorldGet, "novaworld_get", serve_novaworld_get,
-			"The project project_key got into dir (missing, or empty) as a working copy at its head, an "
-			"operation (the files downloaded and checked by their SHA-256), then opened as open_project opens it. "
+	Request(K::NovaWorldSync, "novaworld_sync", serve_novaworld_sync,
+			"The project project_key synced into dir (missing, or empty) as a working copy at its head, an "
+			"operation (the files downloaded and checked by their SHA-256), its project file naming project_key "
+			"whatever the revision's named, then opened as open_project opens it; a dir holding the project "
+			"already is opened, nothing got. "
 			"A mod's project builds on its base game's in the folder its project file names: made there first where "
-			"none is (the base_setup operation: got from NovaWorld, or a retail game's, or one the account may not "
-			"read, imported from the editor's game install; with no install of that game the mod opens alone, "
-			"Output saying where to make it).")
+			"none is (the base_setup operation: synced from NovaWorld where the account reads it and it has a "
+			"revision, else imported from the editor's game install; with no install of that game the mod opens "
+			"alone, Output saying where to make it).")
 			.takes(request_params({ F::Dir, F::ProjectKey }, {}))
 			.holds(kNone, kHoldsAll | kSlot)
 			.ends_edit_groups()
-			.guarded(GuardScope::AllDirty, "Get a project", "Save all")
+			.guarded(GuardScope::AllDirty, "Sync a project", "Save all")
 			.can_discard()
 			.acts_on_saved()
 			.row,
@@ -1631,9 +1644,23 @@ constexpr RequestKindRow kRows[] = {
 	// The project file written as Project settings' Apply writes it, once nothing holds the project.
 	Request(K::NovaWorldMakeOwn, "novaworld_make_own", serve_novaworld_make_own,
 			"The open project's NovaWorld key taken out of its project file (another's project made the author's own "
-			"copy): the project is then on no NovaWorld project, and Put on NovaWorld (novaworld_put) makes it one of "
-			"the account's.")
+			"copy), for a signed-in account: the project is then on no NovaWorld project, and Put on NovaWorld "
+			"(novaworld_put) makes it one of the account's. Its working copy's state stays, for novaworld_rejoin.")
 			.holds(kNone, kHoldsAll)
+			.row,
+	Request(K::NovaWorldRejoin, "novaworld_rejoin", serve_novaworld_rejoin,
+			"The open project's folder taken back to the NovaWorld project its own state names and its project "
+			"file does not (the novaworld section's working_copy.former_key): that key written in its project file, "
+			"nothing downloaded, its base and revision as they were where they are this service's. Refused where "
+			"its state names none.")
+			.holds(kNone, kHoldsAll)
+			.row,
+	Request(K::NovaWorldKeepFolder, "novaworld_keep_folder", serve_novaworld_keep_folder,
+			"A working copy holding no revision of its project (a folder synced from another service, or one that lost "
+			"its base): the project's head taken as its base with no file changed, an operation, then checked, so "
+			"every difference from the head, deletions too, is a change for the next push. A stopped pull is given "
+			"up. Refused for a folder that holds a revision.")
+			.holds(kFiles, kSlot)
 			.row,
 	// A call the poll takes the reply of, as a release's.
 	Request(K::NovaWorldSubmit, "novaworld_submit", serve_novaworld_submit,
@@ -1646,13 +1673,26 @@ constexpr RequestKindRow kRows[] = {
 	// An operation (base_setup) that opens the project again once it is in: its unsaved edits saved first.
 	Request(K::NovaWorldMakeBase, "novaworld_make_base", serve_novaworld_make_base,
 			"The open mod's base game's project made where its project file names it, which holds no project "
-			"(the novaworld section's missing_base), as a got mod's is: its NovaWorld game (the mod's project's "
-			"base) got from NovaWorld, or a retail game's imported from game_install (left out, the project's; "
+			"(the novaworld section's missing_base), as a synced mod's is: its NovaWorld game (the mod's project's "
+			"base) synced from NovaWorld, or a retail game's imported from game_install (left out, the project's; "
 			"refused where it holds none of that game); an operation (base_setup), the mod opened again once it is "
 			"in.")
 			.takes(request_params({}, { F::GameInstall }))
 			.holds(kNone, kHoldsAll | kSlot)
 			.guarded(GuardScope::AllDirty, "Make the base game's project", "Save all")
+			.row,
+	// Reads alone: it opens no document and writes no file of the project (session/heights_export.h).
+	Request(K::ExportHeights, "export_heights", serve_export_heights,
+			"The heights of the .cpt at path (left out, the active document) written to the file values.to names (a "
+			"relative one from the project's folder) as the game's 16-bit .raw: 1024 x 1024 little-endian words, the "
+			"top row first, 1/256 of a world unit a step, the atlas as the .cpt holds it, which a terrain import's "
+			"heightmap takes as it is. An open document's unsaved heights are in it, and it opens nothing, so it works "
+			"on an import's .cpt too. Refused, nothing written (terrain_heights.export): a value of no key it takes, a "
+			"values.to not a .raw or inside the project, a file no .cpt of the project or not the file its name reads, "
+			"a .cpt that does not read, a write the disk refuses.")
+			.takes(request_params({ F::Values }, { F::Path }))
+			.holds(kFilesAndDocuments, kNone)
+			.names_active()
 			.row,
 };
 

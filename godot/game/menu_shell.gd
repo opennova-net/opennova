@@ -106,15 +106,17 @@ const _LAN_MULTI_PLAYER := "LAN_MULTI_PLAYER"
 ## The LAN multiplayer entry (an authored SCREEN action to mp.mnu), which the
 ## update gate disables beside the NovaWorld controls while an update waits.
 @export var lan_entry_control_names := PackedStringArray([_LAN_MULTI_PLAYER])
-## True while a screen over the menu holds the keyboard; main_game hands it its
-## join screen's is_open. Retail's join screen is its own mode, so the menu it
-## opens over (the LAN screen binds the same Return and Escape) takes no keys
-## while it is up.
-var keyboard_covered := Callable()  # () -> bool
+## True while a screen over the menu is its own mode; main_game hands it its join
+## screen's is_open. Retail's join screen is a mode of its own, so the menu it
+## opens over neither takes keys (the LAN screen binds the same Return and Escape)
+## nor runs its frame (the mouse pump, the widget clock) while it is up.
+var covered := Callable()  # () -> bool
 
 # Shell -> main_game intents. The shell never loads a world or quits the app
 # itself; it translates menu activity into these and lets main_game decide.
-signal start_requested(bms_name: String)
+# `campaign` / `campaign_mission`: the picked mission's campaign words (-1, 0 none), which the
+# mission start records in the profile and its round end reads (engine MenuFlow::selected_campaign).
+signal start_requested(bms_name: String, campaign: int, campaign_mission: int)
 # `reason` names what ends the process, for the exit's log line.
 signal exit_to_desktop_requested(reason: String)
 signal return_to_menu_requested()
@@ -199,23 +201,28 @@ func _process(delta: float) -> void:
 ## advance, and -- at the tail, the way the original orders it -- the deferred
 ## expansion remount. Public so a caller (and the GUT suite) can step the menu
 ## tick the way the mode loop does.
-## retail: Menu_UpdateFrame @ 0x5528a0 (the mode struct's update slot @ 0x83b404).
+## retail: Menu_UpdateFrame @ 0x5528a0 (the MainMenu mode descriptor @ 0x83b400, its
+## update slot @ 0x83b424).
 func update_menu_frame(delta: float = 0.0) -> void:
+	# Covered by a screen that is its own mode (the join screen), the menu's frame
+	# does not run: its pump, its clock and the deferred remount wait for it.
+	var menu_runs := not _is_covered()
 	# The pump, once a frame after the input events (each taken as its message
 	# in _gui_input): hover, the click and the window sounds of the mouse as the
 	# events left it (engine/runtime/menu/menu_runtime.h, pump_mouse). Over a
 	# running mission the game loop's frame runs it instead (pump_screen_pass).
-	if not _in_game:
+	if menu_runs and not _in_game:
 		pump_screen_pass()
 	# The blink/marquee clock rides the OS tick like the original's
 	# GetTickCount gate.
-	if _driver != null:
+	if menu_runs and _driver != null:
 		_driver.tick(GameWorld.current_frame_clock_ms())
 	# The one model runtime-frame driver outside a live mission: menu portraits
 	# (avatar previews) are ObjectModels, which no longer self-clock. The static
 	# advance is per-frame-guarded, so a mission's own driver takes precedence.
 	ObjectModel.advance_awake_frame(delta)
-	_consume_expansion_reload_request()
+	if menu_runs:
+		_consume_expansion_reload_request()
 
 
 ## The screen pass's mouse pump: hover, the click and the window sounds of the
@@ -325,6 +332,9 @@ func leave_menu_mode() -> void:
 		return
 	_menu_mode = false
 	_driver.leave_menu_mode()
+	# The menu's teardown at a mission start writes the high scores back
+	# (engine: runtime/mission/mission_catalog.h HighScoreTable).
+	MissionCatalog.save_high_scores(String(LaunchFlags.working_dir()))
 
 
 # --- Asset assembly -----------------------------------------------------------
@@ -408,6 +418,9 @@ func _load_root_assets() -> void:
 	Strings.register_table(Strings.TABLE_GAMETEXT, _load_text(game_text_file))
 	Strings.register_table(Strings.TABLE_GAMEERR, _load_text("gameerr.bin"))
 	Strings.register_table(Strings.TABLE_GAMEUI, _load_text(menu_ui_text_file))
+	# The catalog's high scores, read past its scan at boot and at each reload
+	# (engine: runtime/mission/mission_catalog.h HighScoreTable).
+	MissionCatalog.load_high_scores(_root, String(LaunchFlags.working_dir()))
 	# The shell's stylesheets by their fixed names, usually PFF-archived:
 	# menu_style.mns, then brand.mns onto it, as the game loads them (the port
 	# and its witnesses: engine/runtime/menu/menu_style.h); null when neither is
@@ -441,7 +454,7 @@ func _gui_input(event: InputEvent) -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	# A backgrounded menu must not steal Esc from the world, nor a covered one
 	# the keys of the screen over it.
-	if _driver == null or not is_visible_in_tree() or _is_keyboard_covered():
+	if _driver == null or not is_visible_in_tree() or _is_covered():
 		return
 	if _options_controller != null and _options_controller.consume_input(event):
 		get_viewport().set_input_as_handled()
@@ -450,8 +463,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 
-func _is_keyboard_covered() -> bool:
-	return keyboard_covered.is_valid() and bool(keyboard_covered.call())
+func _is_covered() -> bool:
+	return covered.is_valid() and bool(covered.call())
 
 
 # --- Menu loading + navigation ------------------------------------------------
@@ -602,6 +615,11 @@ func _wire_named_controls() -> void:
 	_driver.set_mission_controls(sp_mission_list_names, briefing_pane_names,
 			sp_accept_control_names)
 	_driver.set_mod_descriptions(mod_desc_names)
+	# The single-player screen's inputs: the title's screen, and under dfx2.exe's campaign tabs
+	# the campaign reader's file, its menu table (the gameui table, Game.bin, not menutxt: engine
+	# MenuFlow::set_campaign_source) and the profile's progress (engine MenuFlow).
+	_driver.set_single_player_source(PlayerProfile.store(),
+			Strings.get_table(Strings.TABLE_GAMEUI))
 
 	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
 	# can own a whole menu: when one claims this one, hand it the named-control wiring and
@@ -661,6 +679,9 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 	# controls (engine menu_commands.h MenuCommand::Update).
 	if _driver.screen_command(_driver.widget_screen_of(id), widget_name, _in_game) == "update":
 		_launch_update()
+		return
+	# The campaign tabs' radios refresh ACCEPT (engine MenuFlow::activate_tab).
+	if _driver.activate_single_player_tab(widget_name):
 		return
 	var handler: Callable = _named_handlers.get(widget_name.to_upper(), Callable())
 	if handler.is_valid():
@@ -773,11 +794,18 @@ func _mount_expansion(name: String) -> void:
 	# The reload closes every archive before it mounts the pick, so the pick's
 	# text-override table loads as at boot (docs/vfs/vfs-pff-mount-re.md,
 	# "Expansions" item 1): the root mounts from cleared, not as the join's
-	# switch does over its open archives.
+	# switch does over its open archives. The reload keeps the game running: it
+	# reopens the same game's archives and writes no title or protocol (the
+	# Game_ReloadExpansionAndMods witness above), so both mounts name the game the
+	# root ran, never the default title's.
+	var game := _root.get_game_code()
+	# The reload writes the high scores back before it closes the archives
+	# (engine: runtime/mission/mission_catalog.h HighScoreTable).
+	MissionCatalog.save_high_scores(String(LaunchFlags.working_dir()))
 	_root.clear()
-	if _root.mount_runtime(dir, name, LaunchFlags.loose_override_enabled()) != OK:
+	if _root.mount_runtime(dir, name, LaunchFlags.loose_override_enabled(), game) != OK:
 		push_warning("MenuShell: could not mount expansion '%s': %s" % [name, _root.get_last_error()])
-		_root.mount_runtime(dir, prev, LaunchFlags.loose_override_enabled())  # rollback
+		_root.mount_runtime(dir, prev, LaunchFlags.loose_override_enabled(), game)  # rollback
 		return
 	_load_root_assets()
 	_enter_menu_music()
@@ -847,6 +875,9 @@ func _on_quit_requested() -> void:
 
 
 func _on_widget_value_changed(widget_name: String, kind: String, index: int, value: String) -> void:
+	# The campaign list's pick is the engine's (MenuFlow::select_campaign).
+	if kind == "list" and _driver.select_campaign(_driver.widget_id(widget_name), index):
+		return
 	if kind == "list" and _is_mission_list(widget_name):
 		_driver.select_mission(_driver.widget_id(widget_name), index, value)
 	elif kind == "list" and _is_mod_list(widget_name):
@@ -880,7 +911,8 @@ func _on_start_control() -> void:
 	if mission.is_empty():
 		push_warning("MenuShell: start pressed with no mission selected")
 		return
-	start_requested.emit(mission)
+	var campaign := _driver.get_selected_campaign()
+	start_requested.emit(mission, campaign.x, campaign.y)
 
 
 func _on_exit_control() -> void:
@@ -1082,7 +1114,7 @@ func menu_click_at(design_pos: Vector2) -> bool:
 func menu_key(keycode: int, unicode: int = 0) -> bool:
 	# The same guard as the real input paths: a hidden menu (a world is up)
 	# or a covered one must not receive synthetic menu input either.
-	if _driver == null or not is_visible_in_tree() or _is_keyboard_covered():
+	if _driver == null or not is_visible_in_tree() or _is_covered():
 		return false
 	var ev := InputEventKey.new()
 	ev.keycode = keycode as Key

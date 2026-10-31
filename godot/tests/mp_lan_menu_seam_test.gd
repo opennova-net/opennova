@@ -98,7 +98,7 @@ func _press(driver: MenuDriver, name: String) -> void:
 # A synthetic host-listable catalog row (objective co-op unless overridden —
 # stock co-op is host-invisible by the witnessed populate skip).
 func _pool_row(file: String, game_type := 0x30020) -> MissionCatalogRow:
-	return MissionCatalogRow.create(file, "", "", game_type, false)
+	return MissionCatalogRow.create(file, "", "", game_type, false, 1)
 
 
 func _start_host_config(mission_file: String) -> HostSessionConfig:

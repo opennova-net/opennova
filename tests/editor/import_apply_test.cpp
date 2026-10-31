@@ -1298,7 +1298,7 @@ static int test_apply_install_expansion() {
 			std::string io_error;
 			TEST_EXPECT(origin.read(*file, planned) && opennova::io::read_file_bytes(file->loose_path, on_disk, io_error));
 			std::vector<uint8_t> decoded = on_disk; // as the game's loaders take it (a scrambled text decoded)
-			opennova::vfs_decode_payload(decoded, origin.vfs().scr_policy());
+			opennova::vfs_decode_payload(decoded);
 			TEST_EXPECT(planned == on_disk || planned == decoded);
 			if (file->layer == InstallFile::Layer::Expansion)
 				TEST_EXPECT(opennova::strutil::to_lower(file->loose_path).find(minted_install::kExpansion) != std::string::npos);

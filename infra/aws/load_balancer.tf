@@ -14,8 +14,7 @@
 # which answers with both, and so does the update service's unproxied one. Target groups, of IP targets (the tasks) that see each
 # client's own address, each with its listener on its port:
 #   gate            UDP gate_udp_port to the gate's tasks, from everyone (the
-#                   clients' probes, the hosts' status blobs); health: HTTP
-#                   /livez on health_port
+#                   clients' probes); health: HTTP /livez on health_port
 #   lobby           UDP nw_udp_port to the lobby's tasks, from everyone: the
 #                   one lobby address every lobby announces, so a stock host
 #                   whose lobby task went away reconnects to it and lands on a

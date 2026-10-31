@@ -25,6 +25,8 @@
 #include <runtime/controls/binding_set.h>
 #include <runtime/profile/player_profiles.h>
 #include <runtime/profile/profile_controls.h>
+#include <games/dfx2/dfx2.h>
+#include <games/jo/jo.h>
 
 using namespace opennova;
 using opennova::profile::PlayerProfiles;
@@ -32,9 +34,12 @@ using opennova::profile::ProfileDefaults;
 
 namespace {
 
+// The title the profiles are Joint Operations' (its files' magic, Title::profile_magic).
+const Title &kJo = games::jo_title();
+
 ProfileDefaults defaults() {
     ProfileDefaults d;
-    d.bindings = profile::default_binding_table();
+    d.bindings = profile::default_binding_table(opennova::controls::default_catalog());
     d.macros = profile::default_macros(nullptr, nullptr);
     d.avatars[0] = {0, 0, 0x0200};
     d.avatars[1] = {7, 0, 0x8207};
@@ -57,7 +62,7 @@ rtxt::File macros_table(const std::vector<std::pair<std::string, std::string>> &
 // --- 1. the default binding table [orig: KeyBinding_BuildFilteredTable @0x54c2b0] ---
 
 int test_default_binding_table() {
-    const std::vector<playersav::BindingEntry> table = profile::default_binding_table();
+    const std::vector<playersav::BindingEntry> table = profile::default_binding_table(opennova::controls::default_catalog());
     // Every catalog row with the 0x4000000 flag: 109 in JO:CA (the shipped
     // profiles' count).
     TEST_EXPECT(table.size() == 109);
@@ -107,12 +112,13 @@ int test_init_defaults() {
     record.name = "stale";
     record.sp_no_char_abilities = 1;
     playersav::Record weapons;
-    profile::init_defaults(record, weapons, d);
+    profile::init_defaults(record, weapons, d, kJo);
     TEST_EXPECT(record.name.empty() && record.flags == playersav::kRecordFlagNoName);
     TEST_EXPECT(record.sp_no_char_abilities == 0 && record.sp_gps_icons == 1);
     TEST_EXPECT(record.intro_pending == -1 && record.mouse_sensitivity == 128);
     TEST_EXPECT(record.word_1468 == 127 && record.auto_reload == 1 && record.view_mode == 1);
     TEST_EXPECT(record.joystick_cap_1 == 1 && record.joystick_cap_4 == 1 && record.joystick_cap_2 == 0);
+    TEST_EXPECT(record.word_1396 == 0);  // Jointops.exe stores nothing at +1396
     TEST_EXPECT(record.bindings.size() == d.bindings.size());
     TEST_EXPECT(record.macros[0] == "??MACRO_0??");
     TEST_EXPECT(weapons.blue.player_class == 8 && weapons.red.player_class == 8);
@@ -123,7 +129,7 @@ int test_init_defaults() {
 
     // The two inner joystick seeds hang off the first [orig: @0x54bc64].
     d.joystick_caps = 2 | 4;
-    profile::init_defaults(record, weapons, d);
+    profile::init_defaults(record, weapons, d, kJo);
     TEST_EXPECT(record.joystick_cap_1 == 0 && record.joystick_cap_2 == 0 && record.joystick_cap_4 == 0);
     return 0;
 }
@@ -131,7 +137,7 @@ int test_init_defaults() {
 // --- 4. the merge [orig: KeyBinding_MergeSavedBindings @0x54c3f0] -----------------------
 
 int test_merge_bindings() {
-    const std::vector<playersav::BindingEntry> table = profile::default_binding_table();
+    const std::vector<playersav::BindingEntry> table = profile::default_binding_table(opennova::controls::default_catalog());
     std::vector<playersav::BindingEntry> saved;
     playersav::BindingEntry forward;
     for (const auto &e : table)
@@ -162,11 +168,77 @@ int test_merge_bindings() {
     return 0;
 }
 
+// DFX2-110: the default table and the merge follow the title's catalog. dfx2.exe's table carries
+// Powerup0 200, Grenades 204, Accessory 205, Powerup6..9 206..209, Detonator 210, Objectives
+// 58, EmoteToggle 59 and the 1st Person Toggle 412, and no JO-only row; a player.sav entry
+// merges where its code and token both name a default row, so dfx2.exe's Accessory (code 205)
+// is FragGrenade's code under Jointops.exe and keeps nothing there, and its Powerup0 (200) has
+// no row at all, while under dfx2.exe both take the saved keys.
+// [orig: KeyBinding_BuildFilteredTable @0x549530 over the table @0x8148A0;
+//  KeyBinding_MergeSavedBindings @0x549670 (dfx2.exe)]
+int test_title_binding_tables() {
+    const controls::Catalog &jo = controls::title_catalog(kJo);
+    const controls::Catalog &dfx2 = controls::title_catalog(games::dfx2_title());
+    const std::vector<playersav::BindingEntry> jo_table = profile::default_binding_table(jo);
+    const std::vector<playersav::BindingEntry> dfx2_table = profile::default_binding_table(dfx2);
+    const auto entry = [](const std::vector<playersav::BindingEntry> &table, int code) {
+        for (const playersav::BindingEntry &e : table)
+            if (e.index == code) return &e;
+        return static_cast<const playersav::BindingEntry *>(nullptr);
+    };
+    TEST_EXPECT(jo_table.size() == 109);
+    // dfx2.exe's 0x4000000 rows: Jointops.exe's 109 less its nine (Flashbang, FragGrenade,
+    // SmokeGrenade, medpack, ToSpecial, dotsize, ScopeZeroDec / Inc, commander_menu) plus
+    // its own nine (Grenades, Powerup6..9, Powerup0, Objectives, EmoteToggle, viewtoggle).
+    TEST_EXPECT(dfx2_table.size() == 109);
+    for (size_t i = 1; i < dfx2_table.size(); ++i) TEST_EXPECT(dfx2_table[i - 1].id < dfx2_table[i].id);
+    struct Want {
+        int code;
+        const char *token;
+        uint16_t primary;
+    };
+    for (const Want &w : {Want{200, "Powerup0", '0'}, Want{204, "Grenades", '4'},
+                          Want{205, "Accessory", '5'}, Want{206, "Powerup6", '6'},
+                          Want{209, "Powerup9", '9'}, Want{210, "Detonator", 0x08},
+                          Want{58, "Objectives", 'O'}, Want{59, "EmoteToggle", 0},
+                          Want{412, "viewtoggle", 0x70}}) {
+        const playersav::BindingEntry *e = entry(dfx2_table, w.code);
+        TEST_EXPECT(e != nullptr && e->token == w.token && e->primary == w.primary &&
+                    e->id == w.code);
+        TEST_EXPECT(w.code == 205 || entry(jo_table, w.code) == nullptr ||
+                    entry(jo_table, w.code)->token != w.token);
+    }
+    TEST_EXPECT(entry(dfx2_table, 400)->primary == 0x70 && entry(dfx2_table, 400)->primary_mod == 0x11);
+    for (const int code : {216, 220, 221, 222, 223}) TEST_EXPECT(entry(dfx2_table, code) == nullptr);
+    TEST_EXPECT(entry(jo_table, 205)->token == "FragGrenade" && entry(jo_table, 207)->token == "Accessory");
+
+    // A dfx2.exe player.sav table: Accessory on 'K', Powerup0 on 'L'.
+    std::vector<playersav::BindingEntry> saved;
+    for (playersav::BindingEntry e : dfx2_table) {
+        if (e.token == "Accessory") e.primary = 'K';
+        if (e.token == "Powerup0") e.primary = 'L';
+        if (e.token == "Accessory" || e.token == "Powerup0") saved.push_back(e);
+    }
+    const std::vector<playersav::BindingEntry> under_dfx2 = profile::merge_bindings(dfx2_table, saved);
+    TEST_EXPECT(entry(under_dfx2, 205)->primary == 'K' && entry(under_dfx2, 200)->primary == 'L');
+    const std::vector<playersav::BindingEntry> under_jo = profile::merge_bindings(jo_table, saved);
+    TEST_EXPECT(under_jo.size() == jo_table.size() && entry(under_jo, 200) == nullptr);
+    TEST_EXPECT(entry(under_jo, 205)->token == "FragGrenade" && entry(under_jo, 205)->primary == '5');
+    TEST_EXPECT(entry(under_jo, 207)->token == "Accessory" && entry(under_jo, 207)->primary == '7');
+    // The options records follow the catalog: dfx2.exe's Accessory record takes the 'K'.
+    playersav::ProfileRecord r;
+    r.bindings = under_dfx2;
+    const controls::BindingSet options = profile::options_bindings(r, dfx2);
+    TEST_EXPECT(options.record(options.index_of_token("Accessory"))->primary == 'K');
+    TEST_EXPECT(options.record(options.index_of_token("Powerup0"))->primary == 'L');
+    return 0;
+}
+
 // --- 5. the load and the save [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0;
 //        PlayerProfile_SaveToFiles @0x54be00] ------------------------------------
 
 int test_load_without_files() {
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     p.select_slot(3);
     PlayerProfiles::LoadInput in;
     in.user_name = "cdouglass";
@@ -199,7 +271,7 @@ int test_load_with_files() {
     playersav::PlayerSav file;
     file.flags = 1;
     file.extra = 0x03000000u;
-    for (playersav::ProfileRecord &r : file.slots) r.bindings = profile::default_binding_table();
+    for (playersav::ProfileRecord &r : file.slots) r.bindings = profile::default_binding_table(opennova::controls::default_catalog());
     file.slots[2].name = "Sandman";
     file.slots[2].flags = 0;
     file.slots[2].sp_no_weapon_recoil = 1;
@@ -208,12 +280,12 @@ int test_load_with_files() {
     extra.id = 700;
     extra.token = "removed";
     file.slots[2].bindings.push_back(extra);
-    const std::vector<uint8_t> player = playersav::write(file);
+    const std::vector<uint8_t> player = playersav::write(file, kJo.profile_magic);
     playersav::File weapons = playersav::make_defaults();
     weapons.slots[2].blue.player_class = 6;
-    const std::vector<uint8_t> weapon = playersav::write(weapons);
+    const std::vector<uint8_t> weapon = playersav::write(weapons, kJo.profile_magic);
 
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     p.select_slot(2);
     PlayerProfiles::LoadInput in;
     in.player_sav = &player;
@@ -240,7 +312,7 @@ int test_load_with_files() {
     bad[0] = 'X';
     in.player_sav = &bad;
     in.weapon_sav = nullptr;
-    PlayerProfiles q;
+    PlayerProfiles q(kJo);
     q.load(in, defaults());
     TEST_EXPECT(q.player_sav().slots[2].name.empty());
     TEST_EXPECT(q.player_sav_bytes()[15] == 3 && q.player_sav_bytes()[8] == 0);
@@ -249,7 +321,7 @@ int test_load_with_files() {
     std::vector<uint8_t> shorter(player.begin(), player.begin() + playersav::kHeaderBytes +
                                  2 * playersav::kPlayerRecordBytes + 100);
     in.player_sav = &shorter;
-    PlayerProfiles r;
+    PlayerProfiles r(kJo);
     r.select_slot(2);
     r.load(in, defaults());
     TEST_EXPECT(r.current().name == "Sandman");  // the first 100 bytes of record 2
@@ -260,7 +332,7 @@ int test_load_with_files() {
 // --- 6. the screens and the session ------------------------------------------------
 
 int test_name_rules() {
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     PlayerProfiles::LoadInput in;
     p.load(in, defaults());
     p.select_slot(1);
@@ -335,7 +407,7 @@ int test_name_rules() {
 }
 
 int test_voice_override() {
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     PlayerProfiles::LoadInput in;
     p.load(in, defaults());
     playersav::ProfileRecord &r = p.current();
@@ -355,7 +427,7 @@ int test_voice_override() {
     TEST_EXPECT(r.voice[0] == 0x0A && r.voice[1] == 7 && profile::voice_override(r, 2) == 0);
     // The pair rides player.sav at +1532 / +1533.
     const std::vector<uint8_t> bytes = p.player_sav_bytes();
-    PlayerProfiles reread;
+    PlayerProfiles reread(kJo);
     PlayerProfiles::LoadInput again;
     again.player_sav = &bytes;
     reread.load(again, defaults());
@@ -365,7 +437,7 @@ int test_voice_override() {
 }
 
 int test_session_steps() {
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     PlayerProfiles::LoadInput in;
     p.load(in, defaults());
     // [orig: SinglePlayer_StartMission @0x561b99]
@@ -397,7 +469,7 @@ int test_session_steps() {
     TEST_EXPECT(p.current_weapons().blue.player_class == 7);
     {
         const std::vector<uint8_t> weapons = p.weapon_sav_bytes();
-        PlayerProfiles reread;
+        PlayerProfiles reread(kJo);
         PlayerProfiles::LoadInput again;
         again.weapon_sav = &weapons;
         reread.load(again, defaults());
@@ -412,7 +484,7 @@ int test_session_steps() {
 // --- 6b. the controls words the game reads (runtime/profile/profile_controls.h) ----
 
 int test_controls_words() {
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     PlayerProfiles::LoadInput in;
     p.load(in, defaults());
     playersav::ProfileRecord &r = p.current();
@@ -442,8 +514,8 @@ int test_controls_words() {
     // A fresh record's table onto the live records changes nothing: the default
     // table is the catalog's own defaults, row for row.
     {
-        controls::BindingSet fresh;
-        const controls::BindingSet applied = profile::options_bindings(r);
+        controls::BindingSet fresh(opennova::controls::default_catalog());
+        const controls::BindingSet applied = profile::options_bindings(r, opennova::controls::default_catalog());
         for (int i = 0; i < static_cast<int>(fresh.size()); ++i) {
             const controls::BindingRecord *a = fresh.record(i);
             const controls::BindingRecord *b = applied.record(i);
@@ -455,7 +527,7 @@ int test_controls_words() {
     }
     // The table onto the live records [orig: KeyBinding_ApplyProfileBindings -> KeyBinding_ApplyProfileEntry]: a row
     // the table names takes the entry's fields, the joystick gate the word.
-    controls::BindingSet live;
+    controls::BindingSet live(opennova::controls::default_catalog());
     const int forward = live.index_of_token("move_forward");
     TEST_EXPECT(forward >= 0);
     for (playersav::BindingEntry &e : r.bindings) {
@@ -477,7 +549,7 @@ int test_controls_words() {
     // The Options screen's records [orig: UI_BuildKeyBindingLoadoutTable
     // @0x559e50] and their store back [orig: @0x559d50]: the count and the
     // identity fields stand, the eight binding fields follow the records.
-    controls::BindingSet options = profile::options_bindings(r);
+    controls::BindingSet options = profile::options_bindings(r, opennova::controls::default_catalog());
     TEST_EXPECT(options.record(forward)->primary == 'Y');
     TEST_EXPECT(options.assign_key(forward, 'K', false, false, false, false));
     const size_t count = r.bindings.size();
@@ -486,12 +558,13 @@ int test_controls_words() {
     for (const playersav::BindingEntry &e : r.bindings) {
         if (e.token != "move_forward") continue;
         TEST_EXPECT(e.primary == 'Y' && e.secondary == 'K' && e.mouse_mask == 0x10);  // the empty slot
-        TEST_EXPECT(e.index == controls::action_code(forward) && e.id == e.index);
+        TEST_EXPECT(e.index == options.catalog().rows[forward].code && e.id == e.index);
     }
     // A record that round-trips through the file keeps the stored table.
     std::vector<uint8_t> image(playersav::kPlayerRecordBytes, 0);
     playersav::write_record(r, image.data());
-    controls::BindingSet reread = profile::options_bindings(playersav::read_record(image.data()));
+    controls::BindingSet reread = profile::options_bindings(playersav::read_record(image.data()),
+            opennova::controls::default_catalog());
     TEST_EXPECT(reread.record(forward)->secondary == 'K');
 
     // The two checkboxes [orig: @0x554d36, @0x56074c; @0x55528c, @0x5552b5].
@@ -575,7 +648,7 @@ constexpr size_t kProgramBindingEntries = 109;
 constexpr uint64_t kProgramBindingTableDigest = UINT64_C(0xF822C6DB461D2A12);
 
 int test_program_binding_table() {
-    const std::vector<playersav::BindingEntry> table = profile::default_binding_table();
+    const std::vector<playersav::BindingEntry> table = profile::default_binding_table(opennova::controls::default_catalog());
     TEST_EXPECT(table.size() == kProgramBindingEntries);
     TEST_EXPECT(binding_table_digest(table) == kProgramBindingTableDigest);
     return 0;
@@ -671,9 +744,9 @@ int test_program_controls_code() {
 // --- 8. the shipped default weapon.sav, loaded and saved in memory ---------------
 
 int test_default_weapon_sav() {
-    const std::vector<uint8_t> bytes = playersav::write(test_weapon_sav::default_file());
+    const std::vector<uint8_t> bytes = playersav::write(test_weapon_sav::default_file(), kJo.profile_magic);
     TEST_EXPECT(test_weapon_sav::fnv1a64(bytes) == test_weapon_sav::kDefaultWeaponSavFnv1a64);
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     PlayerProfiles::LoadInput in;
     in.weapon_sav = &bytes;
     p.load(in, defaults());
@@ -683,6 +756,148 @@ int test_default_weapon_sav() {
     TEST_EXPECT(saved.size() == bytes.size());
     TEST_EXPECT(saved.size() > 16 && std::equal(saved.begin(), saved.begin() + 8, bytes.begin()));
     TEST_EXPECT(saved.size() == bytes.size() && std::equal(saved.begin() + 16, saved.end(), bytes.begin() + 16));
+    return 0;
+}
+
+// --- 9. the title's magic (DFX2-4) ------------------------------------------------
+// Both files open with the title's magic: dfx2.exe's load gates on "2XFD" and its save writes
+// it, so each game refuses the other's files and keeps its seeds [orig: PlayerProfile_SaveToFiles
+// @0x549080 - @0x5490ae; PlayerProfile_LoadAllFromDisk @0x54c720 - @0x54c7dc, the gates @0x54c800
+// and @0x54c93f (dfx2.exe)].
+
+int test_title_magic() {
+    PlayerProfiles jo(kJo);
+    PlayerProfiles::LoadInput none;
+    jo.load(none, defaults());
+    jo.select_slot(1);
+    jo.current().name = "Sandman";
+    jo.current_weapons().blue.player_class = 6;
+    const std::vector<uint8_t> jo_player = jo.player_sav_bytes();
+    const std::vector<uint8_t> jo_weapon = jo.weapon_sav_bytes();
+    TEST_EXPECT(std::memcmp(jo_player.data(), "FPBC0211", 8) == 0);
+    TEST_EXPECT(std::memcmp(jo_weapon.data(), "FPBC0211", 8) == 0);
+
+    const Title &dfx2 = games::dfx2_title();
+    PlayerProfiles d(dfx2);
+    d.select_slot(1);
+    PlayerProfiles::LoadInput in;
+    in.player_sav = &jo_player;
+    in.weapon_sav = &jo_weapon;
+    d.load(in, defaults());
+    // JO's files are there, and refused: the seeds stand.
+    TEST_EXPECT(!d.first_run());
+    TEST_EXPECT(d.current().name.empty() && d.current_weapons().blue.player_class == 8);
+    d.current().name = "Sandman";
+    d.current_weapons().blue.player_class = 6;
+    const std::vector<uint8_t> dfx2_player = d.player_sav_bytes();
+    const std::vector<uint8_t> dfx2_weapon = d.weapon_sav_bytes();
+    TEST_EXPECT(std::memcmp(dfx2_player.data(), "2XFD0211", 8) == 0);
+    TEST_EXPECT(std::memcmp(dfx2_weapon.data(), "2XFD0211", 8) == 0);
+
+    // DFX2's files read back under its own title and are refused under JO's.
+    in.player_sav = &dfx2_player;
+    in.weapon_sav = &dfx2_weapon;
+    PlayerProfiles back(dfx2);
+    back.select_slot(1);
+    back.load(in, defaults());
+    TEST_EXPECT(back.current().name == "Sandman" && back.current_weapons().blue.player_class == 6);
+    PlayerProfiles refused(kJo);
+    refused.select_slot(1);
+    refused.load(in, defaults());
+    TEST_EXPECT(refused.current().name.empty() && refused.current_weapons().blue.player_class == 8);
+    return 0;
+}
+
+// --- 10. the title's record 0 name ------------------------------------------------
+// dfx2.exe names the fresh record 0 "Bravo 1" where Jointops.exe reads the account
+// [orig: PlayerProfile_LoadAllFromDisk @0x54c720 - @0x54c770..0x54c78a (dfx2.exe)]; player.sav's
+// record 0 still reads over it.
+
+int test_title_first_name() {
+    PlayerProfiles d(games::dfx2_title());
+    PlayerProfiles::LoadInput in;
+    in.user_name = "cdouglass";
+    d.load(in, defaults());
+    TEST_EXPECT(d.player_sav().slots[0].name == "Bravo 1" && d.player_sav().slots[0].flags == 0);
+    TEST_EXPECT(d.player_sav().slots[1].name.empty());
+    in.user_name = std::string(16, 'u');
+    d.load(in, defaults());
+    TEST_EXPECT(d.player_sav().slots[0].name == "Bravo 1");
+    d.player_sav().slots[0].name = "Sandman";
+    const std::vector<uint8_t> player = d.player_sav_bytes();
+    in.player_sav = &player;
+    PlayerProfiles back(games::dfx2_title());
+    back.load(in, defaults());
+    TEST_EXPECT(back.player_sav().slots[0].name == "Sandman");
+    return 0;
+}
+
+// --- 11. the title's kit pages (DFX2-29) ----------------------------------------------
+// dfx2.exe's fresh weapon record takes its own pages: the single-player page at 0x832368, and on
+// each side classes 7 and 8 the XM4AUTO and M4AUTO pages, classes 5, 6 and 9 empty pages (static
+// buffers nothing writes) [orig: PlayerProfile_InitDefaults @0x548db0 - @0x548f67,
+// @0x548f94..0x548fe0 (side 1), @0x548ff9..0x549045 (side 0) (dfx2.exe)].
+
+int test_title_kit_pages() {
+    const auto names = [](const playersav::KitPage &page) {
+        std::string out;
+        for (const playersav::KitEntry &e : page.entries) out += e.name + " ";
+        return out;
+    };
+    playersav::ProfileRecord record;
+    playersav::Record weapons;
+    profile::init_defaults(record, weapons, defaults(), games::dfx2_title());
+    TEST_EXPECT(names(weapons.single_player) ==
+            "WPN_M4AUTO WPN_M4 WPN_MK23 WPN_AT4 WPN_GRENADEFB WPN_GRENADEHE WPN_GRENADESM WPN_KNIFE ");
+    const std::string xm4 = "WPN_XM4AUTO WPN_XM4 WPN_XMK23 WPN_XAT4 WPN_GRENADEFB WPN_GRENADEHE "
+                            "WPN_GRENADESM WPN_KNIFE ";
+    const std::string m4 = "WPN_M4AUTO WPN_MK23 WPN_SATCHEL_CHARGE WPN_GRENADEFB WPN_GRENADEHE "
+                           "WPN_GRENADESM WPN_KNIFE ";
+    for (const playersav::Side *side : {&weapons.blue, &weapons.red}) {
+        TEST_EXPECT(side->pages[0].entries.empty() && side->pages[1].entries.empty());
+        TEST_EXPECT(names(side->pages[2]) == xm4);
+        TEST_EXPECT(names(side->pages[3]) == m4);
+        TEST_EXPECT(side->pages[4].entries.empty());
+        TEST_EXPECT(side->player_class == 8);
+    }
+    TEST_EXPECT(weapons.blue.pages[2].entries[0].ammo_primary == -1);
+    // dfx2.exe's record carries +1396 = 1 [orig: PlayerProfile_InitDefaults @0x548db0
+    // (@0x548ece) (dfx2.exe)].
+    TEST_EXPECT(record.word_1396 == 1);
+    // A DFX2 profile's load seeds every record so, and its fresh player.sav carries the word.
+    PlayerProfiles p(games::dfx2_title());
+    PlayerProfiles::LoadInput none;
+    p.load(none, defaults());
+    TEST_EXPECT(names(p.weapon_sav().slots[4].red.pages[3]) == m4);
+    TEST_EXPECT(p.weapon_sav().slots[0].blue.pages[0].entries.empty());
+    const std::vector<uint8_t> dfx2_player = p.player_sav_bytes();
+    for (size_t s = 0; s < playersav::kProfileSlots; ++s)
+        TEST_EXPECT(dfx2_player[playersav::kHeaderBytes + s * playersav::kPlayerRecordBytes + 1396] == 1);
+    // JO's stay the format's.
+    profile::init_defaults(record, weapons, defaults(), kJo);
+    TEST_EXPECT(record.word_1396 == 0);
+    TEST_EXPECT(weapons.red.pages[4].entries[0].name == "WPN_AK74AUTO");
+    TEST_EXPECT(weapons.single_player.entries[2].name == "WPN_colt45");
+    // A fresh weapon record (the session start's and the 0x2F's with no weapon.sav) is the same
+    // weapon half over a cleared record: JO's the format's defaults, dfx2.exe's its own pages, no
+    // title's no page, each with both class bytes 8 and the avatar bytes 0.
+    // [orig: PlayerProfile_InitDefaults @0x54bb40; @0x548db0 (dfx2.exe)]
+    const playersav::Record jo = profile::fresh_weapon_record(&kJo);
+    const playersav::Record shipped = playersav::make_defaults().slots[0];
+    TEST_EXPECT(names(jo.single_player) == names(shipped.single_player));
+    for (size_t i = 0; i < playersav::kKitPagesPerSide; ++i) {
+        TEST_EXPECT(names(jo.blue.pages[i]) == names(shipped.blue.pages[i]));
+        TEST_EXPECT(names(jo.red.pages[i]) == names(shipped.red.pages[i]));
+    }
+    const playersav::Record dfx2 = profile::fresh_weapon_record(&games::dfx2_title());
+    TEST_EXPECT(names(dfx2.red.pages[3]) == m4 && names(dfx2.blue.pages[2]) == xm4 &&
+            dfx2.red.pages[4].entries.empty());
+    const playersav::Record untitled = profile::fresh_weapon_record(nullptr);
+    TEST_EXPECT(untitled.single_player.entries.empty() && untitled.red.pages[3].entries.empty());
+    for (const playersav::Record *r : {&jo, &dfx2, &untitled}) {
+        TEST_EXPECT(r->blue.player_class == 8 && r->red.player_class == 8);
+        TEST_EXPECT(r->blue.avatar_a == 0 && r->red.avatar_packed == 0);
+    }
     return 0;
 }
 
@@ -698,6 +913,7 @@ int main() {
         {"default_macros", test_default_macros},
         {"init_defaults", test_init_defaults},
         {"merge_bindings", test_merge_bindings},
+        {"title_binding_tables", test_title_binding_tables},
         {"load_without_files", test_load_without_files},
         {"load_with_files", test_load_with_files},
         {"name_rules", test_name_rules},
@@ -708,6 +924,9 @@ int main() {
         {"program_kit_pages", test_program_kit_pages},
         {"program_controls_code", test_program_controls_code},
         {"default_weapon_sav", test_default_weapon_sav},
+        {"title_magic", test_title_magic},
+        {"title_first_name", test_title_first_name},
+        {"title_kit_pages", test_title_kit_pages},
     };
     int failures = 0;
     for (const Case &c : cases) {

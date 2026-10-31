@@ -163,7 +163,7 @@ func test_session_block_composites_into_the_background() -> void:
 	assert_eq(font.load_from_bytes(FileAccess.get_file_as_bytes(FONT_FIXTURE)), OK)
 	var background := Image.create_empty(800, 600, false, Image.FORMAT_RGB8)
 	var quiet := HudPos.composite_loading_session_text(background, font, font, "HOST", "", "",
-			"Message", "", 661)
+			"Message", "", true)
 	assert_not_null(quiet)
 	if quiet == null:
 		return
@@ -172,10 +172,10 @@ func test_session_block_composites_into_the_background() -> void:
 	assert_true(_lit(quiet, Rect2i(21, 29, 180, 50)), "the title blends into the band")
 	assert_false(_lit(quiet, Rect2i(0, 505, 800, 95)), "no server message, nothing under the band")
 	var told := HudPos.composite_loading_session_text(background, font, font, "HOST", "", "",
-			"Message", "HI", 661)
+			"Message", "HI", true)
 	assert_true(_lit(told, Rect2i(16, 522, 384, 78)), "the server message under the band")
 	assert_eq(background.get_pixel(30, 40), Color.BLACK, "the background itself is untouched")
-	assert_null(HudPos.composite_loading_session_text(null, font, font, "", "", "", "", "", 661),
+	assert_null(HudPos.composite_loading_session_text(null, font, font, "", "", "", "", "", true),
 			"no background, no composite")
 
 

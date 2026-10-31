@@ -1,12 +1,13 @@
 class_name PlayerInfoMenuCompanion
 extends MenuCompanion
 
-# Drives the JO PLAYER_INFO screen (player.mnu) by control NAME: fills the
-# NATIONALITY / DIVISION / COMBO_LIST / PLAYERVOICE comboboxes from Avatars.def and
+# Drives the PLAYER_INFO screen (player.mnu) by control NAME: fills the
+# NATIONALITY / DIVISION / COMBO_LIST / PLAYERVOICE lists from Avatars.def and
 # runs the nationality -> division -> combo cascade plus the SIDE_BLUE/SIDE_RED team
-# filter. It is a companion the game-agnostic MenuShell (menu_shell.gd) delegates
-# to -- the same pattern as mp_menu_companion.gd -- claimed by the NATIONALITY + COMBO_LIST
-# controls unique to this screen, riding the shell's MenuDriver over the compiled
+# filter, each over the controls the screen holds. It is a companion the game-agnostic
+# MenuShell (menu_shell.gd) delegates to -- the same pattern as mp_menu_companion.gd --
+# claimed by the screen's name, as the game knows it (engine menu_commands.h
+# is_player_info_document), riding the shell's MenuDriver over the compiled
 # MenuFrame surface (widgets addressed by document id via _id/widget_id).
 #
 # Avatar cascade, voice rows and preview-trigger selection live in the native
@@ -47,8 +48,10 @@ var _team := 0                          # 0 = blue/good, 1 = red/evil (SIDE_BLUE
 var _loadout := PlayerInfoLoadout.new()
 var _preview                            # AvatarPreview mounted over PLAYER_PREVIEW (null until wired)
 var _preview_id := -1                   # PLAYER_PREVIEW doc id, for the hover-zoom filter
-# NAME (upper) -> Callable(row, value), dispatched by combo value changes.
+# NAME (upper) -> Callable(row, value), dispatched by its control's value changes.
 var _combo_handlers: Dictionary = {}
+# NAME (upper) -> the value change kind its handler hears ("combo" unless registered otherwise).
+var _combo_kinds: Dictionary = {}
 var _character_state := PlayerCharacterSelectionStateScript.new()
 # While a build or a side switch restores the shown side, the cascade's voice
 # results are held here and only the last, the fill against the restored
@@ -67,11 +70,11 @@ func set_persisted_profile(profile: Dictionary) -> void:
 	_character_state.set_persisted_profile(profile)
 
 
-# True for the JO PLAYER_INFO screen's unique avatar controls.
+# True for a document holding the PLAYER_INFO screen, whatever controls it holds.
 func owns_menu(driver: MenuDriver) -> bool:
 	if driver == null:
 		return false
-	return driver.has_widget("NATIONALITY") and driver.has_widget("COMBO_LIST")
+	return driver.is_player_info_document()
 
 
 # Losing the document to another (or no) companion is the only teardown edge
@@ -85,6 +88,7 @@ func on_menu_released() -> void:
 # Wire and populate from scratch for each document build.
 func _wire(_file: String, _screen: String) -> void:
 	_combo_handlers.clear()
+	_combo_kinds.clear()
 	_clear_mounts()
 	_ensure_db()
 	_character_state.set_database(_db)
@@ -104,7 +108,9 @@ func _wire(_file: String, _screen: String) -> void:
 	_wire_team_radios()
 	_connect_combo("NATIONALITY", _on_nat_selected)
 	_connect_combo("DIVISION", _on_div_selected)
-	_connect_combo("COMBO_LIST", _on_combo_selected)
+	# The combo list's handler hears the value change of the control the title registers it
+	# for: a combo box's select, or a spin list's step (engine player_info_combo_list_event).
+	_connect_combo("COMBO_LIST", _on_combo_selected, _driver.player_info_combo_list_event())
 	_connect_combo("PLAYERVOICE", _on_voice_selected)
 	_connect_pressed(VOICE_PREVIEW_CONTROL, _preview_voice)
 	# Prefer persisted team; otherwise retain player.mnu's authored SIDE_BLUE default.
@@ -160,6 +166,9 @@ func _ensure_db() -> void:
 		_db = null
 
 
+# Each list the screen holds selected to the side's record; one it lacks keeps the
+# record's byte (seeded ahead of the fill, _populate_side) and the next is restored
+# from it (engine PlayerInfoAvatars::seed_record).
 func _restore_character_selection(side: int) -> void:
 	if _db == null or side < 0 or side > 1:
 		return
@@ -167,18 +176,20 @@ func _restore_character_selection(side: int) -> void:
 	if saved == null:
 		return
 	var nat_index := saved.nationality
-	var visible_nat_row := nationality_rows().find(nat_index)
 	var nat_combo := _id("NATIONALITY")
-	if visible_nat_row < 0 or nat_combo < 0:
-		return
-	_driver.select_row(nat_combo, visible_nat_row, false)
-	_update_avatars(MenuDriver.AVATAR_NATIONALITY, visible_nat_row)
+	if nat_combo >= 0:
+		var visible_nat_row := nationality_rows().find(nat_index)
+		if visible_nat_row < 0:
+			return
+		_driver.select_row(nat_combo, visible_nat_row, false)
+		_update_avatars(MenuDriver.AVATAR_NATIONALITY, visible_nat_row)
 	var div_index := saved.division
-	var div_combo := _id("DIVISION")
-	if div_index < 0 or div_index >= _db.get_division_count(nat_index) or div_combo < 0:
+	if div_index < 0 or div_index >= _db.get_division_count(nat_index):
 		return
-	_driver.select_row(div_combo, div_index, false)
-	_update_avatars(MenuDriver.AVATAR_DIVISION, div_index)
+	var div_combo := _id("DIVISION")
+	if div_combo >= 0:
+		_driver.select_row(div_combo, div_index, false)
+		_update_avatars(MenuDriver.AVATAR_DIVISION, div_index)
 	var combo_index := saved.combo
 	var combo := _id("COMBO_LIST")
 	if combo_index < 0 or combo_index >= _db.get_combo_count(nat_index, div_index) \
@@ -429,13 +440,18 @@ func _populate_nationalities() -> void:
 
 
 # The shown side's lists filled and its saved selection restored, as the
-# screen's build and a side switch do. The cascade runs through the first rows
+# screen's build and a side switch do. The side's record is seeded first, which a
+# list the screen lacks keeps. The cascade runs through the first rows
 # on its way to the restored ones; each of its legs reads the profile's byte as
 # it stands, and only the last leg's voice, the fill against the restored
 # selection, is written (engine profile::set_voice_override).
 func _populate_side() -> void:
 	_restoring_side = true
 	_restored_voice = selected_voice()
+	if _db != null:
+		var saved := _character_state.side_selection(_team)
+		if saved != null:
+			_driver.seed_player_info_avatars(saved.nationality, saved.division)
 	_populate_nationalities()  # cascades into divisions -> combos -> voice
 	_restore_character_selection(_team)
 	_restoring_side = false
@@ -496,6 +512,9 @@ func _wire_preview() -> void:
 	_preview = AvatarPreviewScript.new()
 	_preview.name = "PlayerInfoAvatarPreview"
 	_preview.drawn.connect(player_preview_drawn.emit)
+	# The title's portrait hovers under the pointer, or never (engine
+	# Title::player_info_preview_hover).
+	_preview.hovers = _driver.player_info_preview_hovers()
 	frame.add_child(_preview)
 	_place_mount(_preview, preview_id)
 	# Runtime PLAYER_INFO portrait: camera fixed, character facing the viewer,
@@ -638,22 +657,22 @@ func snapshot() -> Dictionary:
 	# distinct from a loaded screen whose three selected rows are explicitly
 	# NONE, as a missing or empty weapon.def's are (D-MNU-27).
 	if _weapons != null and _weapons.is_loaded():
-		var primary := _selected_weapon("PRIMARY")
-		var secondary := _selected_weapon("SECONDARY")
-		var accessory := _selected_weapon("ACCESSORY")
 		# Clip counts are the recorded picks, -1 = untouched default — the kit
 		# tuple's serialized semantic [orig: PlayerInfo_SerializeWeaponLoadout @ 0x55e4b0
 		# writes the saved arrays; "-1" is the filler]. The type bytes are the
-		# tuple's flags field [orig: g_PlayerInfoAmmoTypePri/Sec].
+		# tuple's flags field [orig: g_PlayerInfoAmmoTypePri/Sec]. A category the
+		# screen holds no list of is no pick, as its page entry is none (engine
+		# PlayerInfoLoadout::kit_selection): its keys stay out, staging nothing.
+		for control in PARENT_SLOTS:
+			if _id(control) < 0:
+				continue
+			var key: String = control.to_lower()
+			var weapon := _selected_weapon(control)
+			profile[key] = weapon.name if weapon != null else ""
+			profile[key + "_clips"] = selected_clips(control)
+			if control in TYPE_SLOTS:
+				profile[key + "_ammo_type"] = selected_ammo_type(control)
 		profile.merge({
-			"primary": primary.name if primary != null else "",
-			"primary_clips": selected_clips("PRIMARY"),
-			"primary_ammo_type": selected_ammo_type("PRIMARY"),
-			"secondary": secondary.name if secondary != null else "",
-			"secondary_clips": selected_clips("SECONDARY"),
-			"secondary_ammo_type": selected_ammo_type("SECONDARY"),
-			"accessory": accessory.name if accessory != null else "",
-			"accessory_clips": selected_clips("ACCESSORY"),
 			"kit": kit_entries(),
 			# The page the populate restored, which a class pick has already left.
 			"kit_class": _loadout.page_class,
@@ -719,13 +738,14 @@ func _save_from_dialog() -> Dictionary:
 
 # --- Helpers ------------------------------------------------------------------
 
-# Register a combo-select handler (row, value) for a named control, dispatched off
-# the driver's aggregate widget_value_changed (kind == "combo") — the item_selected
-# successor. `value` is the row's display text; handlers needing the authored
-# value= attr resolve it through item_value.
-func _connect_combo(name: String, handler: Callable) -> void:
+# Register a value-change handler (row, value) for a named control, dispatched off
+# the driver's aggregate widget_value_changed for the `kind` it hears ("combo", a
+# combo box's select) — the item_selected successor. `value` is the row's display
+# text; handlers needing the authored value= attr resolve it through item_value.
+func _connect_combo(name: String, handler: Callable, kind := "combo") -> void:
 	if _driver.has_widget(name):
 		_combo_handlers[name.to_upper()] = handler
+		_combo_kinds[name.to_upper()] = kind
 
 
 func _on_widget_value_changed(widget_name: String, kind: String, index: int, value: String) -> void:
@@ -736,9 +756,10 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, val
 	if kind == "edit" and widget_name.to_upper() == "PLAYERNAME":
 		_on_player_name_changed(value)
 		return
-	if kind != "combo":
+	var upper := widget_name.to_upper()
+	if kind != _combo_kinds.get(upper, ""):
 		return
-	var handler: Callable = _combo_handlers.get(widget_name.to_upper(), Callable())
+	var handler: Callable = _combo_handlers.get(upper, Callable())
 	if handler.is_valid():
 		handler.call(index, value)
 

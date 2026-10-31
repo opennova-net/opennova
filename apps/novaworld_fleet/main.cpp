@@ -219,7 +219,7 @@ int run(const program::Boot &boot) {
 	// in nothing (first, so a database that fails the rest still sends it), then
 	// the fleet's health over the rows (hosted/model/fleet_health.h) against the
 	// release's images.
-	const hosted::ReleaseImages release{ fleet.image_id, fleet.hostd_image };
+	const hosted::ReleaseImages release{ fleet.image_id, fleet.hostd_image, fleet.serve_image };
 	const hosted::PlacementPolicy placement = fleet.placement;
 	hooks.heartbeat = [counted, &leader, &launch_failures_reported, release, placement](
 							  db::Database &db, Heartbeat &beat, int64_t window_s) {
@@ -263,6 +263,6 @@ int run(const program::Boot &boot) {
 } // namespace
 
 int main() {
-	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
+	opennova::games::install(); // every game's titles and protocols (games/games.h)
 	return opennova::novaworld_server::program::run_program({ "fleet", configure, run });
 }

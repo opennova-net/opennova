@@ -218,6 +218,9 @@ func begin_restart_splash(owner: Node, root: ResourceRoot, world: GameWorld,
 	_world = world
 	_load_info = load_info
 	_show_screen(load_info)
+	# The key's recomposite passes its own stage (engine: runtime/hud/loading_screen.h).
+	if _screen != null:
+		_screen.set_stage(HudPos.LOADING_RESTART_STAGE)
 	if not maybe_begin_start_mission_splash(audio, headless_skip):
 		dismiss()
 		return false

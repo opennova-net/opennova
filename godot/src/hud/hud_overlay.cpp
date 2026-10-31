@@ -207,7 +207,9 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_map_legend);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("map_legend_keys"),
 			&HudOverlay::map_legend_keys);
-	ClassDB::bind_method(D_METHOD("set_briefing", "shown", "sim"), &HudOverlay::set_briefing);
+	ClassDB::bind_method(D_METHOD("set_briefing", "briefing_mode", "briefing_panel_open", "sim",
+								 "gametext"),
+			&HudOverlay::set_briefing);
 	ClassDB::bind_method(D_METHOD("cycle_briefing_page", "direction", "in_session"),
 			&HudOverlay::cycle_briefing_page);
 	ClassDB::bind_method(D_METHOD("set_tip", "tip", "countdown", "local_dead", "gametext",
@@ -398,7 +400,7 @@ void HudOverlay::clear_font_() {
 	}
 	label_font_impact38_ = {};
 	label_font_impact38_valid_ = false;
-	label_tier_ = -1;
+	label_tier_ = -2;
 	for (const Ref<Texture2D> &page : page_textures_) {
 		if (page.is_valid()) texture_material_words_.erase(page->get_instance_id());
 	}
@@ -439,8 +441,8 @@ void HudOverlay::ensure_label_fonts_(float p_surface_w) {
 	if (w <= 0 || root_.is_null()) {
 		return;
 	}
-	const opennova::hud::HudLabelFontChoice choice =
-			opennova::hud::hud_label_font_choice(w);
+	const opennova::hud::HudLabelFontChoice choice = opennova::hud::hud_label_font_choice(
+			w, ResourceRoot::session_title(root_));
 	if (choice.tier == label_tier_) {
 		// Same files, new width: retail recomputes the slot scales on every
 		// resolution change (the witness rides hud_label_font_choice), and the
@@ -560,6 +562,10 @@ void HudOverlay::load_crosshair_texture_() {
 void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> &p_root,
 		bool p_full_arm) {
 	root_ = p_root;
+	// The title a session over the root runs as (ResourceRoot::session_title: the game's launch
+	// title, the editor HUD preview's project's), whose HUD variants draw until set_role_facts
+	// hands the session's own each frame; none with no root.
+	state_.title = p_root.is_valid() ? &ResourceRoot::session_title(p_root) : nullptr;
 	layout_ = HudLayout{};
 	crosshair_alpha_mode_ = false; // the HUD init loads the crosshair in colour mode
 	textures_ = {};
@@ -1535,6 +1541,8 @@ void HudOverlay::set_friendly_tags(bool p_shown, const Transform3D &p_camera_xfo
 			// witness); the viewer gate is set_radio_request_icon_viewer's.
 			tag.radio_request = t.radio_request;
 			tag.squad_color_index = t.squad_color_index;
+			tag.cursor_target = t.cursor_target;
+			tag.same_account = t.same_account;
 			state_.friendly_tags.push_back(tag);
 		}
 	}
@@ -1685,8 +1693,19 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 			opennova::gd_to_retail_text(overlay_text(p_gametext, "STROVER59", ""));
 	state_.start_timer.footer =
 			opennova::gd_to_retail_text(overlay_text(p_gametext, "STROVER63", ""));
+	// The EXPPOINTS element's words and its Overlays strings (engine hud/hud_exp_points.h).
+	state_.exp_points = facts.exp_points;
+	opennova::hud::hud_exp_points_text(game_text_lookup(p_gametext), state_.exp_points.text);
+	state_.title = facts.title;
+	state_.lone_gunner = facts.lone_gunner;
+	// The vehicle panel's rider lines and their weapon texts (engine hud/hud_frame.h
+	// HudVehicleRider carries the witness).
+	state_.vehicle_riders = facts.vehicle_riders;
+	opennova::hud::hud_vehicle_rider_text(game_text_lookup(p_gametext), state_.vehicle_riders);
 	inset_target_name_ = facts.inset_target_name;
-	opennova::hud::hud_session_text(game_text_lookup(p_gametext), state_.session.text);
+	inset_reticle_quad_ = facts.inset_reticle_quad;
+	opennova::hud::hud_session_text(game_text_lookup(p_gametext), state_.session.game_type,
+			state_.session.text);
 	for (size_t c = 0; c < state_.slot_bar.size(); ++c) {
 		opennova::hud::HudSlotBarSlot &slot = state_.slot_bar[c];
 		slot = opennova::hud::HudSlotBarSlot{};

@@ -3,10 +3,12 @@
 // the joiner's profile-to-wire projection (join_character_profile.h): the
 // fresh-profile defaults, a persisted side selection, the class-byte rule.
 
+#include <base/title/title.h>
 #include <runtime/inmatch/character_registry.h>
 #include <runtime/inmatch/join_character_profile.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_spawn.h>
+#include <runtime/world/world.h> // CharacterTraitsTable (the profile sounds' pick)
 
 #include <formats/avatars/avatars.h>
 
@@ -118,6 +120,68 @@ int main() {
 	check(registry.first_character_id(AVATAR_ALIGN_GOOD) == 0x0200, "first good = entry 0");
 	check(registry.first_character_id(AVATAR_ALIGN_EVIL) == 0x8207, "first evil = entry 2");
 	check(CharacterRegistry().first_character_id(AVATAR_ALIGN_GOOD) == 0, "empty registry packs 0");
+
+	// DFX2-53: dfx2.exe's sector render draws each player as the first combo of its side relative
+	// to the viewer, the good one with no viewer; Jointops.exe's keeps the spawn's id.
+	// [orig: Terrain_RenderSectorEntitiesBySide @0x5C6C20 - @0x5C6EE1..0x5C6F42 (dfx2.exe)]
+	{
+		const opennova::Title *jo = opennova::title_by_code("jo");
+		const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+		const opennova::Title *ag = opennova::title_by_code("acidgambit");
+		check(jo != nullptr && dfx2 != nullptr && ag != nullptr && dfx2->player_avatar_by_viewer_side &&
+						!jo->player_avatar_by_viewer_side && !ag->player_avatar_by_viewer_side,
+				"the per-frame pick is dfx2.exe's");
+		check(drawn_player_character(jo, &registry, 0x0400, true, 2, 1) == 0x0400,
+				"Jointops.exe draws the spawn's id");
+		check(drawn_player_character(nullptr, &registry, 0x0400, true, 2, 1) == 0x0400,
+				"no title draws the spawn's id");
+		check(drawn_player_character(dfx2, &registry, 0x0400, true, 1, 1) == 0x0200,
+				"a teammate draws as the first good combo");
+		check(drawn_player_character(dfx2, &registry, 0x0400, true, 2, 1) == 0x8207,
+				"another team's player draws as the first evil combo");
+		check(drawn_player_character(dfx2, &registry, 0x8207, true, 2, 2) == 0x0200,
+				"the side is the viewer's, not the team's");
+		check(drawn_player_character(dfx2, &registry, 0x8207, false, 2, 1) == 0x0200,
+				"no viewer draws everyone good");
+		check(drawn_player_character(dfx2, nullptr, 0x8207, true, 2, 1) == 0x8207,
+				"no registry passes the id through");
+		// The local player is its own viewer: its body and first-person arms draw as the good
+		// side's first combo, an evil (and female) spawn's id included; Jointops.exe's keep the id.
+		// [orig: Terrain_RenderSectorEntitiesBySide @0x5C6C20 - @0x5C6EEE..0x5C6F00;
+		//  Player_RenderFirstPersonViewModel @0x4DBE00 - @0x4DC08F (dfx2.exe)]
+		check(drawn_local_player_character(dfx2, &registry, 0x8207) == 0x0200,
+				"an evil local player draws as the first good combo");
+		check(drawn_local_player_character(dfx2, &registry, 0x0400) == 0x0200,
+				"a good local player draws as the first good combo");
+		check(drawn_local_player_character(jo, &registry, 0x8207) == 0x8207,
+				"Jointops.exe's local player draws its spawn's id");
+		check(drawn_local_player_character(ag, &registry, 0x8207) == 0x8207,
+				"Acid Gambit's local player draws its spawn's id");
+		check(drawn_local_player_character(dfx2, nullptr, 0x8207) == 0x8207,
+				"no registry passes the local id through");
+		// The profile sounds read the sex off the same blip: the world's traits carry the pick,
+		// each side's first combo under dfx2.exe's title alone, and pick as drawn_player_character.
+		// [orig: Entity_GetProfileSlotSound @0x525490 - the blip @0x52549F, its sex byte
+		//  @0x5254AC (dfx2.exe)]
+		opennova::world::CharacterTraitsTable traits;
+		install_viewer_side_pick(traits, dfx2, &registry);
+		check(traits.by_viewer_side && traits.side_first[0] == 0x0200 &&
+						traits.side_first[1] == 0x8207,
+				"dfx2.exe's traits hold the first good and the first evil combo");
+		bool agree = true;
+		for (const uint16_t id : {uint16_t{0x0400}, uint16_t{0x8207}})
+			for (const bool viewer : {false, true})
+				for (const uint8_t team : {uint8_t{1}, uint8_t{2}})
+					agree = agree && traits.drawn_character(id, viewer, team, 1) ==
+							drawn_player_character(dfx2, &registry, id, viewer, team, 1);
+		check(agree, "the traits' pick is drawn_player_character's");
+		install_viewer_side_pick(traits, jo, &registry);
+		check(!traits.by_viewer_side && traits.drawn_character(0x0400, true, 2, 1) == 0x0400,
+				"Jointops.exe's traits keep the spawn's id");
+		install_viewer_side_pick(traits, dfx2, nullptr);
+		check(!traits.by_viewer_side && traits.drawn_character(0x8207, true, 1, 1) == 0x8207,
+				"no registry keeps the spawn's id");
+	}
 
 	// The fresh profile: first good / first evil, rifleman both sides, the
 	// selected combos' head voices.

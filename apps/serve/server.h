@@ -128,13 +128,19 @@ struct ServeOptions {
 	// What a supervisor reads of the run (run_reports.h), none of it retail's: whether the
 	// status page prints and stdin is its chat input (--status-page on|off; on, as a retail
 	// dedicated host draws its page), the tick health rewritten once a minute (--stats-file),
-	// the error a non-zero exit ends on (--exit-file) and the second listing's state, rewritten
-	// whenever it changes (--second-listing-file; off for a run with none); "" writes no file.
+	// the error a non-zero exit ends on (--exit-file), the second listing's state, rewritten
+	// whenever it changes (--second-listing-file; off for a run with none), and ONE's build,
+	// written once as the server starts (--build-file); "" writes no file.
 	bool status_page = true;
 	bool rotation_first = false; // --rotation-first: hosted rotations start at entry zero
 	std::string stats_file;
 	std::string exit_file;
 	std::string second_listing_file;
+	std::string build_file;
+	// --version: print the version line (serve_version_line) and exit, as opennova-hostd's does.
+	// /HOST is not needed then, and --resource-dir and /game only name the game the line opens
+	// with.
+	bool print_version = false;
 	// The primary desktop's width and height, the display size game.cfg's defaults take ahead of
 	// its video_res line and the renderer's desktop NWHWI prints [orig: Config_SetDefaults
 	// @0x54D030 - GetSystemMetrics(SM_CXSCREEN) called @0x54D0F3 into outWidth @0x54D0F6;
@@ -147,11 +153,22 @@ struct ServeOptions {
 // Parses the command line (argv[1..]): the server's own options from `args`, the retail
 // switches walked over `command_line` (the process's own, proc::own_command_line), or over
 // `args` spelled as one when it is empty (walk_retail_switches; a token the walk does not
-// know is passed over, as the game passes it). Returns 0 when the options parsed, 1 on a
-// usage error (`error` says why: an unknown `--` option among them), -1 when help was asked
-// for.
+// know is passed over, as the game passes it). Returns 0 when the options parsed (with
+// --version, whatever else the run would need: `print_version` set), 1 on a usage error
+// (`error` says why: an unknown `--` option among them), -1 when help was asked for.
 int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out, std::string &error,
 		const std::string &command_line = "");
+// The server's versions on one line (base/version/version_line.h), which --version prints, the
+// server logs as it starts, its status page heads every print with and CMD VERSION posts: the
+// game the launch runs (/game, else the folder's UPDATE.WIZ: boot_policy.h launch_product) with
+// the release installed in --resource-dir (launch_product_version), ONE's build (one_build():
+// its version, a staging build's run number among it, and its commit) and the protocol the
+// title speaks. With neither --resource-dir nor /game the launch names no game, and the line is
+// ONE's build alone ("ONE 0.0.22.123 (a1b2c3d, staging)").
+std::string serve_version_line(const ServeOptions &options);
+// The cap the host file's MaxPlayers line yields to under `title`: the walk's `/maxplayers N`
+// where the title's command line takes the switch (Title::max_players_switch), else none (0).
+int32_t host_file_max_player_arg(const Title &title, int32_t max_player_arg);
 const char *serve_usage();
 
 class ServeListing;
@@ -241,9 +258,7 @@ public:
 	// game OpenNova does not play, with no /game (start() refuses it).
 	const std::string &game_code() const { return game_code_; }
 	bool foreign_folder() const { return foreign_folder_; }
-	// The server's versions on one line (base/version/version_line.h), which it logs as it starts
-	// and CMD VERSION posts: the launch's game and the release installed in its folder
-	// (boot_policy.h launch_product_version), ONE's build and the protocol its title speaks.
+	// The server's versions on one line, serve_version_line's for its options.
 	const std::string &version_line() const { return version_line_; }
 	// The title the server speaks and its gate tag (mount): null / empty before the mount.
 	const Protocol *protocol() const { return protocol_; }

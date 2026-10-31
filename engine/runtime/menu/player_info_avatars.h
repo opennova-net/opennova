@@ -7,12 +7,29 @@
 #include <string>
 #include <vector>
 
+namespace opennova {
+struct Title; // base/title/title.h
+}
+
 namespace opennova::menu {
 class MenuRuntime;
 
 // The PLAYER_INFO nationality -> division -> combo -> voice controller.
-// Widgets may be absent: a missing stage stops its downstream cascade and
-// retains its previous state. The embedder owns profile persistence and preview nodes.
+// Widgets may be absent. The populate hands each stage the side's record: a
+// nationality or division list the screen lacks leaves the record's
+// nationality or division as it stands (seed_record), and the next stage
+// fills from it, as both executables' populate passes the record's bytes to
+// each fill and each fill returns at once without its control
+// [orig: PlayerInfo_PopulateAllControls @0x5606f0 - PlayerInfo_PopulateDivisionList
+//  (the nationality byte) @0x560802, PlayerInfo_PopulateAvatarComboList (the
+//  nationality and division bytes) @0x560865; PlayerInfo_PopulateNationalityList
+//  @0x55d8c0 (@0x55d8dd), PlayerInfo_PopulateDivisionList @0x55da50 (@0x55da6a)]
+// [orig: PlayerInfo_PopulateAllControls @0x55e9a0 (@0x55eab2, @0x55eb15) (dfx2.exe),
+//  whose player.mnu holds no NATIONALITY or DIVISION]. A missing combo list
+// still stops ours there, its voices unfilled, where retail's populate fills
+// them from the record's combo [orig: PlayerInfo_PopulatePlayerVoiceCombo
+// @0x55dce0 (g_CharSelCombo @0x55dd48), called @0x5608d8]; no shipped
+// player.mnu lacks one. The embedder owns profile persistence and preview nodes.
 struct PlayerInfoAvatars {
 	enum class Change { Team, Nationality, Division, Combo, Voice };
 	int nationality = -1;
@@ -21,15 +38,36 @@ struct PlayerInfoAvatars {
 	std::vector<int32_t> voices;
 	bool preview_changed = false;
 
+	// The shown side's record ahead of a Team populate: its nationality and
+	// division (Avatars.def tree indices), which a stage with no list keeps.
+	void seed_record(int record_nationality, int record_division) {
+		nationality = record_nationality;
+		division = record_division;
+	}
+	// `title` the executable whose screen it is (Title::player_info_combo_names).
 	int update(MenuRuntime &menu, const avatars::AvatarsFile &file, Change change,
 			int value, int team, int saved_voice, const hud::GameTextLookup &gameui,
-			const hud::GameTextLookup &menutxt);
+			const hud::GameTextLookup &menutxt, const Title &title);
 	const avatars::AvatarCombo *selected_combo(const MenuRuntime &menu,
 			const avatars::AvatarsFile &file, bool default_first = false) const;
 	std::string voice_preview_trigger(const MenuRuntime &menu,
 			const avatars::AvatarsFile &file, int saved_voice) const;
 };
 inline constexpr const char *kPlayerInfoVoiceBank = "menu.lwf";
+
+// The value change the COMBO_LIST callback hears, as the runtime's ValueChanged kind
+// (MenuEvent::text2): "combo", a combo box's select, or "spinlist", a spin list's step
+// (Title::player_info_combo_spins). A registration's mask names the event classes its callback
+// runs for, bit n class n (the event's top byte); a list's select is class 5, a spin list's step
+// class 6 [orig: CWnd_EmitEventToNamedHandlerAndCallbacks @0x646970 - `1 << (event >> 24)`
+// @0x6469b8 against the mask @0x6469c2; CListWnd_OnCommand @0x643cb0 (0x5000001 @0x643ec4);
+// CSpinListWnd_SelectNext @0x64b910 (0x6000001 @0x64b993)]. Jointops.exe registers it for 5 and 9
+// [orig: PlayerInfo_RegisterAllControls @0x561470 - 0x220 @0x561597], dfx2.exe for 6 alone
+// [orig: PlayerInfo_RegisterAllControls @0x55f720 - 0x40 @0x55f847 (dfx2.exe)]; the one body runs
+// either way, the value it stores the picked row's (the list event's +0x10, the step's +8) [orig:
+// PlayerInfo_HandleComboListSelect @0x55fe00 (@0x55fe12..0x55fe1e, @0x55fe3f);
+// PlayerInfo_HandleComboListSelect @0x55e0c0 (@0x55e0d2..0x55e0de, @0x55e0ff) (dfx2.exe)].
+const char *player_info_combo_list_event(const Title &title);
 
 // The preview model's initial facing, a BAM word: the preview init reseeds the
 // CRT stream from the clock word `seed`, then draws rand() % 180 whole degrees
@@ -39,7 +77,7 @@ inline constexpr const char *kPlayerInfoVoiceBank = "menu.lwf";
 // per-thread stream steps
 // [orig: PlayerInfo_InitPreviewModel @0x5600d0 -- srand(_time64(0))
 //  @0x560120..0x560128, rand() @0x5601a2, cdq / idiv 0B4h @0x5601a7..0x5601ad,
-//  imul 0B60B60h into dword_25DC53C @0x5601b1..0x5601b7].
+//  imul 0B60B60h into g_PlayerPreviewYaw @0x5601b1..0x5601b7].
 int32_t player_info_preview_initial_yaw_bam(uint32_t seed);
 
 // The PLAYER_INFO portrait's motion, stepped once a menu update (the game loop's
@@ -50,13 +88,18 @@ int32_t player_info_preview_initial_yaw_bam(uint32_t seed);
 // spins 0x800000 an update at rest; hovered it closes 5% of its error each update on a sway about
 // a fixed facing: sway = ftol(sin(ticks * 0.0008) * 2^28), the yaw moved by
 // ftol((yaw - sway + 0x58000000) * -0.05), all in 32-bit words. The hover is
-// the pointer over PLAYER_PREVIEW alone.
+// the pointer over PLAYER_PREVIEW alone, under a title that hovers it at all
+// (Title::player_info_preview_hover): dfx2.exe's twin clears the hover each
+// update, so its portrait spins at rest and never zooms or sways
+// [orig: PlayerInfo_UpdatePlayerPreviewAnimation @0x55bed0, from Menu_UpdateFrame @0x54fb57 - `xor
+//  eax, eax` / `mov g_PlayerPreviewHovered, eax` @0x55bf03..0x55bf05 under the registered screen's
+//  flag, the target 0 @0x55bf0a, the rest spin @0x55bf9c (dfx2.exe)].
 // [orig: PlayerInfo_UpdatePlayerPreviewAnimation @0x55dba0, from Menu_UpdateFrame
 //  @0x5528f7 - the hover walk exiting after PLAYER_PREVIEW @0x55dc36, the blend
-//  flt_25DC538 * 0.95 (flt_7C6FB8) + target * 0.05 (flt_7C68E8) @0x55dc4b..0x55dc61,
+//  g_PlayerPreviewZoomBlend * 0.95 (flt_7C6FB8) + target * 0.05 (flt_7C68E8) @0x55dc4b..0x55dc61,
 //  GetTickCount @0x55dc71 (the unsigned fix-up @0x55dc7b), * 0.0008 (flt_7D5B78),
 //  fsin, * 2^28 (flt_7D5B74) @0x55dc81..0x55dc8f, the error + 0x58000000
-//  @0x55dca4, * -0.05 (flt_7D5B70) @0x55dca8..0x55dcb2, the yaw store dword_25DC53C
+//  @0x55dca4, * -0.05 (flt_7D5B70) @0x55dca8..0x55dcb2, the yaw store g_PlayerPreviewYaw
 //  @0x55dcb9, the rest spin @0x55dcc4; PlayerInfo_RenderPlayerPreview3D @0x5609c0
 //  reads both @0x560a67 / @0x560c3b] (D-PLAYERINFO-37).
 float player_info_preview_blend_step(float blend, bool hovered);

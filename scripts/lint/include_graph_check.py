@@ -84,9 +84,10 @@ in the path is what makes the layering visible, so this check reads it:
      games/ tree, included as `<games/<code>/file.h>` against the repository
      root; it includes base, formats, net, runtime and games. Nothing under
      engine/ includes games/ (engine/ holds the types and the registries, the
-     games fill them), and `<games/games.h>` (games::install) is included only
-     at the registration points: each program's start (REGISTRATION_POINTS)
-     and the tests' opennova_test_games.
+     games fill them), and `<games/games.h>` (games::install and
+     games::install_rules) is included only at the registration points: each
+     program's start, the two installs' own TUs (REGISTRATION_POINTS) and the
+     tests' opennova_test_games.
 
 Modes:
   (default)   report violations; exit 0
@@ -133,6 +134,7 @@ GAMES_ROOT = "games"
 GAMES_INSTALL_HEADER = "games/games.h"
 REGISTRATION_POINTS = {
     "games/games.cpp",
+    "games/games_rules.cpp",
     "godot/src/register_types.cpp",
     "tests/common/install_games.cpp",
     "apps/serve/main.cpp",

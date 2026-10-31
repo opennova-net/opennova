@@ -145,6 +145,9 @@ public:
 	// CWnd_SetRect: the widget's own (parent-relative) design rect replaced.
 	virtual void set_widget_rect(int index, int left, int top, int right, int bottom) = 0;
 	virtual void set_widget_caret(int index, int caret) = 0;
+	// An appearance's texture set at run time: each state of `states` (bit n the appearance
+	// state n, menu_frame.h kStateDefault..) draws `file` as its IMAGE; the device loads it.
+	virtual void set_widget_image(int index, uint32_t states, const std::string &file) = 0;
 
 	virtual int get_widget_caret(int index) const = 0;
 	virtual std::string get_widget_text(int index) const = 0;
@@ -320,12 +323,17 @@ struct MenuWidgetRuntimeState {
 	bool has_clip = false;
 	bool clip_enabled = false;
 	int clip_left = 0, clip_top = 0, clip_right = 0, clip_bottom = 0;
+	// An appearance texture set at run time (set_widget_image): the states it draws in, the file.
+	bool has_image = false;
+	uint32_t image_states = 0;
+	std::string image;
 
 	// True while no override has been written (a replay skips the widget).
 	bool empty() const {
 		return !(has_shown || has_disabled || has_checked || has_text || has_items ||
 				has_selected_item || has_scroll_row || has_scroll_range || has_selected_set ||
-				has_table_rows || has_table_columns || has_rect || has_clip || has_disabled_items);
+				has_table_rows || has_table_columns || has_rect || has_clip || has_disabled_items ||
+				has_image);
 	}
 };
 
@@ -446,6 +454,14 @@ public:
 	// units) replaced until the document reopens [orig: CWnd_SetRect @0x646560,
 	// CWnd_MoveToSquare @0x646580 (the same at the widget's own square size)].
 	void set_widget_rect(int id, int left, int top, int right, int bottom);
+	// The widget's appearance texture for the states `states` (bit n the appearance state n) set
+	// to `file` at run time, as the game sets a static's: each named state's appearance takes the
+	// IMAGE type and the texture, loaded at once by the texture manager, its own height
+	// [orig: CWnd_SetAppearanceTexture @0x646450 (CTextureManager_LoadOrFindTexture @0x646497, the
+	//  height 0xFFFFFFFF); its twin CWnd_SetAppearanceTexture @0x6d3760 (dfx2.exe)].
+	void set_widget_image(int id, uint32_t states, const std::string &file);
+	// The file the widget's run-time image names ("" none set).
+	std::string widget_image(int id) const;
 	// Clip a widget's own passes to an absolute design rect until the
 	// document reopens; `enabled` false removes it [orig: CWnd_SetClipRect
 	// @0x646210].
@@ -475,7 +491,10 @@ public:
 	// A spin list's row enabled or disabled [orig: CSpinListWnd_SetItemEnabled @ 0x64bbd0]: a row
 	// out of range changes nothing (@ 0x64bbde). The spin steps past a disabled row (spin_cycle), and
 	// as the current row it draws nothing; fresh rows (set_widget_items) are all enabled, as
-	// CSpinListWnd_InsertItem writes each one's flags anew (@ 0x64b84c).
+	// CSpinListWnd_InsertItem writes each one's flags anew (@ 0x64b84c). A list's row disabled is
+	// locked [orig: CListWnd_SetRowAvailable @ 0x644aa0 — state 1, cleared only from 1]: a press on
+	// it takes nothing (list_press_) and it draws in the disabled state, its state index
+	// [orig: CListWnd_DrawItems @ 0x64419c].
 	void set_item_enabled(int id, int row, bool enabled);
 	bool is_item_enabled(int id, int row) const;
 	int selected_row(int id) const;
@@ -483,6 +502,9 @@ public:
 	std::vector<int> selected_set(int id) const;
 	void set_selected_set(int id, const std::vector<int> &rows);
 	void set_scroll_row(int id, int row);
+	// The first visible row a list or table holds (0 before any write): a table's scroll top
+	// [orig: sub_6CC7A0 @0x6cc7a0, the table's +201 (dfx2.exe)].
+	int scroll_row(int id) const;
 	void set_widget_scroll_range(int id, int minimum, int maximum, int page, int value);
 	bool get_widget_scroll_range(int id, MenuScrollRangeState &out) const;
 	// The engine pump's CScrollWnd interaction result (already applied to the
@@ -540,6 +562,9 @@ public:
 	void table_set_row_visible(int id, int row, bool visible);
 	// Whether the row draws: no hidden bit (kTableRowHiddenMask) set. False out of range.
 	bool table_row_visible(int id, int row) const;
+	// The row's state-1 colour bit (menu_table_row.h table_set_row_state1_color carries the
+	// witness).
+	void table_set_row_state1_color(int id, int row, bool on);
 	// The rows in state 3, ascending.
 	std::vector<int> table_selected_rows(int id) const;
 	// Select `row` alone (every other non-locked row cleared), or toggle it
@@ -553,12 +578,13 @@ public:
 	// over. A count that grows the table (the stat RESULTLIST's, which authors no
 	// COLUMN) leaves no authored column behind; an empty set changes nothing.
 	void table_set_columns(int id, const std::vector<MenuTableColumn> &columns);
-	// A column's sort direction [orig: sub_63EC30 writes the column's +120].
+	// A column's sort direction [orig: sub_63EC30 writes the column's +120]. A table whose
+	// records no code set up writes the authored record, as it stands (table_resize_records_).
 	void table_set_column_ascending(int id, int column, bool ascending);
 	// Sort the rows by `column` [orig: CTableWnd_SortByColumn @ 0x640900: the key
 	// pushed, the rows sorted by CTableWnd_CompareRows @ 0x63e9c0 with their
-	// selection and colours, the column's sort indicator set]; needs installed
-	// columns.
+	// selection and colours, the column's sort indicator set], over the installed
+	// columns or the authored ones as they stand.
 	void table_sort_by_column(int id, int column);
 	// The column whose header shows the sort indicator, -1 none.
 	int table_sort_column(int id) const;

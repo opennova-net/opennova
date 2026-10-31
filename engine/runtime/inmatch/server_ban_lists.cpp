@@ -345,7 +345,8 @@ bool Server_HandleBanPuntCommand(NapiNPServerCtx &ctx, std::string_view line,
 	if (!authorized) return false;
 	if (tokens.size() == 2 && strutil::iequals(tokens[0], "BANDWIDTH")) {
 		const int32_t budget = io::retail_atol(tokens[1].c_str()) / 5;
-		ctx.config.entity_send_budget = static_cast<uint32_t>(std::min(std::max(budget, 100), 1600));
+		ctx.config.entity_send_budget = static_cast<uint32_t>(
+				std::min(std::max(budget, kEntitySendBudgetMin), kEntitySendBudgetMax));
 		return false;
 	}
 	if (tokens.size() == 2 && strutil::iequals(tokens[0], "PUNT")) {

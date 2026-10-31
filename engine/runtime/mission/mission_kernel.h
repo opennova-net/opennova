@@ -132,6 +132,11 @@ struct KernelBootOptions {
 	// creates first) [orig: SinglePlayer_StartMission @0x561af0]. Null = the
 	// bare no-net kernel (the AI-path/convoy drives).
 	std::function<void()> bringup_net_session;
+	// The load's warning box (mission::LoadWarningBox): a title that checks the mission's tables
+	// against their pools (TitleRules::bms_table_warnings) asks it at its header checks and its
+	// load's; a Quit fails the boot (load_warning_quit) and the embedder ends the process. Unset
+	// = the log line alone (opennova-serve).
+	LoadWarningBox load_warning;
 };
 
 class MissionKernel : public world::IPoseProvider, public world::ITeammateSpawner, public world::IItemPieceSpawner {
@@ -262,6 +267,10 @@ public:
 	// This boot is the SP restart's (KernelBootOptions::restart), for the
 	// bring-up's legs its start skips.
 	bool restart_boot() const { return restart_boot_; }
+	// This boot failed on a load warning answered Quit (KernelBootOptions::load_warning): the
+	// embedder ends the process, as dfx2.exe's box does (exit code -1).
+	// [orig: Game_ShutdownAndExit @0x72B980 - exit(-1) @0x72B99B (dfx2.exe)]
+	bool load_warning_quit() const { return load_warning_quit_; }
 
 	// --- the cross-mission carry ---------------------------------------------
 	// A load swaps in a fresh kernel (ADR 0042 d3); the embedder hands this
@@ -413,6 +422,8 @@ public:
 
 	// --- the mounted root and the mission ------------------------------------
 	ResourceIndex index;
+	// The expansion the opened mission's files mount (g_ExpansionName; empty for the base game).
+	const std::string &mounted_expansion() const { return files_.expansion_name; }
 	std::string root_dir;
 	std::string mission_name;
 	std::string mission_basename;
@@ -630,6 +641,8 @@ private:
 	std::function<void()> bringup_net_session_;
 	// This boot is the SP restart's (KernelBootOptions::restart).
 	bool restart_boot_ = false;
+	// This boot's load warning was answered Quit (load_warning_quit).
+	bool load_warning_quit_ = false;
 	// This boot's game type (KernelBootOptions::game_type), for the mission
 	// start's Attack & Defend latch.
 	uint32_t mission_game_type_ = 0;

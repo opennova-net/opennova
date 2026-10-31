@@ -20,7 +20,7 @@ namespace opennova::editor {
 //
 // The install is mounted as a stock launch of the project's game mounts it (mount_install: the
 // witnessed archive table, no /d, read alone while one of its archives is mounted), its payloads
-// decoded with that game's key, with `/exp <expansion>` when the spec names one: the expansion's two
+// decoded by their SCR version byte, with `/exp <expansion>` when the spec names one: the expansion's two
 // archives before the base's, the lowest slot first [orig: PFF_OpenAllArchives @ 0x4a4310 over the
 // table @ 0x829f90; Expansion_LoadAssets @ 0x4a48d6..0x4a48ed]. An expansion that does not mount is
 // refused, never quietly the base game (the game itself falls back [orig: @ 0x4a4767/@ 0x4a4775], which
@@ -40,22 +40,21 @@ namespace opennova::editor {
 // (gameprofile/player_files.h) are never listed: no project holds them.
 struct InstallSpec {
 	std::string root;              // the install's folder
-	std::string game;              // the title code its archives are keyed by
 	std::string expansion;         // the installed expansion mounted (/exp), "" for the base game
 	std::string project_expansion; // the project's own expansion name, "" for a standalone project
 
 	bool operator==(const InstallSpec &other) const {
-		return root == other.root && game == other.game && expansion == other.expansion &&
+		return root == other.root && expansion == other.expansion &&
 		       project_expansion == other.project_expansion;
 	}
 	bool operator!=(const InstallSpec &other) const { return !(*this == other); }
 };
 
-// The view of an install a project imports from: its game, `/exp` the expansion it builds on, its own
-// expansion's name.
+// The view of an install a project imports from: `/exp` the expansion it builds on, its own expansion's
+// name.
 InstallSpec install_spec(const std::string &root, const ProjectDocument &document);
 // The base game's view of the same install: no expansion, no renames.
-InstallSpec base_install_spec(const std::string &root, const ProjectDocument &document);
+InstallSpec base_install_spec(const std::string &root);
 // The view an expansion project imports an installed expansion of the install from (2026-10-24): `/exp
 // <expansion>`, its files renamed to the project's expansion.
 InstallSpec installed_expansion_spec(const std::string &root, const ProjectDocument &document,

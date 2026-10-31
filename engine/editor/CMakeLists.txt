@@ -344,6 +344,7 @@ add_library(opennova_editor STATIC
     # NovaWorld (ADR 0069): the session's part, its jobs as operations, its view's JSON
     ${CMAKE_CURRENT_SOURCE_DIR}/session/novaworld_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/novaworld_json.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/novaworld_standing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/novaworld_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/disk_watch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
@@ -370,6 +371,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke_paint.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_tiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/heights_export.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_add_map.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_tools_parts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_card.cpp

@@ -17,6 +17,9 @@
 
 namespace godot {
 
+class ResourceRoot;
+class Simulation;
+
 class HudToggles : public RefCounted {
 	GDCLASS(HudToggles, RefCounted)
 
@@ -106,18 +109,27 @@ public:
 	// `mouse_scale_negative` is the mousescale fire's sign bit
 	// (ControlsModel.is_token_fire_signed); `head_drops` the rows (1 << Row)
 	// whose event the dispatcher's head drops by their flags (engine
-	// HudKeyPoll::head_drops). The bits are the engine's unsigned
+	// HudKeyPoll::head_drops); `death_screen` the client death-screen latch and
+	// `friendly_tags_skip_mode_1` the session title's rule over it (engine
+	// HudKeyPoll::death_screen). The bits are the engine's unsigned
 	// 32-bit word, EVENT_JOIN_LOCK_TOGGLED its top bit, so the result is 64-bit.
 	int64_t poll(int p_rows_down, bool p_active,
 			bool p_in_session, bool p_objective_game, bool p_local_alive = true,
 			bool p_authority = false, bool p_mp_session_peer = false,
-			bool p_mouse_scale_negative = false, int p_head_drops = 0);
+			bool p_mouse_scale_negative = false, int p_head_drops = 0,
+			bool p_death_screen = false, bool p_friendly_tags_skip_mode_1 = false);
 	// One input frame's dispatched row events (a mask of 1 << Row, each one event;
 	// engine hud_toggles_dispatch), under the poll's gates; returns the Event bits.
 	int64_t dispatch(int p_rows_fired, bool p_active,
 			bool p_in_session, bool p_objective_game, bool p_local_alive = true,
 			bool p_authority = false, bool p_mp_session_peer = false,
-			bool p_mouse_scale_negative = false, int p_head_drops = 0);
+			bool p_mouse_scale_negative = false, int p_head_drops = 0,
+			bool p_death_screen = false, bool p_friendly_tags_skip_mode_1 = false);
+	// The two friendly-tags inputs of a poll or a dispatch, from `sim`: the client death-screen
+	// latch, and the session title's rule over it (engine HudKeyPoll::death_screen); false with
+	// no sim.
+	static bool sim_death_screen(const Ref<Simulation> &p_sim);
+	static bool sim_friendly_tags_skip_mode_1(const Ref<Simulation> &p_sim);
 	// The escape action's HUD-window close chain; returns the Event bits.
 	int escape(bool p_in_session, bool p_round_over, bool p_authority = false);
 	// The session create / destroy's status-view rule (engine
@@ -141,8 +153,13 @@ public:
 	void force_death_screen_hud_detail();
 	// The friendly-tags cycle; returns the gametext Misc toast key for the new mode.
 	String cycle_friendly_tags();
-	// The Misc toast key for the current friendly-tag mode / verbose flag.
-	String friendly_tag_toast_key() const;
+	// The friendly-tags toast line for the current mode under the title a session over
+	// `root` runs as (ResourceRoot::session_title: with no root the launch's; engine
+	// hud::friendly_tag_toast) over the gametext table; "" (which posts nothing) when the
+	// string is missing.
+	String friendly_tag_toast(const Ref<RtxtStringFile> &p_gametext,
+			const Ref<ResourceRoot> &p_root) const;
+	// The Misc toast key for the current verbose flag.
 	String verbose_toast_key() const;
 	// The mousescale toast over the gametext table ("" posts nothing).
 	static String mouse_scale_toast(const Ref<RtxtStringFile> &p_gametext, int p_scale);
@@ -166,6 +183,7 @@ public:
 	bool is_help_open() const;
 	bool is_map_legend_open() const;
 	int get_briefing_mode() const;
+	bool is_briefing_panel_open() const { return state_.briefing_panel_open; }
 	bool is_mp_verbose() const;
 	bool is_emotes_menu_open() const;
 	bool is_radio_menu_open() const;

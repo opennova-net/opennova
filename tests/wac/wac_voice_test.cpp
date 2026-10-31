@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <runtime/audio/ambient_mixer.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/vm.h>
 #include <runtime/world/world.h>
@@ -290,7 +291,29 @@ static void test_entity_voice_anchors_at_the_speaker_or_falls_back_to_a_oneshot(
     CHECK(f.world.script.voice.ready());
 }
 
+// DFX2-42: a voice wave starts at its title's gain byte: Jointops.exe's 210, dfx2.exe's 240,
+// at every start (wave, SSNwave, SSNradio), heard as (gain * 255 + 128) >> 8 at full volume.
+// [orig: Wac_PlayScriptedVoiceWave @0x4ED688; WacCmd_SsnWave @0x4F7989; WacCmd_SsnRadio @0x4F7A63]
+// [orig: WacCmd_SsnWave @0x4F4A40; @0x4F4B20; @0x4EA745 (dfx2.exe)]
+static void test_voice_waves_start_at_the_title_gain() {
+    for (const auto &[code, gain] : {std::pair<const char *, int32_t>{"jo", 210}, {"dfx2", 240}}) {
+        for (const char *line : {"wave(\"tone.wav\")\n", "SSNwave(2,\"tone.wav\",10)\n",
+                     "SSNradio(2,\"tone.wav\")\n"}) {
+            Fixture f;
+            f.world.rules.title_rules = &title_rules(code);
+            f.script(line);
+            const auto frame = f.world.script.voice.frame(f.world, {});
+            CHECK(frame.state.clip && frame.state.volume == gain);
+            // The local anchor's: the gain through the curve at distance 0, its 100-unit radius.
+            if (frame.local)
+                CHECK(frame.volume == opennova::audio::calc_distance_volume(
+                        0, 100 * 65536, (gain * 255 + 128) >> 8, 255));
+        }
+    }
+}
+
 int main() {
+    test_voice_waves_start_at_the_title_gain();
     test_wave_ready_and_physical_completion();
     test_entity_voice_anchors_at_the_speaker_or_falls_back_to_a_oneshot();
     test_radio_sets_share_channel_zero_and_keep_unity_pitch();

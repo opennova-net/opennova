@@ -5,6 +5,7 @@
 #include <base/version/one_build.h>
 #include <base/version/version_line.h>
 #include <editor/model/document.h>
+#include <editor/novaworld/novaworld_account.h>
 #include <net/protocol/protocol.h>
 #include <editor/project/project_document.h>
 #include <editor/session/request_kinds.h>
@@ -28,7 +29,10 @@ std::string editor_version_line(const SessionView &view) {
 }
 
 std::string editor_window_title(const SessionView &view) {
-	const char *const product = "OpenNova Editor";
+	// The service it is on: a debug build's staging and a release build's live editor look alike otherwise.
+	std::string product = "OpenNova Editor";
+	if (view.novaworld.available && !view.novaworld.server.empty())
+		product += " (" + novaworld_host(view.novaworld.server) + ")";
 	if (!view.project.open) return product;
 	const std::vector<std::shared_ptr<const DocumentBase>> &open = view.documents.open;
 	const bool unsaved = std::any_of(open.begin(), open.end(),

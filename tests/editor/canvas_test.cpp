@@ -292,7 +292,7 @@ struct MenuRig {
 				document.rows().empty())
 			return false;
 		const Node &screen = *document.rows()[0];
-		if (render.configure(document, screen.id, files, {}) != MenuScreenStatus::Ready)
+		if (render.configure(document, screen.id, files, {}, 1.0f) != MenuScreenStatus::Ready)
 			return false;
 		frame.document = &document;
 		frame.screen = &screen;

@@ -43,6 +43,9 @@ struct HudCombatLayout {
 	//  dword_2723A80, LogoHumm.tga -> dword_2723A90, LogoBoat.tga ->
 	//  dword_2723AA0 (the shader at +4 is what HUD_DrawEntityMarker binds)].
 	HudSprite logo_helo, logo_humm, logo_boat;
+	// scopexh.tga, loaded in alpha mode (kHudTexScopeCrosshair); only the loaded flag is read
+	// (the Inset's quad takes the aperture's extent).
+	HudSprite scope_crosshair;
 	HudSprite target, target_friendly, custom_aim, commander;
 	HudSprite weapon, vehicle, cargo, parachute, armor;
 	int impact_x = 0, impact_y = 0;
@@ -124,6 +127,10 @@ struct HudCombatState {
 	// The inset's friendly name, the role's display-name lookup of the HUD
 	// target cursor (inmatch::HudRoleFacts::inset_target_name); empty draws none.
 	std::string target_name;
+	// DFX2-45: the title's Inset reticle is the scopexh.tga quad over the aperture, drawn in place
+	// of the four crosshair arms (inmatch::HudRoleFacts::inset_reticle_quad, Title::
+	// inset_reticle_quad).
+	bool inset_reticle_quad = false;
 	int32_t impact_x_q16 = 0, impact_y_q16 = 0, impact_radius_q16 = 0;
 	uint16_t impact_distance_m = 0;
 	float inset_fov_over_zoom = 0, designator_scale = 1;

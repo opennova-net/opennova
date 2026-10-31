@@ -25,53 +25,13 @@ struct HudHelpScreenState {
 	std::vector<std::string> texts; // row + 128, left at x 512
 };
 
-// One map-legend entry: its gametext Hud key, TSDicon strip cell, size
-// factor and ARGB [orig: the 44-byte records @0x8154F8 — name +0x00, cell
-// +0x20, size +0x24 (float), colour +0x28; the walk stops on an empty name].
-struct HudMapLegendIcon {
-	const char *name;
-	uint8_t cell;
-	float size;
-	uint32_t color;
-};
-inline constexpr HudMapLegendIcon kHudMapLegendIcons[] = {
-	{"hud_icon_person", 3, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_medic", 0, 3.0f, 0xFFFFFFFFu},
-	{"hud_icon_persondead", 8, 1.0f, 0x7F2F3F7Fu},
-	{"hud_icon_personmedicable", 14, 1.0f, 0x7F2F3F7Fu},
-	{"hud_icon_waypoint", 1, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_psp", 0, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_lfp_attack", 26, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_lfp_defend", 27, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_emplaced", 4, 0.8f, 0x7F7F6200u},
-	{"hud_icon_emplaced2", 12, 0.8f, 0x7F7F6200u},
-	{"hud_icon_vehicle", 10, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_watervehicle", 15, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_helo", 11, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_motorcycle", 25, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_farp", 5, 1.0f, 0x7F7F6200u},
-	{"hud_icon_armoury", 13, 0.8f, 0x7F207F20u},
-	{"hud_icon_bldg", 0, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_bridge", 9, 1.0f, 0x7F207F20u},
-	{"hud_icon_ridewanted", 23, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_enemyloc", 24, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_recentspeaker", 28, 0.8f, 0x7F7F7F7Fu},
-	{" ", 0, 0.0f, 0x00000000u},
-	{"hud_icon_flag", 2, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_flagbay", 6, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_pwrmed", 16, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_pwrammo", 17, 1.0f, 0x7F7F7F7Fu},
-};
-inline constexpr int kHudMapLegendIconCount =
-		static_cast<int>(sizeof(kHudMapLegendIcons) / sizeof(kHudMapLegendIcons[0]));
-
 // The F12 map legend's resolved text: the title and one label per icon
 // entry, each a gametext Hud lookup [orig: GameText_GetString("Hud",
 // "hud_map_legend") @0x49749e; GameText_GetString("Hud", name) @0x4977a7].
 struct HudMapLegendState {
 	bool shown = false;
 	std::string title;
-	std::vector<std::string> labels; // kHudMapLegendIconCount entries
+	std::vector<std::string> labels; // one per entry of the title's legend (Title::hud_map_legend)
 };
 
 // The briefing panel's text [orig: HUD_DrawBriefingPanel @0x5bad00 — the authority reads
@@ -99,14 +59,37 @@ struct HudVoiceMacroMenuState {
 inline constexpr int kHudEmotesMenuContextRow = 8; // [orig: `cmp esi, 8` @0x5c0002]
 inline constexpr int kHudRadioMenuContextRow = 9;  // [orig: `cmp esi, 9` @0x5bfc8f]
 
+// One briefing box (HudFrameCompiler::element_briefing): the I window's out of a session, or the
+// briefing panel's own window (HudFrameState::briefing_panel, DFX2-96), each at its own slot.
 struct HudBriefingState {
 	bool shown = false;
 	std::string text;
+	// DFX2-96: the box holds the single-player how-to (hud_toggles.h hud_briefing_window): the
+	// text from its first line, no page kept [orig: HUD_DrawSinglePlayerHowTo -
+	// HUD_DrawWrappedText(.., 0) (dfx2.exe)].
+	bool how_to = false;
+};
+
+// The I window in a session, the end-game screen: the embedder builds the
+// page the briefing pages stand on (hud/session_rules_text.h
+// build_end_game_screen_page, end_game_screen_footer; inmatch
+// end_game_screen_text) and the compiler draws it: its box, then while the
+// session status record is valid the wrapped page and the two footer lines
+// [orig: HUD_DrawEndGameScreen @0x5bd070, drawn on the briefing's window flag
+// in a session @0x5be135..0x5be13e].
+struct HudEndGameScreenState {
+	bool shown = false;
+	bool valid = false;  // g_SessionStatus' valid word (@0x5bd10f)
+	int page = 0;        // the page the text was built for [orig: g_BriefingPage]
+	std::string text;
+	bool tags_live = false; // EndGameScreenPage::tags_live
+	std::string page_line;  // KeyHelp Text/PAGE over (page + 1, 4)
+	std::string footer;     // KeyHelp Text/CHANGE_SCREEN
 };
 
 // The briefing pages: the current page and each page's first wrapped line;
 // the drawer writes the next page's start when the page overflows, and the
-// page keys walk them [orig: dword_28E3D6C (page), g_BriefingPageLineOffsets
+// page keys walk them [orig: g_BriefingPage (page), g_BriefingPageLineOffsets
 // @0x28E3D70 (ten starts); HUD_CycleBriefingPage @0x5B9150 (the reset and the cycle)].
 struct HudBriefingPages {
 	static constexpr int kPages = 10;

@@ -471,8 +471,9 @@ locals {
   }, local.database_env)
 
   # The gate's address, which is also web's (the load balancer's zone-a
-  # Elastic IP: POSTIPADDRESS, and the startup URL, the NWU 0x82 web domain,
-  # HOST_URL and GSB_SERVER), and the ports the programs listen on and announce.
+  # Elastic IP: the hosted servers' master address, the NWU 0x82 web domain the
+  # startup URL takes, HOST_URL and GSB_SERVER), and the ports the programs
+  # listen on and announce.
   public_env = {
     ONNET_PUBLIC_HOST   = local.service_public_ip
     ONNET_WEB_HOST      = local.service_public_ip

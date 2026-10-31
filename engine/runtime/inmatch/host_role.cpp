@@ -12,7 +12,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h> // DisconnectEvent
-#include <net/protocol/protocol.h> // protocol_in_match (the rules word's bits, DFX2-18)
+#include <net/protocol/protocol.h> // protocol_in_match (the rules word's bits, DFX2-18), title_protocol
 #include <runtime/inmatch/game_config_block.h> // kSinglePlayerMpAttrib
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/joiner_connection.h> // build_mission_status (the own C2S 0x0B)
@@ -116,6 +116,8 @@ void HostRole::reset_session(bool serve_and_play) {
 	ctx.nwu_player_removed = &client_process_->nwu_player_removed;
 	ctx.file_transfer_session = &client_process_->file_transfer_session;
 	ctx.punt_crc_counters = &client_process_->punt_crc_counters;
+	// A host start clears the map change's state, the kept clock's latch with it
+	// [orig: UI_HandleHostSessionStart @0x556D00 - dword_24D5A0C = 0 @0x556DD1].
 	map_change = HostMapChange{};
 }
 
@@ -164,7 +166,7 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	// authority then ORs the scope-zero bit 0x10000 into the word, in a session or out
 	// (DFX2-18) [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51b89e (dfx2.exe)].
 	const uint32_t rules_word = (in_session ? config.mp_attributes : GameConfig::kSpRulesWord) |
-			protocol_in_match(protocol).rules_word_bits;
+			protocol_in_match(protocol).s2c_64.rules_word_bits;
 	kernel.world.rules.mpattrib = rules_word;
 	kernel.world.rules.hit_feedback = config.hit_feedback;
 	kernel.world.rules.auto_scope_zero =
@@ -194,9 +196,11 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	//  restart's start (Game_RestartRoundSP pushes 1 @0x5263D9)].
 	// The restart's spawn raises read the word the previous start left: the same mission's
 	// mission-start word (D-PWR-8) [orig: Game_StartMission - the 0 @0x525CDD, the objective
-	//  Co-op's -1 @0x525CFA].
+	//  Co-op's -1 @0x525CFA]; dfx2.exe's start leaves the profile's (DFX2-28) [orig:
+	//  Game_StartMission @0x521530 - nothing between @0x522EA9 and @0x522EAE (dfx2.exe)].
 	if (!kernel.world.rules.mp_session)
-		kernel.world.rules.difficulty = kernel.restart_boot()
+		kernel.world.rules.difficulty =
+				kernel.restart_boot() && config.title_rules().mission_start_sets_difficulty
 				? world::mission_start_difficulty(config.game_type)
 				: config.profile_difficulty;
 }
@@ -297,8 +301,10 @@ GameConfig singleplayer_game_config(const Title &title, uint32_t game_type,
 	// mp_difficulty, host_config.cpp). Our SP stream queues at the bring-up,
 	// ahead of the mission start [orig: Game_StartMission @0x525CDD / @0x525CFA;
 	// ServerConfig_SerializeToPacket's live read @0x505D1C, from
-	// Server_SendPlayerSlotStateFrame @0x51BF95 in Server_TickUpdate].
-	config.config_bytes[6] = static_cast<uint8_t>(world::mission_start_difficulty(game_type));
+	// Server_SendPlayerSlotStateFrame @0x51BF95 in Server_TickUpdate]. dfx2.exe's start leaves
+	// the profile's word, so its byte is that (DFX2-28) [orig: Game_StartMission @0x521530 -
+	// nothing between @0x522EA9 and @0x522EAE; ServerConfig_SerializeToPacket @0x502E4C
+	// (dfx2.exe)].
 	if (profile != nullptr) {
 		// Outside a session the restriction words come from the current
 		// profile record: +0x548 -> g_SessionNoCharAbilities, +0x54C ->
@@ -317,6 +323,9 @@ GameConfig singleplayer_game_config(const Title &title, uint32_t game_type,
 		config.no_scope_drift = profile->sp_no_scope_drift;
 		config.profile_difficulty = profile->sp_difficulty;
 	}
+	config.config_bytes[6] = static_cast<uint8_t>(config.title_rules().mission_start_sets_difficulty
+			? world::mission_start_difficulty(game_type)
+			: config.profile_difficulty);
 	return config;
 }
 
@@ -336,6 +345,9 @@ void HostRole::bring_up_singleplayer(const Title &title, const playersav::Profil
 	stop_unstopped_server(client_process_->unstopped_server, ServerLogs{}, nullptr, nullptr);
 	reset_session(/*serve_and_play=*/true);
 	inmatch::HostConfig host_cfg;
+	// The title's protocol: the single player's session takes its in-match branches as a host's
+	// does (the rules word's bits, in a session or out, DFX2-18).
+	host_cfg.protocol = title_protocol(title.code);
 	host_cfg.config = config;
 	host_cfg.socket_mode = inmatch::SocketMode::Socketless;
 	host_cfg.serve_and_play = true;
@@ -346,7 +358,7 @@ void HostRole::bring_up_singleplayer(const Title &title, const playersav::Profil
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
 	// Then the mission's World under it.
-	bind_session_world(config, /*serve_and_play=*/true, /*in_session=*/false, /*title=*/nullptr);
+	bind_session_world(config, /*serve_and_play=*/true, /*in_session=*/false, host_cfg.protocol);
 	// The authority's start steps the process's file-transfer session words, which the context
 	// reads [orig: Game_StartMission @0x524360 (the add @0x5244B4, the store @0x5244C6)].
 	client_process_->file_transfer_session.start_mission();
@@ -834,15 +846,19 @@ void HostRole::send_own_mission_status() {
 				team = conn.assigned_team;
 		const JoinerConnection::LoadoutKit *kit = state.client_runtime->host_loadout_kit();
 		const world::WeaponTable &weapons = kernel.world.tables.weapons;
+		// The fresh profile of the title the session runs as (DFX2-29: dfx2.exe's pages).
+		const playersav::Record fresh =
+				profile::fresh_weapon_record(state.host_owner.ctx.config.title);
 		auto submit_for = [&](bool alternate) {
 			LoadoutSubmit submit = kit != nullptr
 					? profile_loadout_submit(*kit, team, false)
-					: fresh_profile_loadout_submit(&weapons, team);
+					: fresh_profile_loadout_submit(fresh, &weapons, team,
+							  loadout_fixed_class(protocol, kernel.mission.header.mission_type));
 			if (alternate && kernel.local.inventory_valid)
 				submit.weapon_slot_index = static_cast<uint32_t>(resolve_loadout_submit_combo(
 						weapons, &kernel.local.inventory, team,
 						kernel.local.inventory.current_slot));
-			if (protocol_in_match(protocol).loadout_class_fixed)
+			if (protocol_in_match(protocol).c2s_2f.loadout_class_fixed)
 				submit.player_class =
 						kernel.mission.header.mission_type == bms::MissionType::CombatVehicleMission
 						? uint8_t{7}
@@ -1027,14 +1043,18 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// The chat handler, the snapshot builder, the radio call (its
 		// designation table and zone test), the squad handlers, the team
 		// change, the Respawn key's 0x41 (the authority and the respawn
-		// timeout) and the 0x51 convert (its authority test) read the host
-		// context.
+		// timeout), the 0x51 convert (its authority test) and the deploy
+		// pick's 0x0E (the deploy's protocol, whose state byte a DFX2 deploy
+		// writes (DFX2-11), and its /PROFILE line) read the host context: the
+		// own slot's deploy runs the remote's Server_DeployPlayer
+		// [orig: Server_ProcessClientRequestRespawn @0x519AF0 -> Server_DeployPlayer
+		//  @0x517740].
 		const bool reads_ctx = squad || dg.tag == c2s::CHAT_MESSAGE ||
 				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST ||
 				dg.tag == c2s::TEAM_CHANGE_REQUEST || dg.tag == c2s::DEATH_TIMEOUT_RESET ||
 				dg.tag == c2s::SPECTATOR_RESPAWN || dg.tag == c2s::ADMIN_NETLOG_COMMAND ||
 				dg.tag == c2s::BAN_PUNT_COMMAND || dg.tag == c2s::MISSION_FILE_STATUS ||
-				dg.tag == c2s::LOADOUT_SUBMIT;
+				dg.tag == c2s::LOADOUT_SUBMIT || dg.tag == c2s::RESPAWN_REQUEST;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
 		inmatch::ServerDispatchInputs inputs;

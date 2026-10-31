@@ -17,6 +17,7 @@ import { configurationDocument, settingsFromDocument, parseSettingsSchema, parse
 import { adminClient, apiClient } from './client';
 import { pickProtocol } from './products';
 import { formatRetryAfter, parseRetryAfter } from './session';
+import { buildOf, type Build } from '../utils/buildView';
 import type {
   ConsoleLine,
   ConsoleLink,
@@ -43,6 +44,7 @@ import type {
   RotationEntryAction,
   StartRequest,
   StartSettings,
+  UpdateKind,
 } from '../types/hostedServer';
 import { FIELD_RULES, INT_FIELDS, MISSIONS_MAX, NETWORK_INT_FIELDS, NETWORK_LIMITS, isSettingsField, type SettingsField } from '../utils/hostedSettings';
 
@@ -342,6 +344,13 @@ function parseNovaLogic(value: unknown): NovaLogicListing | null {
   return listing;
 }
 
+// A ONE build ({version, commit}, either null), or null when it is missing or names neither.
+function parseBuild(value: unknown): Build | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null) return null;
+  return buildOf(typeof v.version === 'string' ? v.version : null, typeof v.commit === 'string' ? v.commit : null);
+}
+
 export function parseHostedServer(value: unknown): HostedServer | null {
   if (!isHostedServerShape(value)) return null;
   const v = value as unknown as Record<string, unknown>;
@@ -365,7 +374,11 @@ export function parseHostedServer(value: unknown): HostedServer | null {
     expansion: parseNamed(v.expansion, (e) => ({ code: typeof e.code === 'string' ? e.code : '' })),
     data: parseServerData(v.data),
     update_available: v.update_available === true,
+    update_kinds: Array.isArray(v.update_kinds) ? v.update_kinds.filter((k): k is UpdateKind => k === 'content' || k === 'server_build') : [],
+    build: parseBuild(v.build),
+    build_available: parseBuild(v.build_available),
     update_requested: v.update_requested === true,
+    generation: isCount(v.generation) ? v.generation : 0,
     novalogic: parseNovaLogic(v.novalogic),
     phase: parsePhase(v.phase),
     stopped_because: parseStoppedBecause(v.stopped_because),

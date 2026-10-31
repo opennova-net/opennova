@@ -7,6 +7,7 @@
 // [orig: NapiNPClientMsg_0x01D @0x430840; StatScreen_PopulateStatResultsList
 //  @0x562240; UI_UpdateDeathScreenContent @0x5536a0]
 #include <base/gameprofile/game_type.h>
+#include <base/title/title.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/effect_pose_index.h>
 #include <runtime/inmatch/loopback_channel.h>
@@ -18,6 +19,7 @@
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/radio_call.h>
+#include <base/title/title.h> // title_by_code (DFX2-45)
 
 #include <cstdio>
 #include <initializer_list>
@@ -407,11 +409,315 @@ static void hud_pass_call_site_cases() {
 	CHECK(!hud_overlays_called(bare, false));
 }
 
+// DFX2-41: the SPAWNPOINTS_TABLE zones, over the zone walk the DEATH list takes: a zone of the
+// local team with a SpawnZoneList index, its category and class id, its health colour over the
+// stance pair, the greyed state, then its text lines: the seats 8, 9, 0..7 named as the HUD
+// names an entity (the roster's name and "<ch>" tag "<co>", else the entity's), the driver
+// marked; each gun standing on the zone, once per gun slot of the zone's definition whose
+// userpoint is the gun's mount bone, with its slot weapon's attach text (0 under a zone that is
+// no vehicle, which every unauthored slot matches); the wave members.
+// [orig: sub_551450 @0x551450 - the walk @0x55156d..0x551624, sub_5A19D0 @0x55164c, the greyed
+//  test @0x551645..0x551673, the seats @0x5518b3..0x5519c0, the guns @0x5519db..0x551b7f, the
+//  members @0x551b96..0x551c86; HUD_GetEntityDisplayName @0x58dd40;
+//  Entity_GetMountSlotBoneIndex @0x5438f0 (dfx2.exe)]
+void deploy_table_zone_cases() {
+	// The kernel and the view on the heap: main's frame already holds several (1 MB stack).
+	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	mission::MissionKernel &kernel = *kernel_heap;
+	world::World &w = kernel.world;
+	w.registry.configure_pool(0, 8);
+	w.registry.configure_pool(1, 8);
+	w.registry.configure_pool(2, 8);
+	world::Entity person;
+	person.kind = world::EntityKind::Organic;
+	person.has_item_def = true;
+	person.alive = true;
+	person.team = 1;
+	person.display_name = "Pilot";
+	const world::EntityHandle pilot = w.registry.spawn(0, person);
+	person.display_name = "Shooter";
+	const world::EntityHandle shooter = w.registry.spawn(0, person);
+	person.display_name = "Rider";
+	const world::EntityHandle rider = w.registry.spawn(0, person);
+	w.cached.local_player = rider;
+	world::Entity heli;
+	heli.kind = world::EntityKind::Item;
+	heli.has_item_def = true;
+	heli.is_spawn_point = true;
+	heli.alive = true;
+	heli.team = 1;
+	heli.item_type = 1;
+	heli.item_attrib = 0x40u | 0x40000u;
+	heli.item_unit_type = 3;
+	heli.item_id = 0x219;
+	heli.health = 50;
+	heli.health_max = 100;
+	heli.def_slot_userpoints = { 7, 9, 0, 0 };
+	world::Seat seat;
+	seat.type = world::SeatType::Driver;
+	seat.retail_slot = 8;
+	seat.occupant = pilot;
+	heli.seats.push_back(seat);
+	seat.type = world::SeatType::Passenger;
+	seat.retail_slot = 0;
+	seat.occupant = rider;
+	heli.seats.push_back(seat);
+	heli.primary_occupant = pilot;
+	const world::EntityHandle heli_h = w.registry.spawn(1, heli);
+	// A greyed truck: a type-1 zone with no driver, full health.
+	world::Entity truck = heli;
+	truck.seats.clear();
+	truck.primary_occupant = world::EntityHandle{};
+	truck.item_unit_type = 1;
+	truck.item_id = 0x300;
+	truck.health = 100;
+	const world::EntityHandle truck_h = w.registry.spawn(1, truck);
+	// A PSP that is no vehicle, its gun slots unauthored.
+	world::Entity psp = truck;
+	psp.item_type = 5;
+	psp.item_attrib = 0x40000u;
+	psp.item_unit_type = 0;
+	psp.item_id = 0;
+	psp.health = 10;
+	psp.def_slot_userpoints = { 0, 0, 0, 0 };
+	const world::EntityHandle psp_h = w.registry.spawn(2, psp);
+	// The guns: the heli's in its slot 1 (userpoint 9), the PSP's.
+	world::WeaponTableEntry fifty;
+	fifty.valid = true;
+	fifty.name = "50cal";
+	fifty.attach_text_id = "attach_50cal";
+	w.tables.weapons.entries.push_back(fifty);
+	world::Entity gun;
+	gun.kind = world::EntityKind::Item;
+	gun.has_item_def = true;
+	gun.alive = true;
+	gun.team = 1;
+	gun.item_attrib = 0x20u;
+	gun.ground_target = heli_h;
+	gun.emplacement_slot = 1;
+	gun.primary_occupant = shooter;
+	gun.primary_weapon_slot_adm = 0;
+	seat.type = world::SeatType::Gunner;
+	seat.retail_slot = 9;
+	seat.occupant = shooter;
+	gun.seats.push_back(seat);
+	w.registry.spawn(1, gun);
+	gun.ground_target = psp_h;
+	gun.emplacement_slot = 0;
+	gun.primary_weapon_slot_adm = world::kAdmSlotNone;
+	w.registry.spawn(1, gun);
+	world::SpawnZoneRegistry reg;
+	reg.entries = { truck_h, heli_h, psp_h };
+	replication::LoopbackChannel loop;
+	auto host_view_heap = std::make_unique<ClientRuntime>(loop);
+	ClientRuntime &host_view = *host_view_heap;
+	replication::ClientState &cs = host_view.state();
+	auto bank = [](replication::ClientMinimapOverlaySlot &slot, world::EntityHandle h) {
+		slot.active = true;
+		slot.handle = h.packed;
+		slot.flags = 0x10;
+	};
+	bank(cs.minimap.persistent[0], heli_h);
+	bank(cs.minimap.persistent[1], truck_h);
+	bank(cs.minimap.persistent[2], psp_h);
+	replication::ClientRosterSlot ace;
+	ace.bound = true;
+	ace.entity_slot = static_cast<int16_t>(pilot.slot());
+	ace.name = "Ace";
+	ace.registry_clan = "CL";
+	cs.roster[0] = ace;
+	replication::ClientRosterSlot rider_slot;
+	rider_slot.bound = true;
+	rider_slot.entity_slot = static_cast<int16_t>(rider.slot());
+	rider_slot.name = "Rider";
+	cs.roster[1] = rider_slot;
+	SpawnWaveGroup wave;
+	wave.zone_handle = truck_h.packed;
+	wave.members = { rider.packed };
+	cs.spawn_waves.known = true;
+	cs.spawn_waves.value.groups = { wave };
+	RoleView view;
+	view.kernel = &kernel;
+	view.runtime = &host_view;
+	const hud::GameTextLookup gametext = [](const char *, const char *key, const char *fallback) {
+		return std::string(key) == "attach_50cal" ? std::string("Fifty") : std::string(fallback);
+	};
+	std::vector<world::DeployTableZone> zones;
+	CHECK(deploy_table_zones(view, reg, 0xFF111111u, 0xFF222222u, gametext, zones));
+	CHECK(zones.size() == 3);
+	if (zones.size() != 3) return;
+	const world::DeployTableZone &h = zones[0];
+	CHECK(h.index == 1 && h.vehicle_category == 3 && h.class_id == 0x219 && !h.greyed);
+	CHECK(h.health_color == 0xFF111111u); // 0x8000: the middle band
+	CHECK(h.lines.size() == 3);
+	CHECK(h.lines.size() == 3 && h.lines[0] == "Ace<ch>CL<co>  <i>(Driver)<-i>\r\n");
+	CHECK(h.lines.size() == 3 && h.lines[1] == "Rider\r\n");
+	CHECK(h.lines.size() == 3 && h.lines[2] == "Shooter  <i>(Fifty)<-i>\r\n");
+	const world::DeployTableZone &t = zones[1];
+	CHECK(t.index == 0 && t.greyed && t.health_color == 0xFFDDDDDDu);
+	CHECK(t.lines.size() == 1 && t.lines[0] == "<b><cC0FFFF>** Rider **<-b> <i>waiting</i>\r\n");
+	const world::DeployTableZone &p = zones[2];
+	CHECK(p.index == 2 && !p.greyed && p.health_color == 0xFF222222u);
+	// Bone 0 under a zone that is no vehicle: every unauthored slot matches, a line each, and
+	// no slot weapon reads "Gunner".
+	CHECK(p.lines.size() == 4);
+	CHECK(p.lines.size() == 4 && p.lines[3] == "Shooter  <i>(Gunner)<-i>\r\n");
+	// A zone off the SpawnZoneList, or of the other team, is no row.
+	reg.entries = { heli_h };
+	CHECK(deploy_table_zones(view, reg, 0, 0, gametext, zones) && zones.size() == 1);
+	w.registry.get(heli_h)->team = 2;
+	CHECK(deploy_table_zones(view, reg, 0, 0, gametext, zones) && zones.empty());
+	RoleView bare;
+	CHECK(!deploy_table_zones(bare, reg, 0, 0, gametext, zones) && zones.empty());
+	// DFX2-41's team lists: per Tab-board row the entity the roster slot drives in a session,
+	// else the one the walk held (never reset), the local player at first; a title without the
+	// lists gives none [orig: DeathScreen_UpdateTeamLists @0x55040d..0x5505c3 (dfx2.exe)].
+	std::vector<world::DeployTeamListPlayer> players;
+	CHECK(!deploy_team_list_players(view, players));
+	opennova::Title dfx2;
+	dfx2.death_screen_team_lists = true;
+	view.title = &dfx2;
+	w.registry.get(rider)->team = 2;
+	replication::ClientScoreboardRow row;
+	row.slot_id = 0; // Ace, the pilot
+	cs.scoreboard.rows.push_back(row);
+	row.slot_id = 5; // no body: the walk keeps the pilot
+	cs.scoreboard.rows.push_back(row);
+	row.slot_id = 1; // the rider, the local player
+	cs.scoreboard.rows.push_back(row);
+	w.rules.mp_session = true;
+	// Ace again, then an active slot that drives no body: the local player.
+	row.slot_id = 0;
+	cs.scoreboard.rows.push_back(row);
+	replication::ClientRosterSlot bodiless;
+	bodiless.bound = true;
+	bodiless.name = "Ghost";
+	cs.roster[6] = bodiless;
+	row.slot_id = 6;
+	cs.scoreboard.rows.push_back(row);
+	CHECK(deploy_team_list_players(view, players));
+	CHECK(players.size() == 5 && players[4].name == "Rider" && players[4].local);
+	cs.scoreboard.rows.resize(3);
+	CHECK(deploy_team_list_players(view, players));
+	CHECK(players.size() == 3);
+	CHECK(players.size() == 3 && players[0].name == "Ace<ch>CL<co>" && players[0].team == 1 &&
+			!players[0].local);
+	CHECK(players.size() == 3 && players[1].name == "Ace<ch>CL<co>");
+	CHECK(players.size() == 3 && players[2].name == "Rider" && players[2].team == 2 &&
+			players[2].local);
+	// Out of a session every row is the local player's.
+	w.rules.mp_session = false;
+	CHECK(deploy_team_list_players(view, players) && players.size() == 3 && players[0].local);
+}
+
+// DFX2-82's rider lines: the driver and each gunner named as HUD_GetEntityDisplayName names
+// them (the roster slot's name and clan, else the entity's own), a rider without a definition
+// dropped, and nothing on foot or for a title without the lines.
+// [orig: HUD_DrawVehicleHealthBars @0x5A4711..0x5A4871 (dfx2.exe); HUD_GetEntityDisplayName
+//  @0x58DD40 (dfx2.exe)]
+void vehicle_panel_rider_cases() {
+	// The kernel and the view on the heap: main's frame already holds several (1 MB stack).
+	auto kernel_heap = std::make_unique<mission::MissionKernel>();
+	mission::MissionKernel &kernel = *kernel_heap;
+	world::World &w = kernel.world;
+	w.registry.configure_pool(0, 8);
+	w.registry.configure_pool(1, 8);
+	world::Entity person;
+	person.kind = world::EntityKind::Organic;
+	person.has_item_def = true;
+	person.alive = true;
+	person.display_name = "Pilot";
+	const world::EntityHandle pilot = w.registry.spawn(0, person);
+	person.display_name = "Shooter";
+	const world::EntityHandle shooter = w.registry.spawn(0, person);
+	person.display_name = "Rider";
+	person.mounted = true;
+	const world::EntityHandle rider = w.registry.spawn(0, person);
+	w.cached.local_player = rider;
+	world::Entity jeep;
+	jeep.kind = world::EntityKind::Item;
+	jeep.has_item_def = true;
+	jeep.alive = true;
+	jeep.item_attrib = 0x40u;
+	jeep.def_slot_userpoints = {3, 0, 0, 0};
+	world::Seat seat;
+	seat.type = world::SeatType::Driver;
+	seat.retail_slot = 8;
+	seat.occupant = pilot;
+	jeep.seats.push_back(seat);
+	seat.type = world::SeatType::Passenger;
+	seat.retail_slot = 0;
+	seat.occupant = rider;
+	jeep.seats.push_back(seat);
+	const world::EntityHandle jeep_h = w.registry.spawn(1, jeep);
+	w.registry.get(rider)->mount_target = jeep_h;
+	world::WeaponTableEntry fifty;
+	fifty.valid = true;
+	fifty.attach_text_id = "attach_50cal";
+	w.tables.weapons.entries.push_back(fifty);
+	world::Entity gun;
+	gun.kind = world::EntityKind::Item;
+	gun.has_item_def = true;
+	gun.alive = true;
+	gun.item_attrib = 0x20u;
+	gun.emplacement_parent = jeep_h;
+	gun.emplacement_slot = 0;
+	gun.primary_weapon_slot_adm = 0;
+	seat.type = world::SeatType::Gunner;
+	seat.retail_slot = 9;
+	seat.occupant = shooter;
+	gun.seats.push_back(seat);
+	w.registry.spawn(1, gun);
+	replication::LoopbackChannel loop;
+	auto host_view_heap = std::make_unique<ClientRuntime>(loop);
+	ClientRuntime &host_view = *host_view_heap;
+	replication::ClientRosterSlot ace;
+	ace.bound = true;
+	ace.entity_slot = static_cast<int16_t>(pilot.slot());
+	ace.name = "Ace";
+	ace.registry_clan = "CL";
+	host_view.state().roster[0] = ace;
+	RoleView view;
+	view.kernel = &kernel;
+	view.runtime = &host_view;
+	std::vector<hud::HudVehicleRider> riders;
+	fill_vehicle_panel_riders(view, riders);
+	CHECK(riders.size() == 2);
+	CHECK(riders.size() == 2 && riders[0].name == "Ace<ch>CL<co>" && !riders[0].gunner);
+	CHECK(riders.size() == 2 && riders[1].name == "Shooter" && riders[1].gunner &&
+			riders[1].has_weapon && riders[1].weapon_key == "attach_50cal");
+	// The role facts carry them under the title's knob alone.
+	CHECK(hud_role_facts(view).vehicle_riders.empty());
+	opennova::Title dfx2;
+	dfx2.hud_vehicle_panel_riders = true;
+	view.title = &dfx2;
+	CHECK(hud_role_facts(view).vehicle_riders.size() == 2);
+	// A rider without a definition drops out.
+	w.registry.get(shooter)->has_item_def = false;
+	fill_vehicle_panel_riders(view, riders);
+	CHECK(riders.size() == 1 && !riders[0].gunner);
+	// On foot: none.
+	w.registry.get(rider)->mounted = false;
+	fill_vehicle_panel_riders(view, riders);
+	CHECK(riders.empty());
+}
+
 int main() {
+	deploy_table_zone_cases();
+	vehicle_panel_rider_cases();
 	hud_pass_call_site_cases();
 	voice_macro_override_cases();
 	lighting_walk_keeps_the_row_at_l_cases();
 	serve_only_end_round_cases();
+	// DFX2-45: the role's title names the Inset reticle; no title draws the arms.
+	{
+		RoleView view;
+		CHECK(!hud_role_facts(view).inset_reticle_quad);
+		view.title = title_by_code("jo");
+		CHECK(!hud_role_facts(view).inset_reticle_quad);
+		view.title = title_by_code("dfx2");
+		CHECK(hud_role_facts(view).inset_reticle_quad);
+	}
 	// The bare local role: nothing folded, nothing gathered.
 	{
 		RoleView bare;
@@ -644,6 +950,15 @@ int main() {
 		st.scoreboard.teams[1].score1 = static_cast<uint16_t>(0xFFFEu); // -2 through movsx
 		st.scoreboard.teams[1].koth_hold = 4;
 		st.scoreboard.teams[2].score1 = 90;
+		st.scoreboard.teams[2].ctf_flag = 1;
+		st.scoreboard.team_count = 4;
+		st.scoreboard.timed = true;
+		st.scoreboard.rows[1].slot_id = 3;
+		st.scoreboard.rows[1].score1 = -5;
+		st.scoreboard.rows[1].spectator = true;
+		st.scoreboard.rows[1].name = "Ann";
+		st.scoreboard.rows[1].clan = "CL";
+		st.session_status.mission_name = "Hill";
 		mission::MissionKernel kernel;
 		kernel.world.rules.mp_session = true;
 		kernel.world.registry.configure_pool(0, 8);
@@ -660,8 +975,18 @@ int main() {
 		CHECK(f.session.in_session && f.session.round_time_remaining == -1 &&
 				f.session.permanent_death && f.session.remaining_count == 3 &&
 				f.session.row_count == 6 && f.session.spectator_count == 2);
-		CHECK(f.session.time_limit_minutes == 15 && f.session.team_score1[0] == -2 &&
-				f.session.team_koth[0] == 4 && f.session.team_score1[1] == 90);
+		CHECK(f.session.time_limit_minutes == 15 && f.session.teams[1].score1 == -2 &&
+				f.session.teams[1].koth_hold == 4 && f.session.teams[2].score1 == 90 &&
+				f.session.teams[2].ctf_flag == 1 && f.session.team_count == 4);
+		// dfx2.exe's GAMEINFO board's facts (DFX2-114): the 0x16 records as the board projects
+		// them, the timed flag, the local body's slot byte, a joiner's 0x58 mission name and the
+		// kernel's mounted expansion (none here) [orig: HUD_DrawGameTimerOverlay @0x59AE5C,
+		// @0x59B4E4, @0x59B54B, @0x59B575 (dfx2.exe)].
+		CHECK(f.session.rows.size() == 6 && f.session.rows[1].slot_id == 3 &&
+				f.session.rows[1].score1 == -5 && f.session.rows[1].spectator &&
+				f.session.rows[1].name == "CL Ann");
+		CHECK(f.session.timed && f.session.local_slot == rt.local_body_slot() &&
+				f.session.mission_name == "Hill" && f.session.expansion.empty());
 		CHECK(f.session.team == 2 && f.session.attack_defend == 1 && f.session.zone_coverage == 0);
 		// No inventory: every slot-bar category empty.
 		CHECK(f.slot_bar[6].adm_index == -1 && f.slot_bar[0].count == 0);
@@ -847,6 +1172,18 @@ int main() {
 		CHECK(rows.size() == 3 && rows[2].wave_countdown == 42 && rows[2].occupants.size() == 2);
 		CHECK(rows.size() == 3 && rows[2].occupants.size() == 2 && rows[2].occupants[0].name == "Ace" &&
 				rows[2].occupants[1].name == "Bravo" && !rows[2].occupants[0].self);
+		// A bound roster slot with no name yet: the member's replica row names it (the entity's
+		// own Name, which the 0x0C name writes) [orig: UI_UpdateDeathScreenContent
+		// @0x553d5a..0x553d7f].
+		cs.roster[0].name.clear();
+		replication::ClientEntityState ace_row;
+		ace_row.handle = 3;
+		ace_row.display_name = "Ace's body";
+		cs.entities.push_back(ace_row);
+		CHECK(deploy_zone_rows(jv, reg, rows) && rows.size() == 3 && rows[2].occupants.size() == 2 &&
+				rows[2].occupants[0].name == "Ace's body" && rows[2].occupants[1].name == "Bravo");
+		cs.roster[0].name = "Ace";
+		cs.entities.pop_back();
 		// No bank slots, no rows (nothing is listed before the first 0x40 lands).
 		const replication::ClientMinimapState banks = cs.minimap;
 		cs.minimap = replication::ClientMinimapState();

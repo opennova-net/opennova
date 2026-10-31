@@ -251,9 +251,11 @@ public:
     // with its model loaded and a weapon bound, splits its startrounds, then on a ground
     // entity with a def (an addeweap child's carrier) runs its class update once, which
     // composes it; a CHel / cpln row whose def carries EWeap binds and splits without the
-    // model test. Every other row's init touches no slot. The mission start, a deployable
-    // and its addeweap children, a joiner's arriving rows and a vehicle's respawn run it;
-    // no mount does.
+    // model test, and on a joiner every CHel / cpln row then takes back its 0x0D latch byte
+    // (Entity::VehicleMotorState::spawn_sound_latch): its brain the low two bits, its rotor a
+    // full start under bit 7. Every other row's init touches no slot. The mission start, a
+    // deployable and its addeweap children, a joiner's arriving rows and a vehicle's respawn
+    // run it; no mount does.
     // [orig: Entity_InitBoneReferences @0x441470 (the ewep row's init dword @0x81309C; the
     //  class update called @0x44164B); the
     //  CHel / cpln rows' Entity_InitHelicopterAIFromDef @0x4683C0 -> Entity_InitAircraftWeaponBones
@@ -298,7 +300,7 @@ public:
     // for the weapon's ammo class (the slot's reserve, the entity's +0x120 word for class 1,
     // the class cap under the infinite-ammo cheat) and the slot's loaded rounds. No item def
     // or no bound weapon reads not full.
-    // [orig: sub_546150 @0x546150 - the slot by def+0x54 bit 0x40 @0x546167..0x54616F;
+    // [orig: Entity_IsWeaponSlotFull @0x546150 - the slot by def+0x54 bit 0x40 @0x546167..0x54616F;
     //  Score_CalculateKillScore @0x5407E0 (Entity_GetScoreValueBySlotType @0x5406E0, the
     //  loaded rounds @0x540816..0x540831); the startrounds compare @0x546186]
     bool weapon_slot_full(const Entity &entity) const;

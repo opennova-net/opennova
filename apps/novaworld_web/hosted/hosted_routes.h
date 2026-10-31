@@ -45,17 +45,29 @@ namespace hosted {
 // /api/me/servers/<id>, the start, stop and update replies, an admin's user
 // page) or, with `admin`, for the fleet view (fleet_routes.h): its owner (with
 // its support tier), its service account, its container and machine address,
-// its place in the fleet (machine_ref, slot, game_port, generation,
-// serve_image), its pins and whether it is outdated, its last minute of ticks
-// (`tick`: {p99_ms, late} from its slot's report, null with none) and its
-// listing's players besides. Never its admin password. Without its events. The owner's
-// views carry its phase and why its last run ended besides (phase_json).
+// its place in the fleet (machine_ref, slot, game_port, serve_image), its pins
+// and whether it is outdated, its last minute of ticks (`tick`: {p99_ms, late}
+// from its slot's report, null with none) and its listing's players besides.
+// Never its admin password. Without its events. Either view carries its starts so
+// far (`generation`); the owner's views carry its phase and why its last run
+// ended besides (phase_json).
 // With `zone` (the play zone, "" for none), its address's hostname too. Every
 // view carries its listing on NovaLogic's NovaWorld (`novalogic`: {state, try and
 // tries while trying or retrying, next_try_at (ISO 8601) while retrying, reason
 // while retrying or not listed, player_slots}, and for an admin its NWEC `tag`;
-// null unless live_second_listing has one).
-crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin, const std::string &zone = {});
+// null unless live_second_listing has one). Every view says what a waiting update
+// brings (`update_kinds`: "content", newer data than its pins, and "server_build", an
+// older serve image than `serve_image`, the release's: server_build_outdated;
+// `update_available` is either), the ONE build it says it runs (`build`, its own
+// container's report: serve_build_json, null before one) and, with a server build
+// update, the build that update moves it to (`build_available`, as a server already
+// on `serve_image` reports it: fleet_repository.h reported_build_of_image; null when
+// none does, or no such update waits).
+crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin,
+		const std::string &serve_image, const std::string &zone = {});
+// A server's ONE build as the routes give it: {"version", "commit"}, each null when not named
+// (the lobby's listings carry it too, lobby_routes.h).
+crow::json::wvalue serve_build_json(const ServeBuild &build);
 
 // A live server's listing on NovaLogic's NovaWorld (ADR 0068) as its own container's slot
 // report last carried it (fleet_repository.h SlotReport::second_listing), for a server whose
@@ -112,6 +124,10 @@ public:
 	// ONNET_NOVALOGIC_LISTING): the list's `novalogic_listing`, and a start asking for it
 	// without it is refused; before register_routes().
 	void set_novalogic_listing(bool offered) { novalogic_listing_ = offered; }
+	// The serve image the release pins (fleet_config.h ONNET_HOSTED_SERVE_IMAGE, "" when
+	// unset): a live server pinned to another has a server build update (server_json, and the
+	// owner's update takes it); before register_routes().
+	void set_serve_image(std::string image) { serve_image_ = std::move(image); }
 	void register_routes(WebApp &app);
 
 	// What configure decided (the fleet routes report them): a driver, its
@@ -137,6 +153,7 @@ private:
 	PlacementPolicy fleet_;
 	std::string address_zone_;
 	bool novalogic_listing_ = false;
+	std::string serve_image_;
 	RateLimiter start_stop_per_user_;
 };
 

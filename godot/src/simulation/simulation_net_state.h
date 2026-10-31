@@ -114,10 +114,6 @@ struct SimulationNetState {
 		return process_rotation != nullptr ? *process_rotation : own_rotation;
 	}
 	bool map_change_pending = false;
-	// The live slot limit the map change's staging derived from the cfg block for the next map's
-	// BMS placements (engine inmatch::stage_next_mission); 0 = none staged (a first boot, which
-	// takes the session's own).
-	int32_t staged_player_limit = 0;
 	// The mounted <mission>.bin (or the medmssn.bin fallback) RTXT the shell
 	// handed over before load, harvested engine-side
 	// (runtime/mission/mission_text.h): the briefing pages the S2C 0x7E payload
@@ -144,7 +140,7 @@ struct SimulationNetState {
 	// The title the session speaks (set_protocol); null until the shell names one.
 	const opennova::Protocol *protocol = nullptr;
 	// The title the session runs as (set_game_title): its player caps and its rules; null until
-	// the shell names one (simulation_net.cpp session_game_title then reads the launch's).
+	// the shell names one (sim_internal::session_title then reads the mounted root's game).
 	const opennova::Title *game_title = nullptr;
 	// The game-session APPID join token (decoded .joi CK) a NovaWorld host
 	// validates (reject code 9). "0" is the LAN default. Retained across rebuilds.
@@ -173,6 +169,10 @@ struct SimulationNetState {
 	// The gate's GLSVSSREQUEST for a NovaWorld 0x00 JOIN (D-NET-723). Empty for LAN. Retained
 	// across direct-load runtime rebuilds.
 	std::string join_glsvss_request;
+	// The CD-key ids a LAN 0x00 JOIN leads with: this machine's activation as the process's
+	// record holds it at the join (machine_activation_cd_keys, network/novaworld_identity.h).
+	// Retained across direct-load runtime rebuilds.
+	opennova::cdkey::WireKeys join_cd_key_ids;
 	// The browse row's 0x81 record a join from it connects with (no 0x41).
 	// Retained across direct-load runtime rebuilds.
 	opennova::inmatch::JoinerConnection::DiscoveredSession join_discovered_session;

@@ -61,6 +61,7 @@
 #include "terrain/foliage_frame_stats.h"
 #include "terrain/terrain_tile_info.h"
 #include "util/string_convert.h"
+#include "world/occlusion_frame.h" // occlusion_view_inputs (the game's main view's reads)
 
 namespace godot {
 
@@ -1302,15 +1303,14 @@ void MissionViewportApplier::collect_frame_() {
 		fields[i][1] = float(axes[i].y);
 		fields[i][2] = float(axes[i].z);
 	}
-	float tan_h = 0.0f, tan_v = 0.0f;
-	view.fov_h_deg = ObjectLodFrame::camera_tangents(camera_, tan_h, tan_v)
-			? float(Math::rad_to_deg(2.0 * std::atan(double(tan_h))))
-			: 90.0f;
+	// The game's main view's inputs, the same reads (world/occlusion_frame.h occlusion_view_inputs).
+	const OcclusionViewInputs in = occlusion_view_inputs(camera_, environment_, water_);
+	view.fov_h_deg = float(in.fov_h_deg);
 	const Vector2 size = viewport->get_visible_rect().size;
 	view.viewport_width = float(size.x);
 	view.viewport_height = float(size.y);
-	view.fog_dist_units = environment_ != nullptr ? environment_->get_fog_distance() : 1000.0f;
-	view.water_z_units = water_->is_water_render_active() ? water_->get_water_height() : -100000.0f;
+	view.fog_dist_units = float(in.fog_dist);
+	view.water_z_units = float(in.water_z);
 	view.force_indoors = opennova::world::mission_forces_indoors(mission_->scene().header().attrib_flags);
 	view.object_detail = opennova::renderer::kObjectLodDetailFreshProfile;
 	mission_->collect(view, verdicts_);

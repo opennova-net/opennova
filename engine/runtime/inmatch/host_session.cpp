@@ -738,8 +738,9 @@ void apply_first_mission_settings(HostOwner &owner, const HostConfig &cfg) {
 	ctx.weapon_restrictions.clear();
 	if (ctx.world == nullptr) return;
 	const world::WeaponTable &table = ctx.world->tables.weapons;
-	const int32_t armory = protocol_in_match(ctx.np_protocol.identity).armory_only_availability;
-	const int32_t mission_value = armory == 2 ? 3 : 2;
+	const auto &s2c_66 = protocol_in_match(ctx.np_protocol.identity).s2c_66;
+	const int32_t armory = s2c_66.armory_only_availability;
+	const int32_t mission_value = s2c_66.mission_availability();
 	std::vector<std::pair<std::string, int32_t>> pairs;
 	if (ctx.mission != nullptr) pairs = mission::mission_availability_pairs(*ctx.mission);
 	world::WeaponAvailability mission_words;
@@ -775,6 +776,8 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 	// [orig: CNapiGameSession_BuildAndCreateSession @0x5695B3 -> Server_InitNewRoundState
 	//  @0x51C92F (banlist.txt), @0x51CB3B (banned.txt)].
 	owner.ctx.bans.directory = cfg.ban_directory;
+	// The host's own CD-key ids, which its LAN join check compares (code 12).
+	owner.ctx.host_cd_keys = cfg.host_cd_keys;
 	owner.serve_and_play = cfg.serve_and_play; // the pump's step-5 loopback handling reads this
 	owner.pending_session_messages.clear();
 	owner.pending_session_datagrams.clear();

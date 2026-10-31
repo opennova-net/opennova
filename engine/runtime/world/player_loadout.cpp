@@ -280,7 +280,8 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
                                 WeaponInventory &inventory,
                                 bool &inventory_valid,
                                 const std::vector<WeaponKitEntry> &kit,
-                                int32_t player_class, bool validate_banned) {
+                                int32_t player_class, bool validate_banned,
+                                LoadoutApplySelect select) {
     // [orig: WeaponLoadout_ApplyFromBuffer @ 0x565cd0 offline leg.] A joiner
     // applies its kit before L exists; the inventory is sim-side state and the
     // entity stamps (class + equipped adm) defer to the joiner spawn block.
@@ -314,10 +315,23 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // empty kit stays empty (the armory all-NONE accept leaves the table bare).
     loadout.spawn_kit() = std::move(accepted);
     // The apply runs no Player_InitPlayer: the current slot word keeps its value
-    // through the rebuild's stamp, the rebuild selects nothing, and the held weapon (the
-    // body's AdmDef index) decides the word ahead of the apply's own select below.
+    // through the rebuild's stamp, the rebuild selects nothing, and the selected weapon
+    // (`select`: the body's held AdmDef index, or the kit's last primary row) decides the
+    // word ahead of the apply's own select below.
     const Entity *holder = world.registry.get(world.cached.local_player);
-    const uint8_t held_adm = holder != nullptr ? holder->equipped_adm_index : kAdmSlotNone;
+    uint8_t select_adm = holder != nullptr ? holder->equipped_adm_index : kAdmSlotNone;
+    if (select == LoadoutApplySelect::LastPrimaryRow) {
+        // The name-list walk keeps the last row whose def is a primary, from AdmDef 0
+        // (LoadoutApplySelect carries the witness).
+        select_adm = 0;
+        for (const WeaponKitEntry &entry : loadout.spawn_kit()) {
+            const int adm = world.tables.weapons.index_of(entry.name.c_str());
+            if (adm < 0) continue;
+            const WeaponTableEntry *def = world.tables.weapons.by_index(static_cast<uint8_t>(adm));
+            if (def != nullptr && def->weapon_class_slot == 1)
+                select_adm = static_cast<uint8_t>(adm);
+        }
+    }
     const int32_t current_slot = inventory.current_slot;
     local_loadout_rebuild(world, loadout, weapon, inventory, inventory_valid,
             /*select_spawn_default=*/false);
@@ -381,14 +395,15 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // entity's +0x37C (the run-promotion band) [orig:
     // NapiNPClientMsg_HandleWeaponLoadoutSync @0x4296f9 -> @0x425220].
     loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory, seat);
-    // The apply's select target: the held weapon's combo (its AdmDef's rank + 65 *
-    // category), stored into the current slot word; a body holding no weapon leaves the
-    // word, which the select then reads. [orig: NapiNPClientMsg_HandleWeaponLoadoutSync
-    //  @0x4290E0 (AdmDef_GetEntryByIndex(+0x2B0) @0x4296B4..0x4296BC, the store
-    //  @0x4296C8..0x4296D4, the word's read @0x4296DC); WeaponLoadout_ApplyFromBuffer
-    //  @0x565CD0 (@0x566250..0x566276, the word's read @0x56627E)]
-    if (const WeaponTableEntry *held = table.by_index(held_adm))
-        inventory.current_slot = held->category * weapon_combo::kRanksPerCategory + held->rank;
+    // The apply's select target: the selected weapon's combo (its AdmDef's rank + 65 *
+    // category; the held weapon's, or a protocol's pick, LoadoutApplySelect), stored into
+    // the current slot word; no def leaves the word, which the select then reads.
+    // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (AdmDef_GetEntryByIndex(+0x2B0)
+    //  @0x4296B4..0x4296BC, the store @0x4296C8..0x4296D4, the word's read @0x4296DC);
+    //  WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566250..0x566276, the word's read @0x56627E)]
+    if (const WeaponTableEntry *selected = table.by_index(select_adm))
+        inventory.current_slot =
+                selected->category * weapon_combo::kRanksPerCategory + selected->rank;
     select_current_slot(world, weapon, inventory, /*mount=*/true);
     return true;
 }

@@ -21,17 +21,29 @@ using AnimationMap = std::shared_ptr<const adm::AdmFile>;
 using BoneAnimation = std::shared_ptr<const bad::BadFile>;
 using SkeletalRig = std::shared_ptr<const anim::SkeletalClips>;
 
+// What the store's models hold. `Full`, the game's: everything the file reads into, which its
+// renderer draws from. `Simulation`, a headless server's (opennova-serve): what the simulation
+// reads, each model's render buffers freed as it loads (threedi_3di3_free_render_buffers). The
+// game's load keeps every def's model, its render model among it, for the match, a dedicated
+// host's too [orig: ThreediGp_LoadFromFile @0x5B5780 - GPM_LoadRenderModel per LOD @0x5B5B94;
+// GPM_LoadRenderModel @0x5B5000 - the vertex conversion @0x5B50CB, the index copy
+// @0x5B50EF..0x5B510C]; a server draws none of it, and the vertices are most of what every
+// items.def model holds.
+enum class ModelData : uint8_t { Full, Simulation };
+
 // One store per mounted source, shared by simulation and presentation. The
 // index outlives the store; returned immutable handles can outlive both,
 // including remounts and invalidation. Access is serialized by the embedder.
 class AssetStore : public anim::RigFiles {
 public:
-	explicit AssetStore(const ResourceIndex *index = nullptr);
+	explicit AssetStore(
+			const ResourceIndex *index = nullptr, ModelData model_data = ModelData::Full);
 	~AssetStore() override;
 	AssetStore(const AssetStore &) = delete;
 	AssetStore &operator=(const AssetStore &) = delete;
 
 	const ResourceIndex *index() const;
+	ModelData model_data() const;
 	bool has_source() const;
 	void invalidate() const;
 	Model model(const std::string &graphic) const;
@@ -63,8 +75,8 @@ std::string asset_file_name(const std::string &name, const char *extension, bool
 
 // Standalone documents use native ownership without creating a mount.
 // Mounted consumers always use AssetStore::model, which also refuses what the game's
-// load refuses (a version word below 0x103, a mesh type other than 1 or 2); these two
-// read any file the format reader reads.
+// load refuses (a version word below 0x103, a mesh type other than 1 or 2) and frees a
+// Simulation store's render buffers; these two read any file the format reader reads, whole.
 Model read_model_file(const std::string &path);
 // A model's, a table's or a clip's bytes read (the editor's documents hold one as their
 // base, its preview reads the project's); null when they do not read.

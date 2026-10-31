@@ -19,6 +19,8 @@
 #include <runtime/menu/options_screen.h>
 #include <runtime/profile/player_profiles.h>
 #include <base/gameprofile/game_type.h>
+#include <base/title/title.h>
+#include <formats/rtxt/rtxt.h>
 
 #include <cstdio>
 #include <map>
@@ -150,6 +152,9 @@ struct FakeFrame : MenuFrameSeam {
 	void set_widget_rect(int i, int l, int t, int r, int b) override {
 		note("rect " + std::to_string(i) + " " + std::to_string(l) + " " + std::to_string(t) +
 				" " + std::to_string(r) + " " + std::to_string(b));
+	}
+	void set_widget_image(int i, uint32_t states, const std::string &file) override {
+		note("image " + std::to_string(i) + " " + std::to_string(states) + " " + file);
 	}
 	void set_widget_caret(int i, int caret) override {
 		note("caret " + std::to_string(i) + " " + std::to_string(caret));
@@ -1097,6 +1102,15 @@ void test_mouse() {
 	rt.process_mouse(5, 5, true);
 	rt.process_mouse(5, 5, false);
 	CHECK(rec.count(MenuEvent::Kind::ListActivated) == 1);
+	// A locked row takes nothing, no pick and no event [orig: CListWnd_OnCommand @ 0x643df4;
+	// CListWnd_SetRowAvailable @ 0x644aa0].
+	rt.set_widget_items(13, {"a", "b", "c"});
+	rt.set_item_enabled(13, 2, false);
+	rec.events.clear();
+	rt.process_mouse(5, 5, true, /*double_click=*/true);
+	rt.process_mouse(5, 5, false);
+	CHECK(rec.count(MenuEvent::Kind::ValueChanged) == 0 && rec.count(MenuEvent::Kind::ListActivated) == 0);
+	rt.set_item_enabled(13, 2, true);
 	// A press a scrollbar part took never reaches the list.
 	rec.events.clear();
 	frame.scroll_owned = true;
@@ -1546,6 +1560,122 @@ void test_shell_flow() {
 	CHECK(flow.take_expansion_reload() == "last");
 }
 
+// DFX2-60: dfx2.exe's SINGLE_PLAYER tabs. The populate reads the campaigns into CA_LIST (a
+// campaign whose depends are incomplete locked), shows the picked campaign (campaign 0 with none
+// picked) in BRIEFING and CA_MISSION_LIST, and lists in IA_LIST the plain Co-op missions no
+// campaign holds or that are complete; the radios refresh ACCEPT from their tab's list; a pick on
+// either list names the mission and its campaign words. [orig: sub_560510 @0x560510, sub_560190
+// @0x560190, sub_55FAD0 @0x55fad0, sub_560BC0 @0x560bc0, SinglePlayer_RefreshAcceptOnActivate
+// @0x560710 (dfx2.exe)]
+void test_campaign_tabs() {
+	mnu::Document doc;
+	mnu::Screen screen;
+	screen.name = "SINGLE_PLAYER";
+	mnu::Window root = widget("ROOT", mnu::WindowType::Window);
+	root.children = {
+		widget("CA_LIST", mnu::WindowType::List),
+		widget("CA_MISSION_LIST", mnu::WindowType::List),
+		widget("BRIEFING", mnu::WindowType::Static),
+		widget("CAMPAIGN_IMAGE_OVERLAY", mnu::WindowType::Static),
+		widget("CAMPAIGN_IMAGE", mnu::WindowType::Static),
+		widget("IA_LIST", mnu::WindowType::List),
+		widget("IA_BRIEFING", mnu::WindowType::Static),
+		widget("ACCEPT", mnu::WindowType::Button),
+		widget("RADIO_TAB_CAMPAIGN", mnu::WindowType::Radio),
+		widget("RADIO_TAB_INSTANTACTION", mnu::WindowType::Radio)};
+	screen.roots.push_back(root);
+	doc.screens.push_back(screen);
+	MenuRuntime menu;
+	menu.open_document(&doc, "sp.mnu", "");
+	rtxt::File text;
+	text.sections.push_back({"Campaign", 2});
+	text.entries.push_back({"ID_A", "Alpha", {}, 0});
+	text.entries.push_back({"ID_A_BRIEF", "Alpha briefing", {}, 0});
+	const std::string def =
+			"complete_overlay done.tga\r\n"
+			"begin a\r\ntitle ID_A\r\nbriefing ID_A_BRIEF\r\nimage a.tga\r\n"
+			"mission c1.bms\r\nmission c2.bms c1.bms\r\nend\r\n"
+			"begin b\r\ntitle ID_B\r\ndepend a\r\nmission c3.bms\r\nend\r\n"
+			"begin untitled\r\nend\r\n";
+	campaign::CompletionTable progress{};
+	MenuFlow flow;
+	Title dfx2;
+	dfx2.sp_campaign_tabs = true;
+	flow.set_title(&dfx2);
+	flow.set_mission_controls({"IA_LIST", "CA_MISSION_LIST"}, {"BRIEFING"}, {"ACCEPT"});
+	flow.set_campaign_source(def, &text, progress);
+	const std::vector<MissionChoice> rows = {
+		{"c1.bms", "C1", "c1 briefing", game_type::kCoop, {}, "C1"},
+		{"c2.bms", "C2", "c2 briefing", game_type::kCoop, {}, ""},
+		{"c3.bms", "C3", "", game_type::kCoop, {}, "C3"},
+		{"free.bms", "*Free", "free briefing", game_type::kCoop, {}, "Free"},
+		{"obj.bms", "Objective", "", game_type::kObjectiveCoop, {}, "Objective"},
+		{"dm.bms", "DM", "", game_type::kDeathmatch, {}, "DM"}};
+	const int ca = menu.widget_id("CA_LIST"), missions = menu.widget_id("CA_MISSION_LIST");
+	const int ia = menu.widget_id("IA_LIST"), accept = menu.widget_id("ACCEPT");
+	const int briefing = menu.widget_id("BRIEFING"), ia_briefing = menu.widget_id("IA_BRIEFING");
+	const int overlay = menu.widget_id("CAMPAIGN_IMAGE_OVERLAY");
+	// CA_MISSION_LIST's own seed is the reader's: it fills nothing.
+	flow.seed_missions(menu, missions, rows);
+	CHECK(menu.item_count(missions) == 0 && menu.item_count(ca) == 0);
+	flow.seed_missions(menu, ia, rows);
+	// The titled campaigns, b locked (a incomplete); none picked, campaign 0 shown.
+	CHECK(menu.get_widget_items(ca) == (std::vector<std::string>{"Alpha", "??ID_B??"}));
+	CHECK(menu.is_item_enabled(ca, 0) && !menu.is_item_enabled(ca, 1) && menu.selected_row(ca) == -1);
+	CHECK(menu.get_widget_text(briefing) == "Alpha briefing");
+	// c2 waits on c1; a title-less row shows its file name.
+	CHECK(menu.get_widget_items(missions) == (std::vector<std::string>{"C1"}));
+	CHECK(!menu.is_widget_shown(overlay) && flow.campaign_image() == "a.tga");
+	// CAMPAIGN_IMAGE's default appearance takes the image [orig: CWnd_SetAppearanceTexture
+	//  @0x560464 (dfx2.exe)].
+	const int image = menu.widget_id("CAMPAIGN_IMAGE");
+	CHECK(menu.widget_image(image) == "a.tga" && menu.widget_image(overlay).empty());
+	// IA_LIST: free.bms alone (the campaign ones incomplete, objective Co-op out, DM out).
+	CHECK(menu.get_widget_items(ia) == (std::vector<std::string>{"*Free"}));
+	CHECK(menu.is_widget_disabled(accept) && menu.get_widget_text(ia_briefing).empty());
+	// The campaign tab's radio: no mission picked, ACCEPT stays off.
+	CHECK(flow.activate_tab(menu, "RADIO_TAB_CAMPAIGN") && menu.is_widget_disabled(accept));
+	CHECK(!flow.activate_tab(menu, "ACCEPT"));
+	// A campaign mission's pick: its briefing in BRIEFING, its image, ACCEPT on, its words.
+	// (A press picks the row in the list, then the pick reaches the flow.)
+	menu.select_row(missions, 0, false);
+	flow.select_mission(menu, missions, 0, "");
+	CHECK(flow.selected_mission() == "c1.bms" && !menu.is_widget_disabled(accept));
+	CHECK(menu.get_widget_text(briefing) == "c1 briefing" && flow.campaign_image() == "c1.tga");
+	CHECK(menu.widget_image(image) == "c1.tga"); // [orig: sub_560BC0 @0x560cac (dfx2.exe)]
+	CHECK(flow.selected_campaign().campaign == 0 && flow.selected_campaign().campaign_mission == 0);
+	CHECK(menu.get_widget_text(ia_briefing).empty());
+	// The instant-action radio: IA_LIST has none picked, ACCEPT off; its pick writes IA_BRIEFING.
+	CHECK(flow.activate_tab(menu, "RADIO_TAB_INSTANTACTION") && menu.is_widget_disabled(accept));
+	menu.select_row(ia, 0, false);
+	flow.select_mission(menu, ia, 0, "");
+	CHECK(flow.selected_mission() == "free.bms" && flow.selected_campaign().campaign == -1);
+	CHECK(menu.get_widget_text(ia_briefing) == "free briefing" && menu.get_widget_text(briefing) == "c1 briefing");
+	CHECK(flow.activate_tab(menu, "RADIO_TAB_INSTANTACTION") && !menu.is_widget_disabled(accept));
+	// The campaign list's pick shows campaign a again, ACCEPT off.
+	CHECK(flow.select_campaign(menu, ca, 0) && menu.is_widget_disabled(accept));
+	CHECK(!flow.select_campaign(menu, ia, 0));
+	// Campaign a complete: b unlocked, the overlay shown, c1/c2 into IA_LIST; the pick stays.
+	progress[0][0] = progress[0][1] = 1;
+	flow.set_campaign_source(def, &text, progress);
+	flow.seed_missions(menu, ia, rows);
+	CHECK(menu.is_item_enabled(ca, 1) && menu.selected_row(ca) == 0 && menu.is_widget_shown(overlay));
+	// The shown overlay takes campaign.def's complete_overlay [orig: @0x5604a4 (dfx2.exe)].
+	CHECK(menu.widget_image(overlay) == "done.tga" && menu.widget_image(image) == "a.tga");
+	CHECK(menu.get_widget_items(missions) == (std::vector<std::string>{"C1", "c2.bms"}));
+	CHECK(menu.get_widget_items(ia) == (std::vector<std::string>{"C1", "C2", "*Free"}));
+	CHECK(flow.select_campaign(menu, ca, 1));
+	CHECK(menu.get_widget_items(missions) == (std::vector<std::string>{"C3"}) && !menu.is_widget_shown(overlay));
+	CHECK(menu.get_widget_text(briefing).empty());
+
+	// Jointops.exe's screen: no tabs, every waypoint-family mission in IA_LIST, BRIEFING its pane.
+	MenuFlow jo;
+	jo.set_mission_controls({"IA_LIST", "CA_MISSION_LIST"}, {"BRIEFING"}, {"ACCEPT"});
+	jo.seed_missions(menu, ia, rows);
+	CHECK(menu.item_count(ia) == 5);
+	CHECK(!jo.select_campaign(menu, ca, 0) && !jo.activate_tab(menu, "RADIO_TAB_CAMPAIGN"));
+}
+
 void test_host_dialog() {
 	auto doc = flow_document();
 	MenuRuntime menu;
@@ -1556,7 +1686,7 @@ void test_host_dialog() {
 		{"team.bms", "Team", "", game_type::kTeamDeathmatch},
 		{"obj.bms", "Objective", "", game_type::kObjectiveCoop},
 		{"dm.bms", "Deathmatch", "", game_type::kDeathmatch}};
-	host.seed(menu, rows);
+	host.seed(menu, rows, Title{});
 	const int list = menu.widget_id("MISSION_LIST"), table = menu.widget_id("SELECTED_MISSIONS");
 	CHECK(menu.item_count(list) == 3 && menu.selected_row(list) == -1);
 	CHECK(!host.can_start() && menu.is_widget_disabled(menu.widget_id("START_GAME")));
@@ -1594,7 +1724,7 @@ void test_host_dialog() {
 	CHECK(menu.selected_row(country) == 1);
 	HostDialog::select_location(menu, country, "unknown");
 	CHECK(menu.selected_row(country) == 1);
-	host.seed(menu, rows);
+	host.seed(menu, rows, Title{});
 	CHECK(!host.can_start() && host.selected_missions().empty());
 }
 
@@ -1685,10 +1815,10 @@ void test_row_switch_callers() {
 	menu.select_row(game_type, 1, false);
 	HostDialog host;
 	host.seed(menu, { { "dm.bms", "Deathmatch", "", game_type::kDeathmatch },
-			{ "sp.bms", "Training", "", game_type::kCoop } });
+			{ "sp.bms", "Training", "", game_type::kCoop } }, Title{});
 	CHECK(menu.is_item_enabled(game_type, 0) && !menu.is_item_enabled(game_type, 1));
 	CHECK(menu.selected_row(game_type) == 0);
-	host.seed(menu, { { "team.bms", "Team", "", game_type::kTeamDeathmatch } });
+	host.seed(menu, { { "team.bms", "Team", "", game_type::kTeamDeathmatch } }, Title{});
 	CHECK(menu.is_item_enabled(game_type, 0) && menu.is_item_enabled(game_type, 1));
 
 	mnu::Document armory;
@@ -1712,6 +1842,76 @@ void test_row_switch_callers() {
 	for (int row = 0; row < 5; ++row) CHECK(weapon.is_item_enabled(spin, row));
 }
 
+// DFX2-72: dfx2.exe's host screen lists its combat-vehicle missions (the BMS header's mission
+// type 2) under GAME_TYPE 254 and not under their own game type, enables 254 at its init when one
+// is in the catalog, writes every ADD's Switch 0, and its remove re-shows a removed one under its
+// own value too, until the next filter; Jointops.exe lists every mission under its own value.
+// [orig: HostDialog_FilterMissionListByGameType @0x555180 (@0x555300..0x555334);
+//  UI_InitHostSettingsDialog @0x556b30 (@0x556cd5..0x556d18);
+//  HostDialog_SelectedMissionsTableEvent's chunk @0x555df0 (@0x556076, @0x555f87..0x555faf)
+//  (dfx2.exe); HostDialog_FilterMissionListByGameType @0x556fe0 (@0x55717c)]
+void test_host_dialog_vehicle_missions() {
+	auto doc = flow_document();
+	for (mnu::Window &w : doc.screens[0].roots[0].children)
+		if (w.name == "GAME_TYPE") w.items.items.push_back(item("Vehicle", "254"));
+	MenuRuntime menu;
+	menu.open_document(&doc, "mp.mnu", "");
+	const int spin = menu.widget_id("GAME_TYPE"), list = menu.widget_id("MISSION_LIST");
+	const int table = menu.widget_id("SELECTED_MISSIONS");
+	const std::vector<MissionChoice> rows = {
+		{"team.bms", "Team", "", game_type::kTeamDeathmatch, {}, "", 1},
+		{"veh.bms", "Vehicles", "", game_type::kTeamDeathmatch, {}, "", 2},
+		{"dm.bms", "Deathmatch", "", game_type::kDeathmatch, {}, "", 1}};
+	const auto key = [](const char *, const char *, const char *fallback) { return std::string(fallback); };
+	HostDialog jo;
+	jo.seed(menu, rows, Title{});
+	CHECK(menu.item_count(list) == 3 && !menu.is_item_enabled(spin, 2));
+	menu.select_row(spin, 1, false);
+	jo.filter(menu);
+	CHECK(menu.item_count(list) == 2 && menu.item_text(list, 1) == "Vehicles");
+	menu.select_row(spin, 0, false);
+	jo.filter(menu);
+	menu.set_selected_set(list, {0, 1});
+	jo.add_selected(menu, key);
+	CHECK(jo.selected_launch_options() == (std::vector<int32_t>{1, 1}));
+
+	Title dfx2;
+	dfx2.host_vehicle_missions = true;
+	dfx2.host_switch_starts_off = true;
+	HostDialog host;
+	host.seed(menu, rows, dfx2);
+	CHECK(menu.item_count(list) == 3 && menu.is_item_enabled(spin, 1) && menu.is_item_enabled(spin, 2));
+	menu.select_row(spin, 1, false);
+	host.filter(menu);
+	CHECK(menu.item_count(list) == 1 && menu.item_text(list, 0) == "Team");
+	menu.select_row(spin, 2, false);
+	host.filter(menu);
+	CHECK(menu.item_count(list) == 1 && menu.item_text(list, 0) == "Vehicles");
+	// The ADD writes every Switch 0.
+	menu.select_row(spin, 0, false);
+	host.filter(menu);
+	menu.set_selected_set(list, {0, 1});
+	host.add_selected(menu, key);
+	CHECK(host.selected_launch_options() == (std::vector<int32_t>{0, 0}));
+	CHECK(menu.table_cell_text(table, 0, 2) == "0" && menu.table_cell_text(table, 1, 2) == "0");
+	CHECK(menu.item_count(list) == 1 && menu.item_text(list, 0) == "Deathmatch");
+	// Under Team, the remove re-shows the vehicle mission it took back with the team one; the
+	// next filter hides it again.
+	menu.select_row(spin, 1, false);
+	host.filter(menu);
+	CHECK(menu.item_count(list) == 0);
+	menu.table_select_row(table, 0, false);
+	menu.table_select_row(table, 1, true);
+	host.remove_selected(menu);
+	CHECK(menu.table_row_count(table) == 0 && menu.item_count(list) == 2 &&
+			menu.item_text(list, 1) == "Vehicles");
+	host.filter(menu);
+	CHECK(menu.item_count(list) == 1 && menu.item_text(list, 0) == "Team");
+	// No combat-vehicle mission in the catalog: 254 stays off.
+	host.seed(menu, {rows[0], rows[2]}, dfx2);
+	CHECK(!menu.is_item_enabled(spin, 2));
+}
+
 // The shipped MISSION_LIST is a LIST whose ITEMS are MULTISELECT: a click keeps a
 // selection set, ADD takes the picked mission, and the rebuilt rows drop the set (its
 // indexes named the old rows), so a second ADD adds nothing and no row stays
@@ -1728,7 +1928,7 @@ void test_host_dialog_multiselect() {
 	HostDialog host;
 	host.seed(menu, {{"team.bms", "Team", "", game_type::kTeamDeathmatch},
 			{"obj.bms", "Objective", "", game_type::kObjectiveCoop},
-			{"dm.bms", "Deathmatch", "", game_type::kDeathmatch}});
+			{"dm.bms", "Deathmatch", "", game_type::kDeathmatch}}, Title{});
 	const int list = menu.widget_id("MISSION_LIST");
 	const int index = menu.frame_index(list);
 	CHECK(index >= 0 && menu.item_count(list) == 3);
@@ -1782,7 +1982,7 @@ void test_options_screen() {
 	MenuRuntime menu;
 	menu.open_document(&doc, "options.mnu", "");
 	OptionsScreen options;
-	options.prepare(menu, nullptr);  // no profile: the catalog defaults
+	options.prepare(menu, nullptr, opennova::controls::default_catalog());  // no profile: the catalog defaults
 	const int table = menu.widget_id("CONTROL_MAPPING");
 	CHECK(options.is_surface() && menu.table_row_count(table) > 40);
 	CHECK(menu.table_cell_text(table, 0, 2) == "W or Up");
@@ -1938,7 +2138,7 @@ void test_options_screen() {
 
 	auto non_options = flow_document();
 	menu.open_document(&non_options, "sp.mnu", "");
-	options.prepare(menu, nullptr);
+	options.prepare(menu, nullptr, opennova::controls::default_catalog());
 	CHECK(!options.is_surface());
 	CHECK(options.activate(menu, nullptr, menu.widget_id("DEFAULTS")) == OptionsScreen::None);
 	CHECK(options.activate(menu, nullptr, menu.widget_id("OPT_CANCEL")) == OptionsScreen::None);
@@ -1960,18 +2160,30 @@ void test_options_profile() {
 	for (const char *name : {"INVERT_MOUSE", "ENABLE_JOYSTICK", "INVERT_JOYSTICK",
 			"ENABLE_FORCE_FEEDBACK", "OPTIONS_AUTORELOAD", "OPTIONS_AUTOMEDIC"})
 		root.children.push_back(widget(name, mnu::WindowType::CheckBox));
+	root.children.push_back(widget("ADVANCED_TAB", mnu::WindowType::Static));
+	root.children.push_back(widget("ADVANCED_OUTLINE", mnu::WindowType::Window));
 	MenuRuntime menu;
 	menu.open_document(&doc, "options.mnu", "");
 	playersav::ProfileRecord record;
-	record.bindings = profile::default_binding_table();
+	record.bindings = profile::default_binding_table(opennova::controls::default_catalog());
 	record.invert_mouse = 1;
 	record.mouse_sensitivity = 300;
 	record.auto_medic_off = 1;
 	for (playersav::BindingEntry &e : record.bindings)
 		if (e.token == "move_forward") e.primary = 'K';
 	OptionsScreen options;
-	options.prepare(menu, &record);
+	options.prepare(menu, &record, opennova::controls::default_catalog());
 	options.apply_policy(menu);
+	// DFX2-62: Jointops.exe's populate leaves the ADVANCED pair shown, dfx2.exe's hides it
+	// [orig: sub_55AB20 @0x55b829..0x55b862 (dfx2.exe)].
+	Title jo, dfx2;
+	dfx2.options_hides_advanced = true;
+	options.apply_title(menu, jo);
+	CHECK(menu.is_widget_shown(menu.widget_id("ADVANCED_TAB")) &&
+			menu.is_widget_shown(menu.widget_id("ADVANCED_OUTLINE")));
+	options.apply_title(menu, dfx2);
+	CHECK(!menu.is_widget_shown(menu.widget_id("ADVANCED_TAB")) &&
+			!menu.is_widget_shown(menu.widget_id("ADVANCED_OUTLINE")));
 	options.seed_profile(menu, &record);
 	const int table = menu.widget_id("CONTROL_MAPPING");
 	CHECK(menu.table_cell_text(table, 0, 2) == "K or Up");  // the record's table
@@ -2027,7 +2239,7 @@ void test_options_profile() {
 	menu.open_document(&doc, "game.mnu", "");
 	record.auto_reload = 0;
 	record.auto_medic_off = 0;
-	options.prepare(menu, &record);
+	options.prepare(menu, &record, opennova::controls::default_catalog());
 	options.apply_policy(menu);
 	options.seed_profile(menu, &record);
 	CHECK(!menu.is_widget_checked(menu.widget_id("OPTIONS_AUTORELOAD")));
@@ -2047,10 +2259,10 @@ void test_options_profile() {
 
 	// A dialog holding XHAIR_APPEARANCE: its Accept also reloads the crosshair art in
 	// alpha mode [orig: UI_IngameOptionsDialogEventHandler @0x554e40 - the gate
-	// @0x5551ca, sub_59EEF0 @0x555201] (D-HUD-48); its Cancel does not.
+	// @0x5551ca, HUD_LoadCrosshairTextureAlpha @0x555201] (D-HUD-48); its Cancel does not.
 	root.children.push_back(widget("XHAIR_APPEARANCE", mnu::WindowType::SpinList));
 	menu.open_document(&doc, "game.mnu", "");
-	options.prepare(menu, &record);
+	options.prepare(menu, &record, opennova::controls::default_catalog());
 	CHECK(options.activate(menu, &record, menu.widget_id("OPT_ACCEPT")) ==
 		(OptionsScreen::CommitPreview | OptionsScreen::ApplyControls |
 				OptionsScreen::ReloadCrosshairAlpha));
@@ -2149,10 +2361,10 @@ void test_options_front_back() {
 	MenuRuntime menu;
 	menu.open_document(&doc, "options.mnu", "OPTIONS");
 	playersav::ProfileRecord record;
-	record.bindings = profile::default_binding_table();
+	record.bindings = profile::default_binding_table(opennova::controls::default_catalog());
 	record.invert_mouse = 1;
 	OptionsScreen options;
-	options.prepare(menu, &record);
+	options.prepare(menu, &record, opennova::controls::default_catalog());
 	options.apply_policy(menu);
 	options.seed_profile(menu, &record);
 	const int back = menu.find_control("OPTIONS", "BACK");
@@ -2178,7 +2390,7 @@ void test_options_front_back() {
 	for (const char *name : {"BACK", "OPT_ACCEPT"})
 		ingame.screens[0].roots[0].children.push_back(widget(name, mnu::WindowType::Button));
 	menu.open_document(&ingame, "game.mnu", "");
-	options.prepare(menu, &record);
+	options.prepare(menu, &record, opennova::controls::default_catalog());
 	CHECK(options.is_surface());
 	CHECK(options.activate(menu, &record, menu.widget_id("BACK")) == OptionsScreen::None);
 }
@@ -2551,7 +2763,9 @@ int main() {
 	test_duplicate_screens();
 	test_mission_choice();
 	test_shell_flow();
+	test_campaign_tabs();
 	test_host_dialog();
+	test_host_dialog_vehicle_missions();
 	test_host_dialog_multiselect();
 	test_spin_rows_enabled_and_parts();
 	test_row_switch_callers();

@@ -44,7 +44,7 @@ import type { HostedServersResponse } from '../../types/hostedServer';
 import type { MyServer } from '../../types/myServers';
 import type { MyProjects, Release } from '../../types/products';
 import { hasLiveTier, subscriptionStatusLabel } from '../../utils/billingView';
-import { formatCount, formatDate, timeMs } from '../../utils/format';
+import { countLabel, formatCount, formatDate, timeMs } from '../../utils/format';
 import { replacedServers } from '../../utils/history';
 import { startBlock } from '../../utils/myServersView';
 import { releaseLabel } from '../../utils/productsView';
@@ -78,8 +78,6 @@ const problems = ref<{ what: string; message: string }[]>([]);
 const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
 
-const plural = (n: number, noun: string) => `${formatCount(n)} ${noun}${n === 1 ? '' : 's'}`;
-
 // "Could not read your servers and billing: <why>", one sentence per reason.
 const problemText = computed(() => {
   const byMessage = new Map<string, string[]>();
@@ -104,7 +102,7 @@ const serversDetail = computed(() => {
   const h = hosting.value;
   if (!h) return undefined;
   const count = live.value.length + selfHosted.value.length;
-  if (count > 0) return `${plural(players.value, 'player')} on ${count === 1 ? 'it' : 'them'}`;
+  if (count > 0) return `${countLabel(players.value, 'player')} on ${count === 1 ? 'it' : 'them'}`;
   if (startBlock(h) === 'off') return 'Hosting is off';
   return h.entitlement.max_servers > 0 ? `${h.entitlement.used} of ${h.entitlement.max_servers} in use` : 'No hosting yet';
 });
@@ -130,7 +128,7 @@ const billingDetail = computed(() => {
     const when = s.current_period_end ? `, ${s.cancel_at_period_end ? 'ends' : 'renews'} ${formatDate(s.current_period_end)}` : '';
     return `${subscriptionStatusLabel(s.status)}${when}`;
   }
-  return b.own_machines > 0 ? plural(b.own_machines, 'dedicated machine') : undefined;
+  return b.own_machines > 0 ? countLabel(b.own_machines, 'dedicated machine') : undefined;
 });
 
 // A payment of the account's past due: its billing says so, or its hosting

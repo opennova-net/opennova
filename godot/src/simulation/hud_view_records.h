@@ -324,6 +324,10 @@ public:
 	int get_medic_cooldown_ticks() const { return value_.medic_cooldown_ticks; }
 	int get_medic_request_serial() const { return value_.medic_request_serial; }
 	bool get_show_team_buttons() const { return value_.team_buttons_shown; }
+	bool get_show_loadout() const { return value_.loadout_shown; }
+	bool get_restart_level() const { return value_.restart_level; }
+	bool get_shroud_main() const { return value_.shroud_main; }
+	bool get_content_refresh() const { return value_.content_refresh; }
 };
 
 } // namespace godot

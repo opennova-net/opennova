@@ -45,6 +45,7 @@ static_assert(godot::HudPos::MESSAGE_SLOT_COUNT ==
 		opennova::hud::kMessageSlotCount);
 static_assert(godot::HudPos::LOADING_PRESENT_INTERVAL_MS ==
 		opennova::hud::kLoadingPresentIntervalMs);
+static_assert(godot::HudPos::LOADING_RESTART_STAGE == opennova::hud::kLoadingRestartStage);
 static_assert(godot::HudPos::BINOCULAR_DIGIT_STEP ==
 		opennova::hud::kBinocularDigitStep);
 static_assert(godot::HudPos::VIEW_DIGIT_CELL ==
@@ -110,15 +111,22 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("objective_header", "gametext"), &HudPos::objective_header);
 	ClassDB::bind_static_method("HudPos", D_METHOD("objective_directive", "mission", "win", "header_id"), &HudPos::objective_directive);
 	ClassDB::bind_static_method("HudPos", D_METHOD("triggered_text", "mission", "text_id"), &HudPos::triggered_text);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_font_small"), &HudPos::loading_font_small);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_font_large"), &HudPos::loading_font_large);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_font_small", "image_width"), &HudPos::loading_font_small);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_font_large", "image_width"), &HudPos::loading_font_large);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_progress_line_count", "stage"), &HudPos::loading_progress_line_count);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_progress_line_key", "line"), &HudPos::loading_progress_line_key);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_progress_line_fallback", "line"), &HudPos::loading_progress_line_fallback);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_screen_stage", "percent"), &HudPos::loading_screen_stage);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_key"), &HudPos::loading_msg_label_key);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_fallback"), &HudPos::loading_msg_label_fallback);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_present_due", "elapsed_ms", "reported_changed"), &HudPos::loading_present_due);
 	ClassDB::bind_static_method("HudPos",
 			D_METHOD("composite_loading_session_text", "background", "large", "small", "title",
-					"mission", "game_type", "label", "custom_text", "band_right"),
+					"mission", "game_type", "label", "custom_text", "custom_background"),
 			&HudPos::composite_loading_session_text);
+	ClassDB::bind_static_method("HudPos",
+			D_METHOD("composite_loading_progress_lines", "background", "small", "lines"),
+			&HudPos::composite_loading_progress_lines);
 	ClassDB::bind_static_method("HudPos", D_METHOD("splash_blink_on", "tick_ms"),
 			&HudPos::splash_blink_on);
 	ClassDB::bind_static_method("HudPos", D_METHOD("splash_arrow_size", "art", "surface"),
@@ -133,13 +141,17 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_continue_font"), &HudPos::loading_splash_continue_font);
 	ClassDB::bind_static_method("HudPos", D_METHOD("draw_splash_continue", "item", "font", "pages", "text", "size", "phase_on"), &HudPos::draw_splash_continue);
 	ClassDB::bind_static_method("HudPos",
-			D_METHOD("draw_cine_text", "item", "font", "pages", "event", "text", "size"),
+			D_METHOD("draw_cine_text", "item", "font", "pages", "event", "game_text", "banner",
+					"size"),
 			&HudPos::draw_cine_text);
+	ClassDB::bind_static_method("HudPos", D_METHOD("cine_font_file", "event", "width"),
+			&HudPos::cine_font_file);
 	ClassDB::bind_static_method("HudPos", D_METHOD("font_page_textures", "font"), &HudPos::font_page_textures);
 	ClassDB::bind_static_method("HudPos", D_METHOD("glyph_shader"), &HudPos::glyph_shader);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_crosshair_rect"), &HudPos::binocular_crosshair_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_digit_pos"), &HudPos::binocular_digit_pos);
-	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_rect"), &HudPos::nvg_scale_rect);
+	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_rect", "resource_root"), &HudPos::nvg_scale_rect,
+			DEFVAL(Ref<ResourceRoot>()));
 	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_modulate"), &HudPos::nvg_scale_modulate);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_range_step", "current", "target"), &HudPos::binocular_range_step);
 	ClassDB::bind_static_method("HudPos", D_METHOD("view_effect_texture", "which"), &HudPos::view_effect_texture);
@@ -160,6 +172,7 @@ void HudPos::_bind_methods() {
 	BIND_CONSTANT(MESSAGE_TEXT_MAX);
 	BIND_CONSTANT(MESSAGE_SLOT_COUNT);
 	BIND_CONSTANT(LOADING_PRESENT_INTERVAL_MS);
+	BIND_CONSTANT(LOADING_RESTART_STAGE);
 	BIND_CONSTANT(BINOCULAR_DIGIT_STEP);
 	BIND_CONSTANT(VIEW_DIGIT_CELL);
 	BIND_CONSTANT(VIEW_TEXTURE_BINOCULAR_MASK);
@@ -316,8 +329,27 @@ int HudPos::waypoint_distance_m(const Vector2 &p_ground_delta) {
 	return opennova::hud::waypoint_distance_m(p_ground_delta.x, p_ground_delta.y);
 }
 
-String HudPos::loading_font_small() { return opennova::hud::kLoadingFontSmall; }
-String HudPos::loading_font_large() { return opennova::hud::kLoadingFontLarge; }
+String HudPos::loading_font_small(int p_image_width) {
+	const char *name = opennova::hud::loading_fonts(
+			ResourceRoot::session_title(Ref<ResourceRoot>()), p_image_width).small;
+	return name != nullptr ? String(name) : String();
+}
+String HudPos::loading_font_large(int p_image_width) {
+	const char *name = opennova::hud::loading_fonts(
+			ResourceRoot::session_title(Ref<ResourceRoot>()), p_image_width).large;
+	return name != nullptr ? String(name) : String();
+}
+int HudPos::loading_progress_line_count(int p_stage) {
+	return opennova::hud::loading_progress_line_count(
+			ResourceRoot::session_title(Ref<ResourceRoot>()), p_stage);
+}
+String HudPos::loading_progress_line_key(int p_line) {
+	return String(opennova::hud::loading_progress_line_key(p_line).c_str());
+}
+String HudPos::loading_progress_line_fallback(int p_line) {
+	return String(opennova::hud::loading_progress_line_fallback(p_line).c_str());
+}
+int HudPos::loading_screen_stage(int p_percent) { return opennova::hud::loading_screen_stage(p_percent); }
 String HudPos::loading_msg_label_key() { return opennova::hud::kLoadingServerMessageLabelKey; }
 String HudPos::loading_msg_label_fallback() { return opennova::hud::kLoadingServerMessageLabelFallback; }
 
@@ -389,7 +421,7 @@ String HudPos::loading_gametype_text_key(int p_game_type) {
 Ref<Image> HudPos::composite_loading_session_text(const Ref<Image> &p_background,
 		const Ref<FntResource> &p_large, const Ref<FntResource> &p_small, const String &p_title,
 		const String &p_mission, const String &p_game_type, const String &p_label,
-		const String &p_custom_text, int p_band_right) {
+		const String &p_custom_text, bool p_custom_background) {
 	if (p_background.is_null() || p_background->is_empty()) return Ref<Image>();
 	Ref<Image> image = p_background->duplicate();
 	if (image->is_compressed()) image->decompress();
@@ -401,7 +433,26 @@ Ref<Image> HudPos::composite_loading_session_text(const Ref<Image> &p_background
 			p_large.is_valid() ? p_large->parsed_font() : nullptr,
 			p_small.is_valid() ? p_small->parsed_font() : nullptr, code_page_text(p_title),
 			code_page_text(p_mission), code_page_text(p_game_type), code_page_text(p_label),
-			code_page_text(p_custom_text), p_band_right);
+			code_page_text(p_custom_text), p_custom_background,
+			ResourceRoot::session_title(Ref<ResourceRoot>()));
+	return Image::create_from_data(surface.width, surface.height, false, Image::FORMAT_RGBA8, data);
+}
+
+Ref<Image> HudPos::composite_loading_progress_lines(const Ref<Image> &p_background,
+		const Ref<FntResource> &p_small, const PackedStringArray &p_lines) {
+	if (p_background.is_null() || p_background->is_empty()) return Ref<Image>();
+	Ref<Image> image = p_background->duplicate();
+	if (image->is_compressed()) image->decompress();
+	image->clear_mipmaps();
+	image->convert(Image::FORMAT_RGBA8);
+	PackedByteArray data = image->get_data();
+	opennova::hud::LoadingSurface surface{ data.ptrw(), image->get_width(), image->get_height() };
+	std::vector<std::string> lines;
+	lines.reserve(static_cast<size_t>(p_lines.size()));
+	for (int64_t i = 0; i < p_lines.size(); ++i) lines.push_back(code_page_text(p_lines[i]));
+	opennova::hud::composite_loading_progress_lines(surface,
+			p_small.is_valid() ? p_small->parsed_font() : nullptr, lines,
+			ResourceRoot::session_title(Ref<ResourceRoot>()));
 	return Image::create_from_data(surface.width, surface.height, false, Image::FORMAT_RGBA8, data);
 }
 
@@ -448,7 +499,8 @@ String HudPos::loading_splash_continue_key() {
 }
 
 String HudPos::loading_splash_continue_font() {
-	return String(opennova::hud::kSplashContinueFont);
+	return String(opennova::hud::hud_large_label_font(
+			ResourceRoot::session_title(Ref<ResourceRoot>())));
 }
 
 
@@ -461,23 +513,33 @@ Array HudPos::draw_splash_continue(CanvasItem *p_item, const Ref<FntResource> &p
 	opennova::hud::GameFont font;
 	font.set_font(parsed);
 	const opennova::hud::GameFontRun run =
-			opennova::hud::splash_continue_run(font, text.c_str(), p_size.x, p_size.y, p_phase_on);
+			opennova::hud::splash_continue_run(font, text.c_str(), p_size.x, p_size.y, p_phase_on,
+					ResourceRoot::session_title(Ref<ResourceRoot>()));
 	return draw_glyph_runs(p_item, run, p_pages);
 }
 
 Array HudPos::draw_cine_text(CanvasItem *p_item, const Ref<FntResource> &p_font,
-		const Array &p_pages, const Ref<CineEventRecord> &p_event, const String &p_text,
-		const Vector2i &p_size) {
+		const Array &p_pages, const Ref<CineEventRecord> &p_event, const String &p_game_text,
+		const String &p_banner, const Vector2i &p_size) {
 	const opennova::fnt::fnt_font_t *parsed = p_font.is_valid() ? p_font->parsed_font() : nullptr;
 	if (parsed == nullptr || p_event.is_null() || p_size.x <= 0 || p_size.y <= 0) return Array();
 	opennova::hud::GameFont font;
 	font.set_font(parsed);
-	// The large label slot at its scale for this width; the viewport the whole screen.
-	const float scale = opennova::hud::hud_label_font_choice(p_size.x).large_scale;
+	// The node's label slot at its scale for this width; the viewport the whole screen.
+	const float scale = opennova::hud::cine_font_scale(
+			opennova::hud::hud_label_font_choice(p_size.x, ResourceRoot::session_title(Ref<ResourceRoot>())),
+			opennova::hud::cine_event_font(p_event->value()));
 	const opennova::hud::CineViewport view{0, 0, p_size.x, p_size.y};
 	const opennova::hud::GameFontRun run = opennova::hud::cine_event_text_run(p_event->value(),
-			code_page_text(p_text), font, scale, view);
+			code_page_text(p_game_text), code_page_text(p_banner), font, scale, view);
 	return draw_glyph_runs(p_item, run, p_pages);
+}
+
+String HudPos::cine_font_file(const Ref<CineEventRecord> &p_event, int p_width) {
+	if (p_event.is_null()) return String();
+	return String(opennova::hud::cine_font_file(
+			opennova::hud::hud_label_font_choice(p_width, ResourceRoot::session_title(Ref<ResourceRoot>())),
+			opennova::hud::cine_event_font(p_event->value())));
 }
 
 Array HudPos::font_page_textures(const Ref<FntResource> &p_font) {
@@ -506,9 +568,10 @@ Vector2 HudPos::binocular_digit_pos() {
 			opennova::hud::kBinocularDigitY);
 }
 
-Rect2 HudPos::nvg_scale_rect() {
-	return Rect2(opennova::hud::kNvgScaleX, opennova::hud::kNvgScaleY,
-			opennova::hud::kNvgScaleW, opennova::hud::kNvgScaleH);
+Rect2 HudPos::nvg_scale_rect(const Ref<ResourceRoot> &p_root) {
+	// The root's title's rect (DFX2-44): the session's, or an editor preview's project game.
+	const opennova::hud::NvgScaleRect r = opennova::hud::nvg_scale_rect(ResourceRoot::session_title(p_root));
+	return Rect2(r.x, r.y, r.w, r.h);
 }
 
 Color HudPos::nvg_scale_modulate() {

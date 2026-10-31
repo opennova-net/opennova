@@ -22,31 +22,6 @@
 
 namespace opennova::world {
 
-// A gunner riding an attached child still sits on the child's last frame: its
-// own body update (the gun channel, its look, its pose) comes later this tick,
-// in the pool-0 walk (finish_entity_update). Refresh only its seat frame on the
-// child the pool-1 walk posed. One pass over the live rows (a rider is found by
-// its own mount word, wherever its seat is held).
-static void refresh_attached_child_riders(World &world) {
-    devtools::ProfileLap lap(world.profile);
-    world.registry.for_each([&](const Entity &snapshot) {
-        if (!snapshot.mounted) return;
-        Entity *occupant = world.registry.get(snapshot.handle);
-        const Entity *target = world.registry.get(snapshot.mount_target);
-        Seat seat;
-        if (occupant == nullptr || target == nullptr ||
-            !target->emplacement_parent.valid() ||
-            !world.vehicles.rider_seat(snapshot, *target, seat))
-            return;
-        if (AiEntity *body = world.ai.for_handle(snapshot.handle)) {
-            world.ai.refresh_mounted_pose(*body, world);
-            return;
-        }
-        world.vehicles.pose_mounted_occupant(*occupant, *target, seat);
-    });
-    lap.mark(devtools::Slot::SIM_ATTACHMENT_RIDERS);
-}
-
 // ----------------------------------------------------------------------------
 // World
 // ----------------------------------------------------------------------------
@@ -290,9 +265,6 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
             lap.mark(devtools::Slot::SIM_WALK_VISIT);
             throwables.update_device(*this, *device, ai.collision, tables.terrain);
             if (Entity *e = live()) {
-                // An intact row with no fade state takes no evaluation (it would only
-                // zero its zeroes; Entity::needs_destroy_fade).
-                if (e->needs_destroy_fade()) update_item_destroy_fade(*this, *e);
                 if (e->squib.motor) {
                     tick_squib(*this, *e);
                 } else {
@@ -393,8 +365,9 @@ void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
         lap.mark(devtools::Slot::SIM_WALK_POWERUPS);
     }
     // (A leg that removes the row leaves its last visit's item time to the walk's residual.)
+    // The +0x1C4 item leg runs no swap fade: the draw evaluates it
+    // (update_item_destroy_fade) [orig: Render_SectorEntity @0x5C4200].
     if ((e = live()) == nullptr) return;
-    if (e->needs_destroy_fade()) update_item_destroy_fade(*this, *e);
     if (e->squib.motor) {
         tick_squib(*this, *e);
     } else {
@@ -521,11 +494,16 @@ void World::update_all_entities(const TickContext &ctx) {
     }
     throwables.compact();
     lap.mark(devtools::Slot::SIM_UPDATE_WALKS);
-    refresh_attached_child_riders(*this);
+    // A gunner riding an attached child keeps the seat frame of its last update until
+    // its own body update in the pool-0 walk (finish_entity_update), so the projectiles
+    // and the proximity build between the walks read it there, as retail's do [orig:
+    // Entity_UpdateAllEntities @0x4C2100 - the pool-1 walk @0x4C2158..0x4C21E9, the
+    // Weapon_UpdateAllProjectiles call @0x4C223A and the proximity build @0x4C240A ahead
+    // of the pool-0 walk's +0x1C4 call @0x4C2472].
     // Attachment and mover poses change during the walk, after AI collision
-    // queries may have cached their views, and the rider refresh after it. The
-    // projectile/out.destruction half of the tick starts a fresh matrix-view
-    // epoch so it never inherits a pre-attachment target transform.
+    // queries may have cached their views. The projectile/out.destruction half of
+    // the tick starts a fresh matrix-view epoch so it never inherits a
+    // pre-attachment target transform.
     if (collision != nullptr) collision->reset_query_view_cache();
     lap.mark(devtools::Slot::SIM_UPDATE_ATTACHMENTS);
 
@@ -1079,11 +1057,15 @@ void World::restore(const Snapshot &s) {
     facials = s.facials;
     match = s.match;
     // The cine's drawn flag is process-lifetime (only the cine render pass
-    // writes it), so the rewind keeps it. [orig: dword_26970F4 — Cine_RenderOverlays
+    // writes it), so the rewind keeps it. [orig: g_CineFrameDrawn — Cine_RenderOverlays
     //  @0x570C66]
     const bool cine_frame_drawn = epilog.frame_drawn;
+    // The end screens' mission is the embedder's (the menu's table outlives the
+    // rewind, its high score with it).
+    EpilogMission cine_mission = std::move(epilog.mission);
     epilog = s.epilog;
     epilog.frame_drawn = cine_frame_drawn;
+    epilog.mission = std::move(cine_mission);
     mission_exit_reason = s.mission_exit_reason;
     mission_exit_map = s.mission_exit_map;
     zones.spawn_waves = s.spawn_waves;

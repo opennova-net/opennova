@@ -250,7 +250,8 @@ private:
 	Ref<HudChatEntry> hud_chat_;
 	Ref<RtxtStringFile> chat_gametext_;
 	Ref<KeyEventQueue> key_events_;
-	opennova::controls::PlayerActions actions_;
+	// Jointops.exe's rows until setup names the controls' catalog (the title's).
+	opennova::controls::PlayerActions actions_{opennova::controls::default_catalog()};
 	bool armory_requested_ = false;
 	bool vehicle_menu_requested_ = false;
 	// The wheel notch remainder. Retail clears it only at process start, so it

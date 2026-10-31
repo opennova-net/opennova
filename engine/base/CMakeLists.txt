@@ -1,5 +1,5 @@
 # opennova_base — the engine base services (project, vfs, resource_index, gameprofile,
-# title, pcapio, os_random, proc, version), one STATIC group target (Shape A). The header-only
+# title, pcapio, os_random, os_registry, proc, version), one STATIC group target (Shape A). The header-only
 # base/io leaf keeps its own INTERFACE target in its subdirectory.
 #
 # base sits ABOVE formats in the Shape A chain (the deliberate inversion): vfs
@@ -15,8 +15,12 @@ add_library(opennova_base STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/gameprofile/required_resources.cpp
     # title — the titles a game runs as (each game's rows are games/<code>/'s, games::install())
     ${CMAKE_CURRENT_SOURCE_DIR}/title/title.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/title/controls_catalog.cpp # a title's static binding catalog's data
     # os_random — the operating system's CSPRNG (the NovaWorld service's secrets and ids)
     ${CMAKE_CURRENT_SOURCE_DIR}/os_random/os_random.cpp
+    # os_registry — a registry string value as NovaLogic's executables read and write one (a DFX2
+    # client's CD-key activation); a file stands in where the platform has no registry
+    ${CMAKE_CURRENT_SOURCE_DIR}/os_registry/os_registry.cpp
     # pcapio — pcap/pcapng reading (shared by capture-driven tests and tools)
     ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/pcap_reader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pcapio/pcap_writer.cpp
@@ -144,8 +148,8 @@ if(WIN32)
     # os_random.cpp: BCryptGenRandom. `bcrypt` names the system import library;
     # the vendored password-hash library is the distinct opennova_bcrypt target.
     # proc/child_process.cpp: terminate()'s WM_CLOSE (EnumWindows,
-    # PostMessageW) is user32's.
-    target_link_libraries(opennova_base PRIVATE bcrypt user32)
+    # PostMessageW) is user32's. os_registry/os_registry.cpp: the Reg* calls are advapi32's.
+    target_link_libraries(opennova_base PRIVATE bcrypt user32 advapi32)
 endif()
 
 target_compile_features(opennova_base PUBLIC cxx_std_17)

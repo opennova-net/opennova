@@ -14,7 +14,7 @@
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_keys.h>
 #include <net/protocol/protocol.h> // protocol_in_match (the 0x2F class byte, DFX2-12)
-#include <formats/playersav/weapon_sav.h> // make_defaults (the fresh profile's kit)
+#include <formats/playersav/weapon_sav.h> // side_for_team, the record's pages
 #include <runtime/world/weapon_table.h>   // index_of (the fresh kit's ADM lookups)
 #include <base/io/le.h>                   // append_u32_le (the 0x0B body)
 #include <base/version/one_build.h> // the 0x0B's version dword
@@ -59,10 +59,10 @@ constexpr uint32_t kConnectErrorJoinTimeout = 2; // NCC002
 
 } // namespace
 
-LoadoutSubmit fresh_profile_loadout_submit(const world::WeaponTable *weapons, uint8_t team) {
-	static const playersav::Record fresh = playersav::make_defaults().slots[0];
+LoadoutSubmit fresh_profile_loadout_submit(const playersav::Record &fresh,
+		const world::WeaponTable *weapons, uint8_t team, uint8_t fixed_class) {
 	const playersav::Side &side = fresh.side(playersav::side_for_team(team));
-	uint8_t player_class = side.player_class;
+	uint8_t player_class = fixed_class != 0 ? fixed_class : side.player_class;
 	if (player_class < 5 || player_class > 9) player_class = 8;
 	LoadoutSubmit submit;
 	submit.team = team;
@@ -437,7 +437,7 @@ std::optional<ProtocolMessage> JoinerConnection::take_world_stream_request() {
 }
 
 uint8_t JoinerConnection::loadout_wire_class(uint8_t profile_class) const {
-	if (!protocol_in_match(protocol_).loadout_class_fixed) return profile_class;
+	if (!protocol_in_match(protocol_).c2s_2f.loadout_class_fixed) return profile_class;
 	constexpr std::size_t kMissionTypeOffset = offsetof(opennova::bms::Header, mission_type);
 	static_assert(kMissionTypeOffset == 0x22A, "the BMS header's mission type byte");
 	const bool gunner_mission = mission_header_bytes_.size() > kMissionTypeOffset &&
@@ -454,7 +454,10 @@ LoadoutSubmit JoinerConnection::build_profile_loadout_submit(
 	// [orig: Game_StartMission @0x525767-0x525836 (join) and NapiNPClientMsg_TeamAssign
 	//  @0x431a35..0x431a9a (the S2C 0x50 reselect)]
 	if (!loadout_kit_set_) {
-		LoadoutSubmit submit = fresh_profile_loadout_submit(weapons_, team);
+		// A protocol that fixes the class picks that class's page, as its mission start wrote
+		// it into the side block (loadout_wire_class gives 0 for the profile's own).
+		LoadoutSubmit submit =
+				fresh_profile_loadout_submit(fresh_weapons_, weapons_, team, loadout_wire_class(0));
 		submit.player_class = loadout_wire_class(submit.player_class);
 		return submit;
 	}

@@ -784,7 +784,7 @@ int main() {
 	// [info]/title, else (empty) the header's name; the stock Co-op selector
 	// the map file; with game_type_auto the header's own mode
 	// [orig: Game_SerializeMissionInfoToDataStream @0x523620 -- the coop arm
-	//  @0x523758, [info]/title @0x5237df, dword_A761D4 @0x52380d].
+	//  @0x523758, [info]/title @0x5237df, g_MissionHeaderName @0x52380d].
 	{
 		std::map<std::string, std::string> files;
 		// The band reads the header alone: a .bms that is its 616-byte header.

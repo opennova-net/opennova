@@ -143,7 +143,7 @@ void ConnectionRoutes::register_routes(WebApp &app, uint64_t heartbeat_timeout_m
 // session that hosts (a listen host plays on its own server too) and "client"
 // for any other; "title", the game it speaks ({slug, display_name} of its games
 // row: a server's by its listing's LobbyName, else any session's by its game
-// tag, aliases included; null for a tag no row answers to); "account", who the
+// tag; null for a tag no row answers to); "account", who the
 // session is; "host", the server it lists; and "playing", the server it plays
 // on. The account is the listing's owner while it hosts (listing_owner, "via":
 // "host_key"), else the account it signed in as (the row's user_id, pinned by

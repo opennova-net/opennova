@@ -182,6 +182,9 @@ void test_keys_and_buttons() {
 // active one (a show_document view event); to a document, the document's tab.
 void test_page_tab() {
 	Navigating n("opennova_editor_ui_navigation_page");
+	// The jar is the player's file since C-22: no requirement makes one, so the project takes it as
+	// File > New does.
+	editor_test::hold_cookie_jar(n.session);
 	const SessionView &v = n.view();
 	// The NovaWorld string table, a file the editor has no editor for (a font is a document since round S23).
 	std::string font;

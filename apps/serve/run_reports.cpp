@@ -133,4 +133,9 @@ std::string second_listing_json(const SecondListingReport &r) {
 	return out + "}\n";
 }
 
+std::string build_file_json(const OneBuild &build) {
+	return "{\"version\":" + json_text(build.version.text()) +
+			",\"commit\":" + json_text(build.commit) + "}\n";
+}
+
 } // namespace opennova::serve

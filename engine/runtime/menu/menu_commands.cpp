@@ -162,6 +162,12 @@ bool is_mission_menu_file(const std::string &file) {
 	return false;
 }
 
+bool is_player_info_document(const MenuRuntime &menu) {
+	for (const std::string &screen : menu.screen_names())
+		if (strutil::iequals(screen, "PLAYER_INFO")) return true;
+	return false;
+}
+
 void MenuCommands::bind_(const std::string &screen, const std::string &name, MenuCommand command) {
 	const std::string upper = strutil::to_upper(name);
 	for (const Bound &bound : bound_)
@@ -185,9 +191,10 @@ void MenuCommands::wire(const MenuRuntime &menu, bool in_mission) {
 		for (const std::string &name : menu_name_set(set))
 			if (menu.widget_id(name) >= 0) bind_(std::string(), name, command);
 	};
-	// A delegate owns a whole document by the controls it holds, and binds its own alone: the LAN
-	// multiplayer screens [orig: UI_RegisterLANMultiplayerCallbacks @ 0x558d20; the host start
-	// UI_HandleHostSessionStart @ 0x556d00], PLAYER_INFO [orig: PlayerInfo_SaveFromDialog @ 0x55ee10]
+	// A delegate owns a whole document, and binds its own alone: the LAN multiplayer screens by the
+	// controls they hold [orig: UI_RegisterLANMultiplayerCallbacks @ 0x558d20; the host start
+	// UI_HandleHostSessionStart @ 0x556d00], PLAYER_INFO by its screen's name
+	// (is_player_info_document) [orig: PlayerInfo_SaveFromDialog @ 0x55ee10]
 	// (godot/game/mp_menu_companion.gd, player_info_menu_companion.gd).
 	if (has("LAN_GAME_LIST") || has("SELECTED_MISSIONS")) {
 		owner_ = "lan";
@@ -196,7 +203,7 @@ void MenuCommands::wire(const MenuRuntime &menu, bool in_mission) {
 		bind_(std::string(), "START_GAME", MenuCommand::HostGame);
 		return;
 	}
-	if (has("NATIONALITY") && has("COMBO_LIST")) {
+	if (is_player_info_document(menu)) {
 		owner_ = "player_info";
 		bind_(std::string(), "ACCEPT", MenuCommand::SaveProfile);
 		return;

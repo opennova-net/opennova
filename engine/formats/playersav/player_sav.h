@@ -9,10 +9,11 @@
 // [orig: PlayerProfile_SaveToFiles @0x54be00 — header @0x54be2e..0x54be43,
 //  the 5 x 0x3C80 record writes @0x54be76, the trailer @0x54be95;
 //  PlayerProfile_LoadAllFromDisk @0x54f4d0 — the "FPBC"/"0211" gate @0x54f5c6,
-//  the record reads @0x54f5ec].
+//  the record reads @0x54f5ec]. The magic is the title's (Title::profile_magic:
+// Jointops.exe's "FPBC", dfx2.exe's "2XFD"); the reader and the writer take it.
 //
 // Every offset below is one the original's code reads or writes; the regions no
-// code touches (+56, +976..+1340, +1344, +1348, +1384..+1408, +1492,
+// code touches (+56, +976..+1340, +1344, +1348, +1384..+1392, +1400..+1408, +1492,
 // +1534..+1656, +1664..+1800, a binding entry's +2) are zero across the retail
 // corpus and are neither stored nor passed through: the writer emits zeros.
 // Witness record: docs/playerinfo/player-sav-re.md.
@@ -130,6 +131,9 @@ struct ProfileRecord {
 	int32_t sp_gps_icons = 1;            // +1372 (mp_gpsicons)
 	int32_t sp_no_drop_weapons = 0;      // +1376 (mp_NoDropWeapons)
 	int32_t sp_difficulty = 0;           // +1380 (mp_difficulty)
+	// +1396: dfx2.exe's defaults seed it 1 and nothing in either executable reads it;
+	// Jointops.exe's leave it 0 (the title's seed, Title::profile_word_1396).
+	int32_t word_1396 = 0;
 	int32_t intro_pending = -1;          // +1412, cleared after the intro videos
 	int32_t word_1416 = 1;               // +1416
 	int32_t mouse_enabled = 1;           // +1420
@@ -190,10 +194,12 @@ ProfileRecord read_record(const uint8_t *data);
 void write_record(const ProfileRecord &record, uint8_t *out);
 
 // Parse. False on a buffer shorter than the header and the five records, or a
-// header other than "FPBC"/"0211" [orig: @0x54f5c6]. The trailer is not read.
-bool read(const uint8_t *data, size_t size, PlayerSav &out);
+// header other than `magic` (the title's, Title::profile_magic) and "0211"
+// [orig: @0x54f5c6]. The trailer is not read.
+bool read(const uint8_t *data, size_t size, uint32_t magic, PlayerSav &out);
 
-// The file from scratch (docs/adr/0003): always kPlayerSavBytes.
-std::vector<uint8_t> write(const PlayerSav &in);
+// The file from scratch (docs/adr/0003), its header opening with `magic`: always
+// kPlayerSavBytes.
+std::vector<uint8_t> write(const PlayerSav &in, uint32_t magic);
 
 }  // namespace opennova::playersav

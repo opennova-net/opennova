@@ -17,6 +17,7 @@
 #include "machine_driver.h"
 #include "products/product_repository.h"
 #include <formats/gamecfg/server_settings.h>
+#include <runtime/inmatch/game_config.h> // the engine's send ranges
 
 #include <cstddef>
 #include <cstdint>
@@ -27,16 +28,18 @@
 
 namespace opennova::novaworld_server::hosted {
 
-inline constexpr size_t kGameNameMaxBytes = 31;     // cp1252 bytes
-inline constexpr size_t kGamePasswordMaxBytes = 16;
 // The longest rotation (service policy: retail's rotation regrows as it fills;
 // the default rotation is every multiplayer mission of the base and its
 // expansion, more than 32 for Joint Operations with Escalation).
 inline constexpr size_t kMissionsMax = 128;
 inline constexpr size_t kMissionNameMaxBytes = 36;  // the stem's 32 and ".bms"
-inline constexpr SettingRange kSendHoldoffTicksRange{ 0, 255 };
-inline constexpr SettingRange kEntitySendBudgetRange{ 100, 1600 };
-inline constexpr SettingRange kMaxPacketSizeRange{ 100, 16384 };
+// The engine's: the send-holdoff override's ceiling (D-NET-1473) and the BANDWIDTH clamp.
+inline constexpr SettingRange kSendHoldoffTicksRange{ 0,
+	static_cast<int>(inmatch::kSendHoldoffTicksMax) };
+inline constexpr SettingRange kEntitySendBudgetRange{ inmatch::kEntitySendBudgetMin,
+	inmatch::kEntitySendBudgetMax };
+// The packet size's range: the settings schema's max_packet_size row (gamecfg/server_settings.h).
+SettingRange max_packet_size_range();
 
 // The owner's settings, stored in hosted_servers.configuration; text in UTF-8.
 struct HostedSettings {
@@ -71,16 +74,19 @@ struct HostedSettings {
 // One canonical persisted document, also used for API settings. Core settings
 // retain their public names; the additional server fields live in options.
 // Hosted packet tuning is a core setting with the runtime's packet-size limits.
-io::JsonValue hosted_settings_schema(gamecfg::ConfigTable table);
+// `title` the code of the title the server runs (inmatch::server_settings_title: its cfg table,
+// its host screen's cap and its availability words).
+io::JsonValue hosted_settings_schema(std::string_view title);
 io::JsonValue settings_document(const HostedSettings &settings);
 bool read_settings_document(const io::JsonValue &document, HostedSettings &settings,
 		std::string &field, std::string &error);
 gamecfg::GameCfg settings_block(const HostedSettings &settings, std::string_view title,
 		const gamecfg::WeaponRoster &weapons = {});
-// The game.cfg table a hosted server of title `title` runs (base/title/title.h
-// Title::config_table): Delta Force Xtreme 2's for dfx2, Joint Operations' for jo and
-// acidgambit; the default title's for a code no title has.
-gamecfg::ConfigTable title_config_table(std::string_view title);
+// The weapon roster a server's settings name weapons from: its expansion tree's when the server
+// runs one that lists any (an expansion's weapon.def replaces the base game's), else its base
+// tree's. `expansion` null for a server with no expansion.
+const gamecfg::WeaponRoster &server_weapon_roster(
+		const gamecfg::WeaponRoster &base, const gamecfg::WeaponRoster *expansion);
 
 // Why check_settings refused: the field (its JSON name) and the reason.
 struct SettingsRefusal {
@@ -93,11 +99,11 @@ struct SettingsRefusal {
 // the bases with a ready current tree), whose title's limits the whole numbers
 // take and whose offered expansions the expansion is one of; the rotation
 // names 1..kMissionsMax missions, each among the base's tree's missions plus
-// the expansion's (by file name, without case). A name is 1..kGameNameMaxBytes
-// bytes once in cp1252 (the host's code page), not blank, with no control byte
-// or undefined cp1252 byte and no double quote (the host file quotes it and has no
-// escape); a password is printable ASCII with no space or double quote; a
-// mission is a .bms file name of letters, digits, '_' and '-'.
+// the expansion's (by file name, without case). A name is 1 to the reader's game_name
+// limit (gamecfg::text_limit) bytes once in cp1252 (the host's code page), not blank, with
+// no control byte or undefined cp1252 byte and no double quote (the host file quotes it and
+// has no escape); a password is at most the reader's limit, printable ASCII with no space or
+// double quote; a mission is a .bms file name of letters, digits, '_' and '-'.
 std::optional<SettingsRefusal> check_settings(
 		const HostedSettings &settings, const std::vector<OfferedProduct> &offered);
 
@@ -105,10 +111,6 @@ std::optional<SettingsRefusal> check_settings(
 // at most kMissionNameMaxBytes bytes (check_settings' rule, and the console's
 // MISSION ADD).
 bool is_mission_file_name(std::string_view name);
-
-// The missions column: one name per line.
-std::string join_missions(const std::vector<std::string> &missions);
-std::vector<std::string> split_missions(const std::string &column);
 
 // The working directory's file names.
 inline constexpr const char *kHostFileName = "server.host";
@@ -221,9 +223,10 @@ std::string render_host_file(const HostedSettings &settings, int64_t server_id);
 // the NovaWorld port range pinned to `plan.game_port` (the slot's: NovaWorld
 // lists a server at its datagrams' source port, so a stock client joins each
 // slot of a machine on its own port), and the remote admin on
-// `plan.admin_port`; written by the format's own writer.
-std::string render_game_cfg(const SlotPlan &plan, const HostedSettings &settings = {},
-        std::string_view title = "jo", const gamecfg::WeaponRoster &weapons = {});
+// `plan.admin_port`; written by the format's own writer, under the server's game `title` (its
+// settings' table and words: inmatch::server_settings_title).
+std::string render_game_cfg(const SlotPlan &plan, const HostedSettings &settings,
+        std::string_view title, const gamecfg::WeaponRoster &weapons = {});
 // admin.cfg: kAdminUser with `admin_password` and kAdminRights, and one
 // ip_restrict line admitting `plan.admin_allowed_ip`.
 std::string render_admin_cfg(const SlotPlan &plan, const std::string &admin_password);
@@ -233,8 +236,8 @@ std::string render_credentials(const std::string &username, const std::string &p
 // opennova-serve's arguments for a server whose product speaks `title` (its
 // base row's title code) with the expansion `expansion_code` ("" for
 // none): /HOST, --credentials, --master-host, --master-gate-port, the status
-// page off with the tick-health and exit files (hosted/protocol/slots.h), /game with the
-// title, and /exp with the code; for a server whose owner asked to be listed on
+// page off with the tick-health, exit and build files (hosted/protocol/slots.h), /game with
+// the title, and /exp with the code; for a server whose owner asked to be listed on
 // NovaLogic's NovaWorld, the second listing's state file (--second-listing-file,
 // off while the service offers none), and while `novalogic` is offered the second
 // listing too (--also-master-host, --also-master-gate-port, --also-credentials with

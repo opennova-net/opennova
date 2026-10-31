@@ -18,8 +18,11 @@
         <RouterLink v-if="adminArea" to="/" class="hidden text-ink-muted hover:text-ink-bright sm:inline">View website <span aria-hidden="true">↗</span></RouterLink>
         <template v-if="ready">
           <template v-if="user">
-            <RouterLink to="/me" class="max-w-[10rem] truncate font-medium text-ink transition hover:text-ink-bright">
-              <span class="sr-only">Your account: logged in as </span>{{ user.username }}
+            <RouterLink to="/me" title="Your account" class="flex max-w-[12rem] items-center gap-2 rounded-control border border-border-strong px-3 py-1.5 font-medium text-ink transition hover:bg-hover hover:text-ink-bright" active-class="bg-hover">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+              <span class="min-w-0 truncate"><span class="sr-only">Your account: logged in as </span>{{ user.username }}</span>
             </RouterLink>
             <button type="button" class="text-ink-muted transition hover:text-ink-bright disabled:opacity-50" :disabled="signingOut" @click="handleSignOut('desktop')">
               Log out
@@ -30,7 +33,7 @@
             <RouterLink to="/register" class="text-ink-muted transition hover:text-ink-bright">Register</RouterLink>
           </template>
         </template>
-        <RouterLink v-if="!adminArea" :to="downloadsLink" class="btn-primary px-4 py-2">Download</RouterLink>
+        <RouterLink v-if="!adminArea" to="/play" class="btn-primary px-4 py-2">Play</RouterLink>
       </div>
 
       <button
@@ -80,7 +83,7 @@
               <RouterLink to="/register" class="rounded-control px-3 py-2.5 hover:bg-hover" @click="closeMenu">Register</RouterLink>
             </template>
           </template>
-          <RouterLink :to="downloadsLink" class="btn-primary mt-2" @click="closeMenu">Download</RouterLink>
+          <RouterLink to="/play" class="btn-primary mt-2" @click="closeMenu">Play</RouterLink>
         </div>
       </nav>
     </Transition>
@@ -93,14 +96,11 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { useSession } from '../composables/useSession';
 
+// Play is the header's button, not a link here.
 const siteLinks = [
-  { to: '/play', label: 'Play' },
-  { to: '/lobby', label: 'Servers' },
-  { to: '/hosting', label: 'Hosting' },
+  { to: '/lobby', label: 'Lobbies' },
+  { to: '/hosting', label: 'Dedicated Hosting' },
 ];
-
-// The downloads page explains each release file and its availability.
-const downloadsLink = '/downloads';
 
 const isMenuOpen = ref(false);
 const toggleMenu = () => {

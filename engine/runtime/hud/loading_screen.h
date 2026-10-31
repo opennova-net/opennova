@@ -18,6 +18,10 @@
 //  bar primitive HUD_DrawProgressBar_0 @ 0x5d4c40]
 // Witness record: docs/interface/loading-screen-re.md.
 
+namespace opennova {
+struct Title; // base/title/title.h
+} // namespace opennova
+
 namespace opennova::hud {
 
 // The LoadingText key for a numeric session game type, or "" for an unknown
@@ -58,13 +62,20 @@ inline const char *loading_gametype_text_key(uint32_t game_type) {
 
 // Top text band, in image space (the original composites text INTO the
 // 800x600 background surface before stretching) [orig: rect (21, 29, right,
-// 500) @ 0x52200f; right edge 661 with a custom background, 782 with the
-// stock one @ 0x521ec4].
+// 500) @ 0x52200f]; its right edge is the title's (loading_band_right).
 inline constexpr int kLoadingBandLeft = 21;
 inline constexpr int kLoadingBandTop = 29;
-inline constexpr int kLoadingBandRightCustom = 661;
-inline constexpr int kLoadingBandRightStock = 782;
 inline constexpr int kLoadingBandBottom = 500;
+
+// The band's right edge over a background `image_w` wide, the title's (TitleLoadingScreen): its
+// custom or its stock value, from the image's left, or from its right edge under band_from_right
+// (Jointops.exe's 661 / 782 at every width, dfx2.exe's the width less 139 / 18); 0 for a title
+// with no loading-screen row.
+// [orig: Render_LoadingScreen @0x521fec..0x522006 (`neg bl; sbb; and 0FFFFFF87h; add 30Eh` over
+//  the custom flag), the band's three draws @0x52200f..0x522050]
+// [orig: Render_LoadingScreen @0x51ef69..0x51ef73 (the width less 139 or 18), the draws
+//  @0x51ef90..0x51efd1 (dfx2.exe)]
+int loading_band_right(const Title &game, bool custom_background, int image_w);
 
 // Server-message block, as fractions of the image size [orig: doubles 0.02
 // @ 0x7D01A0, 0.98 @ 0x7D0198, 0.87 @ 0x7D0190, 0.9 @ 0x7C4878].
@@ -73,9 +84,8 @@ inline constexpr double kLoadingMsgRightFrac = 0.98;
 inline constexpr double kLoadingMsgLabelYFrac = 0.87;
 inline constexpr double kLoadingMsgBodyYFrac = 0.9;
 
-// The message label color, RGB (the body restores white)
-// [orig: "<c80E0FF>%s:\r\n<cFFFFFF>" @ 0x7D01A8].
-inline constexpr uint32_t kLoadingMsgLabelRgb = 0x80E0FFu;
+// The message label's colour is the title's (TitleLoadingScreen::message_label_rgb, the label
+// format's first tag; the body restores white).
 
 // Progress bar, in the 1024x768 virtual overlay space (hud_math.h
 // kDesignWidth/kDesignHeight) [orig: x=368 y=732 w=286 h=15
@@ -167,17 +177,67 @@ inline bool loading_present_due(int elapsed_ms, bool reported_changed) {
 //  model (mission/mission_load_plan.h).]
 
 // The composited resources: the stock background when the mission has no
-// sidecar image [orig: "loadscrn.pcx" @ 0x521e20], the two text fonts
-// [orig: "Arials18.fnt" @ 0x521eec, "Arial22.fnt" @ 0x521f5a], and the
-// server-message label's literal fallback when the gametext table misses
+// sidecar image [orig: "loadscrn.pcx" @ 0x521e20] and the server-message
+// label's literal fallback when the gametext table misses
 // [orig: GameText_GetStringWithFallback("LoadingText", "LT_SERVERMSG", ...)
-// @ 0x522074].
+// @ 0x522074]. The two text fonts are the title's (loading_fonts).
 inline constexpr const char *kLoadingFallbackImage = "loadscrn.pcx";
-inline constexpr const char *kLoadingFontSmall = "Arials18.fnt";
-inline constexpr const char *kLoadingFontLarge = "Arial22.fnt";
 inline constexpr const char *kLoadingServerMessageLabelKey = "LT_SERVERMSG";
 inline constexpr const char *kLoadingServerMessageLabelFallback =
 		"Message from Game Server";
+
+// The two fonts the screen composites with over a background `image_w` wide, the title's
+// (TitleLoadingScreen): its narrow pair under its wide width, else its wide pair; null names for
+// a title with no row. The small one is the server message's (and the progress lines'), the large
+// one the band's.
+// [orig: Render_LoadingScreen - "Arials18.fnt" @ 0x521eec, "Arial22.fnt" @ 0x521f5a]
+// [orig: Render_LoadingScreen - the width tests `cmp 500h` @0x51ee41 / @0x51eebd / @0x51f0f2
+//  (dfx2.exe)]
+struct LoadingFonts {
+	const char *small = nullptr;
+	const char *large = nullptr;
+};
+LoadingFonts loading_fonts(const Title &game, int image_w);
+
+// --- the progress lines (dfx2.exe's) -------------------------------------------
+// Each Render_LoadingScreen call takes the load's stage, which Jointops.exe never reads and
+// dfx2.exe draws as that many lines, the stage capped at 15: line n (n < 7) the LoadingText string
+// STR_MISSION_LD_PROGRESS_0n, else its literal "??n", the string itself the sprintf format, and
+// the lines from the eighth on empty; each in the small font with its 120 tab width, left-aligned
+// in (20, 96 + pitch * n) .. (661, 530), the title's pitch 20 under its wide width and 40 from it
+// (TitleLoadingScreen::progress_pitch). Every call composites them, single player's too.
+// [orig: Render_LoadingScreen @0x51f0e6..0x51f2ea - the font @0x51f0e6..0x51f161, the cap
+//  @0x51f16f..0x51f17b, the switch @0x51f199 (the keys and fallbacks @0x51f1af..0x51f2a2, the
+//  empty line @0x51f2ba), the draw @0x51f2c2..0x51f2ea (dfx2.exe)]
+inline constexpr int kLoadingProgressStageCap = 15;
+inline constexpr int kLoadingProgressTextLines = 7;
+inline constexpr int kLoadingProgressX = 20;
+inline constexpr int kLoadingProgressTop = 96;
+inline constexpr int kLoadingProgressRight = 661;
+inline constexpr int kLoadingProgressBottom = 530;
+// The lines a call at `stage` draws (0 for a title that draws none).
+int loading_progress_line_count(const Title &game, int stage);
+// Line n's LoadingText key and its literal fallback; empty for a line from the eighth on.
+std::string loading_progress_line_key(int line);
+std::string loading_progress_line_fallback(int line);
+
+// The stage each Render_LoadingScreen call of the mission start passes, against the bar value
+// the start presents first past it: 0 (the session prelude) then 1, 1 (the first load's head)
+// then 2, 2 (past the effect world's reset) then 6, 3 (past the minimap's models) then 26, 4
+// (past the entities' init) then 38, 5 then 41, 6 then 70, 7 (past the mission textures) then
+// 90; the round-over RESTART key's recomposite passes 16. OpenNova's load presents its own
+// checkpoints (D-LOADSCR-1), so the screen draws the stage the start had reached when its bar
+// first showed the checkpoint: the last stage whose first present is at or below it.
+// [orig: Game_StartMission @0x524360 - the calls @0x524880 / @0x52496f / @0x524a8f / @0x525272 /
+//  @0x52568a / @0x525870 (@0x525a04) / @0x525a3e / @0x525a75, the presents @0x524933 /
+//  @0x52498f / @0x524a9e / @0x52533b / @0x525699 / @0x52587f / @0x525a4d / @0x525a84;
+//  Input_HandleSpecialKeys @0x49c887]
+// [orig: Game_StartMission @0x521530 - the pushes @0x521a50 (ebx 0) / @0x521b3f (ebp 1) /
+//  @0x521c5e / @0x522441 / @0x522860 / @0x522a5a / @0x522bee / @0x522c28 / @0x522c5f, the presents
+//  @0x521b04 / @0x521b60 / @0x52250c / @0x522871 / @0x522c39; Input_HandleSpecialKeys
+//  @0x49c8f5 (push 10h) (dfx2.exe)]
+inline constexpr int kLoadingRestartStage = 16;
+int loading_screen_stage(int percent);
 
 // <mission>.bms -> <mission>.pcx: the sidecar image name for a mission file
 // — the file part cut at its FIRST '.', then "pcx" appended: the extension is
@@ -219,7 +279,8 @@ inline constexpr const char *kSplashSoundSet = "START_MISSION";
 
 // The continue line: gametext LoadingText/LT_Continue, drawn CENTERED at
 // virtual (512, 730) of the 1024x768 overlay space in the large HUD label
-// font (Impac22b.fnt at the (screen_w << 16) / 800 slot scale), through the
+// font (the title's large slot, hud_large_label_font: Impac22b.fnt at the
+// (screen_w << 16) / 800 slot scale in Jointops.exe), through the
 // half-bright text fold (hud_math.h half_bright_argb), color alternating on
 // GetTickCount() bit 0x200 — a 512 ms two-color pulse, white / light red
 // [orig: fetch @ 0x520975; HUD_DrawTextAtVirtualPos(ctx, 512, 730, 0, text,
@@ -227,7 +288,6 @@ inline constexpr const char *kSplashSoundSet = "START_MISSION";
 //  @ 0x5209b0-0x5209be; font slot Impac22b.fnt @ HUD_InitAllFonts 0x51ef4e;
 //  centered dispatch HUD_DrawTextCentered_HalfBright @ 0x580680].
 inline constexpr const char *kSplashContinueTextKey = "LT_Continue";
-inline constexpr const char *kSplashContinueFont = "Impac22b.fnt";
 inline constexpr int kSplashContinueX = 512;
 inline constexpr int kSplashContinueY = 730;
 inline constexpr uint32_t kSplashContinueColorOn = 0xFFFFFFFFu;
@@ -238,7 +298,8 @@ inline constexpr int kSplashBlinkMaskMs = 0x200;
 // the game's code page: the design point through HUD_DrawTextAtVirtualPos's integer rounding, ((512 * W
 // + 512) / 1024, (730 * H + 384) / 768) [orig: HUD_DrawTextAtVirtualPos @ 0x5d3ec0], its mode 2 the
 // centred half-bright drawer, which halves the phase's colour, its alpha forced opaque, and lays the run
-// out centred at the large slot's scale, W / 800 [orig: HUD_DrawTextAligned_HalfBrightNoFlags @ 0x5d2ece ->
+// out centred at the title's large slot's scale (W / 800 in Jointops.exe)
+// [orig: HUD_DrawTextAligned_HalfBrightNoFlags @ 0x5d2ece ->
 // HUD_DrawTextCentered_HalfBright @ 0x580680 -> CGameFont_DrawText @ 0x6752c0, flags 1 @ 0x58069d;
 // the slot @ HUD_InitAllFonts 0x51ef62 (hud_label_font_choice)]. The quads carry the halved colour, the
 // raw diffuse the font page's material doubles on the device (kFontPageMaterialWord, MODULATE2X), so
@@ -249,7 +310,7 @@ inline constexpr int kSplashBlinkMaskMs = 0x200;
 // background's pixels @ 0x521f1a..0x521f42 / 0x521f86..0x521fa8 -> Render_DrawWrappedTextBlockEx @
 // 0x580eb0 -> CGameFont_RenderText @ 0x675e40 -> CGameFont_DrawBlendedGlyph @ 0x6744a0].
 GameFontRun splash_continue_run(const GameFont &font, const char *text, int surface_w, int surface_h,
-		bool phase_on);
+		bool phase_on, const Title &title);
 
 // The continue line's phase at a GetTickCount() reading: on (white) while bit 0x200 is set
 // [orig: Game_ShowStartMissionSplash - the blink select @ 0x5209b0-0x5209be].
@@ -394,7 +455,7 @@ struct LoadingTextBox {
 // (loading_band_right): the title, the mission and the game type share the band, left-, centre-
 // and right-aligned, all white [orig: Render_LoadingScreen @ 0x521fe1-0x522123 - the alignments
 // 3 / 4 / 5 @ 0x52200f / 0x52202e / 0x522050, folded @ 0x58106c / 0x581071; <cFFFFFF>
-// @ 0x51f42d]; the server message's label (its key's text and a colon, kLoadingMsgLabelRgb) and
+// @ 0x51f42d]; the server message's label (its key's text and a colon, in `label_rgb`) and
 // body (white) at the image fractions, each box to the image's bottom [orig: the label
 // "<c80E0FF>%s:\r\n<cFFFFFF>" @ 0x7D01A8; the fractions' doubles @ 0x7D01A0 / 0x7D0198 /
 // 0x7D0190 / 0x7C4878]. The message draws only over a non-empty server text [orig: the
@@ -406,7 +467,11 @@ struct LoadingSessionBoxes {
 	LoadingTextBox message_label;
 	LoadingTextBox message_body;
 };
-LoadingSessionBoxes loading_session_boxes(int image_w, int image_h, int band_right);
+LoadingSessionBoxes loading_session_boxes(int image_w, int image_h, int band_right,
+		uint32_t label_rgb);
+// Progress line n's box over a background `image_w` wide (loading_progress_line_count above):
+// left-aligned, white.
+LoadingTextBox loading_progress_line_box(const Title &game, int line, int image_w);
 // The message label's text: the key's text and the format's colon.
 inline std::string loading_message_label_text(const std::string &label) { return label + ":"; }
 
@@ -470,13 +535,24 @@ void loading_render_text(LoadingSurface &surface, const opennova::fnt::fnt_font_
 void loading_draw_text_block(LoadingSurface &surface, const opennova::fnt::fnt_font_t &font,
 		int tab_width, const std::string &text, const LoadingTextBox &box);
 
-// The session block composited into the surface (loading_session_boxes over its size): the title,
-// the mission and the game type in the large font; the server message's label and body in the
-// small one where the message is not empty. Code-page text; a null font draws nothing.
-// [orig: Render_LoadingScreen @ 0x521fe1-0x522123]
+// The session block composited into the surface (loading_session_boxes over its size, the band to
+// the title's right edge over `custom_background`, the label in its colour): the title, the
+// mission and the game type in the large font; the server message's label and body in the small
+// one where the message is not empty. Code-page text; a null font draws nothing.
+// [orig: Render_LoadingScreen @ 0x521fe1-0x522123] [orig: Render_LoadingScreen
+//  @0x51ef57..0x51f0a4 (dfx2.exe)]
 void composite_loading_session_text(LoadingSurface &surface,
 		const opennova::fnt::fnt_font_t *large, const opennova::fnt::fnt_font_t *small,
 		const std::string &title, const std::string &mission, const std::string &game_type,
-		const std::string &label, const std::string &custom_text, int band_right);
+		const std::string &label, const std::string &custom_text, bool custom_background,
+		const Title &game);
+
+// The progress lines composited into the surface past the session block: `lines` the stage's
+// texts (loading_progress_line_count of them, each its key's text or its fallback), each in its
+// loading_progress_line_box in the small font with its 120 tab width. A null font draws nothing.
+// [orig: Render_LoadingScreen @0x51f184..0x51f2ea (dfx2.exe)]
+void composite_loading_progress_lines(LoadingSurface &surface,
+		const opennova::fnt::fnt_font_t *small, const std::vector<std::string> &lines,
+		const Title &game);
 
 } // namespace opennova::hud

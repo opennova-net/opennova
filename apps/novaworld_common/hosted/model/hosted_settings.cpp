@@ -6,6 +6,7 @@
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <formats/gamecfg/game_cfg.h>
+#include <runtime/inmatch/host_settings.h> // server_settings_title
 
 #include <cstdio>
 #include <algorithm>
@@ -70,9 +71,10 @@ std::optional<SettingsRefusal> check_settings(
 				"holds a character the game's code page (cp1252) has none for" };
 		if (strutil::trim_view(bytes).empty())
 			return SettingsRefusal{ "game_name", "is empty" };
-		if (bytes.size() > kGameNameMaxBytes)
+		const size_t name_max = gamecfg::text_limit(&gamecfg::GameCfg::game_name);
+		if (bytes.size() > name_max)
 			return SettingsRefusal{ "game_name",
-				"is longer than " + std::to_string(kGameNameMaxBytes) + " characters" };
+				"is longer than " + std::to_string(name_max) + " characters" };
 		// NovaLogic's service refuses a server name holding "nova" in any case with 1009,
 		// SERVERNAMENOTACCEPTED (witnessed live 2026-10-25, ADR 0068), so a listing there
 		// asked over one would list nowhere: the start asks for another name.
@@ -81,9 +83,10 @@ std::optional<SettingsRefusal> check_settings(
 				"holds \"Nova\", which NovaLogic's NovaWorld does not accept in a server name: "
 				"rename the server or untick the NovaLogic box" };
 	}
-	if (s.game_password.size() > kGamePasswordMaxBytes)
+	const size_t password_max = gamecfg::text_limit(&gamecfg::GameCfg::mp_host_game_password);
+	if (s.game_password.size() > password_max)
 		return SettingsRefusal{ "game_password",
-			"is longer than " + std::to_string(kGamePasswordMaxBytes) + " characters" };
+			"is longer than " + std::to_string(password_max) + " characters" };
 	for (const char c : s.game_password) {
 		if (c <= ' ' || c > '~' || c == '"')
 			return SettingsRefusal{ "game_password",
@@ -98,7 +101,7 @@ std::optional<SettingsRefusal> check_settings(
 	if (auto r = out_of_range("start_delay", s.start_delay, limits.start_delay)) return r;
 	if (auto r = out_of_range("send_holdoff_ticks", s.send_holdoff_ticks, kSendHoldoffTicksRange)) return r;
 	if (auto r = out_of_range("entity_send_budget", s.entity_send_budget, kEntitySendBudgetRange)) return r;
-	if (auto r = out_of_range("max_packet_size", s.max_packet_size, kMaxPacketSizeRange)) return r;
+	if (auto r = out_of_range("max_packet_size", s.max_packet_size, max_packet_size_range())) return r;
 	if (s.options.get("max_packet_size"))
 		return SettingsRefusal{ "options.max_packet_size", "Core settings belong at the top level." };
 	const OfferedExpansion *expansion = nullptr;
@@ -107,14 +110,19 @@ std::optional<SettingsRefusal> check_settings(
 		if (!expansion)
 			return SettingsRefusal{ "expansion_id", "is no expansion of this game with data" };
 	}
-    auto block = gamecfg::defaults({}, 0, 0, title_config_table(product->title));
-    std::string field, error;
-    const auto &weapons = expansion && !expansion->weapons.empty() ? expansion->weapons : product->weapons;
-    if (!gamecfg::apply_server_settings(block, s.options, true, weapons, field, error))
-        return SettingsRefusal{ "options." + field, error };
-    if (s.mission_options.size() > s.missions.size() ||
-            std::any_of(s.mission_options.begin(), s.mission_options.end(), [](int v) { return v != 0 && v != 1; }))
-        return SettingsRefusal{"rotation", "invalid side-switch option"};
+	const gamecfg::ServerSettingsTitle settings_title =
+			inmatch::server_settings_title(product->title);
+	auto block = gamecfg::defaults({}, 0, 0, settings_title.table);
+	std::string field, error;
+	const auto &weapons =
+			server_weapon_roster(product->weapons, expansion ? &expansion->weapons : nullptr);
+	if (!gamecfg::apply_server_settings(
+				block, s.options, true, weapons, settings_title, field, error))
+		return SettingsRefusal{ "options." + field, error };
+	if (s.mission_options.size() > s.missions.size() ||
+			std::any_of(s.mission_options.begin(), s.mission_options.end(),
+					[](int v) { return v != 0 && v != 1; }))
+		return SettingsRefusal{ "rotation", "invalid side-switch option" };
 	if (s.missions.empty()) return SettingsRefusal{ "missions", "names no mission" };
 	if (s.missions.size() > kMissionsMax)
 		return SettingsRefusal{ "missions",
@@ -136,28 +144,6 @@ std::optional<SettingsRefusal> check_settings(
 				return SettingsRefusal{"rotation", "Side switching is shared by repeated occurrences of the same map."};
 	}
 	return std::nullopt;
-}
-
-std::string join_missions(const std::vector<std::string> &missions) {
-	std::string out;
-	for (const std::string &m : missions) {
-		if (!out.empty()) out.push_back('\n');
-		out += m;
-	}
-	return out;
-}
-
-std::vector<std::string> split_missions(const std::string &column) {
-	std::vector<std::string> out;
-	size_t pos = 0;
-	while (pos <= column.size()) {
-		const size_t end = column.find('\n', pos);
-		const std::string line = column.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
-		if (!line.empty()) out.push_back(line);
-		if (end == std::string::npos) break;
-		pos = end + 1;
-	}
-	return out;
 }
 
 std::string render_host_file(const HostedSettings &s, int64_t server_id) {
@@ -247,14 +233,15 @@ std::vector<std::string> render_serve_args(const HostedSettings &settings, std::
 		std::string_view expansion_code, const std::string &master_host, uint16_t master_gate_port,
 		const NovaLogicListing &novalogic) {
 	// A supervised server's: no status page (its lines would ride the server's
-	// log stream every 200 ms), its tick health and its exit's line for the
-	// agent (hosted/protocol/slots.h).
+	// log stream every 200 ms), its tick health, its exit's line and its build for
+	// the agent (hosted/protocol/slots.h).
 	std::vector<std::string> args = { "/HOST", kHostFileName, "--credentials", kCredentialsFileName,
 		"--master-host", master_host, "--master-gate-port", std::to_string(master_gate_port),
 		"--status-page", "off", "--stats-file", kTickStatsFileName, "--exit-file", kExitFileName,
-		"--send-holdoff-ticks", std::to_string(settings.send_holdoff_ticks),
-		"--entity-send-budget", std::to_string(settings.entity_send_budget),
-		"--rotation-first", "/game", std::string(title) };
+		"--build-file", kBuildFileName, "--send-holdoff-ticks",
+		std::to_string(settings.send_holdoff_ticks), "--entity-send-budget",
+		std::to_string(settings.entity_send_budget), "--rotation-first", "/game",
+		std::string(title) };
 	if (!expansion_code.empty()) {
 		args.push_back("/exp");
 		args.emplace_back(expansion_code);

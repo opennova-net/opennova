@@ -4,6 +4,7 @@
 //  CGameFont_DrawText @ 0x6752c0]
 
 #include <base/gameprofile/game_type.h>
+#include <base/title/title.h>
 #include <runtime/hud/game_font.h>
 #include <runtime/world/entity.h> // SeatType
 #include <runtime/hud/hud_config_tokens.h>
@@ -375,7 +376,7 @@ void test_declutter_element_gates(const fnt_font_t *font) {
 		const HudDrawList &bar_off = compiler.compile(state, 1024.0f, 768.0f);
 		bool saw_health_fill = false;
 		for (const HudQuad &q : bar_off.quads) {
-			if (q.filled && q.color == layout.tag_middle) saw_health_fill = true;
+			if (q.filled && q.color == layout.stance_middle) saw_health_fill = true;
 		}
 		CHECK(!saw_health_fill && !bar_off.tris.empty(),
 				"a level-2-masked DMGBAR hides the bar and nothing else");
@@ -447,7 +448,7 @@ void test_compiler_health_and_order(const fnt_font_t *font) {
 	CHECK(list.quads.size() == 2, "health emits fill + border");
 	CHECK(list.quads[0].filled && !list.quads[1].filled,
 			"fill first, border on top");
-	CHECK(list.quads[0].color == layout.tag_middle,
+	CHECK(list.quads[0].color == layout.stance_middle,
 			"0.5 health takes the middle band color");
 
 	// Heat with an armed weapon.
@@ -535,6 +536,49 @@ void test_compiler_crosshair_user_options(const fnt_font_t *font) {
 	}
 	CHECK(same_positions,
 			"spread off collapses to the zero-spread geometry (arms centered)");
+
+	// dfx2.exe's crosshair holds still (DFX2-84): the spread input moves no arm, as the
+	// option's off does [orig: HUD_DrawCrosshair @0x590A80 - `fmul flt_7C2244` (0.0) @0x590F7F
+	// (dfx2.exe)].
+	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+	const opennova::Title *jo = opennova::title_by_code("jo");
+	CHECK(dfx2 != nullptr && dfx2->hud_crosshair_fixed, "dfx2.exe's crosshair is fixed");
+	CHECK(jo != nullptr && !jo->hud_crosshair_fixed, "Jointops.exe's spreads");
+	HudFrameState held = state;
+	held.title = dfx2;
+	const HudDrawList dfx2_list = compiler.compile(held, 1024.0f, 768.0f);
+	bool dfx2_centered = dfx2_list.tris.size() == spread_off.tris.size();
+	for (size_t i = 0; dfx2_centered && i < dfx2_list.tris.size(); ++i)
+		dfx2_centered = dfx2_list.tris[i].a.x == spread_off.tris[i].a.x &&
+				dfx2_list.tris[i].a.y == spread_off.tris[i].a.y;
+	CHECK(dfx2_centered, "dfx2's spread input leaves the arms centred");
+	held.title = jo;
+	const HudDrawList jo_list = compiler.compile(held, 1024.0f, 768.0f);
+	CHECK(jo_list.tris.size() == 14 && jo_list.tris[0].a.y != spread_off.tris[0].a.y,
+			"JO's spread input moves the arms");
+
+	// In a Controller / Driver seat (camera mode 1) Jointops.exe swaps the driver crosshair in;
+	// dfx2.exe keeps the ordinary one in the user's colour [orig: HUD_DrawCrosshair
+	// @0x592bf8..0x592c2d] [orig: HUD_DrawCrosshair @0x590A80, no swap (dfx2.exe)].
+	HudLayout seats = layout;
+	seats.combat.driver_crosshair.valid = true;
+	seats.combat.driver_crosshair.width = 32;
+	seats.combat.driver_crosshair.height = 32;
+	compiler.update_layout(seats);
+	HudFrameState seat = state;
+	seat.combat.driver_crosshair = true;
+	seat.title = jo;
+	const HudDrawList jo_seat = compiler.compile(seat, 1024.0f, 768.0f);
+	CHECK(!jo_seat.tris.empty() &&
+					jo_seat.tris[0].texture == opennova::hud::kHudTexDriverCrosshair &&
+					jo_seat.tris[0].color == 0xFF007F00u,
+			"JO's seat draws the driver crosshair");
+	seat.title = dfx2;
+	const HudDrawList dfx2_seat = compiler.compile(seat, 1024.0f, 768.0f);
+	CHECK(!dfx2_seat.tris.empty() && dfx2_seat.tris[0].texture == opennova::hud::kHudTexCrosshair &&
+					dfx2_seat.tris[0].color == 0xFF20FF40u,
+			"dfx2's seat keeps the ordinary crosshair");
+	compiler.update_layout(layout);
 }
 
 // The projected (3P / spectate) anchor: an integer surface pixel through the
@@ -700,16 +744,33 @@ void test_spinmap_projection_zoom_and_clip() {
 	CHECK(!opennova::hud::project_spinmap_point(input, 200 << 16, 0,
 			true, x, y) && std::fabs(y - (657.0f - 103.0f)) < 0.01f,
 			"edge clamp lands on the stencil circle");
-	// Zoom OUT grows the world-extent value x1.15 toward 0x100000; IN shrinks
-	// x0.85 toward 4096. [orig: cases 361/360 @0x49beaf/@0x49bcb0]
-	CHECK(opennova::hud::spinmap_zoom_step(65536, 1) == 75366,
+	// Zoom OUT grows the world-extent value x1.15 toward the title's cap
+	// (Jointops.exe's 0x100000); IN shrinks x0.85 toward 4096.
+	// [orig: cases 361/360 @0x49beaf/@0x49bcb0]
+	const int32_t jo_max = opennova::hud::kSpinmapZoomMax;
+	CHECK(opennova::hud::spinmap_zoom_step(65536, 1, jo_max) == 75366,
 			"zoom out applies the retail x1.15 truncation");
-	CHECK(opennova::hud::spinmap_zoom_step(65536, -1) == 55705,
+	CHECK(opennova::hud::spinmap_zoom_step(65536, -1, jo_max) == 55705,
 			"zoom in applies the retail x0.85 truncation");
-	CHECK(opennova::hud::spinmap_zoom_step(4096, -1) == 4096,
+	CHECK(opennova::hud::spinmap_zoom_step(4096, -1, jo_max) == 4096,
 			"zoom clamps at 4096");
-	CHECK(opennova::hud::spinmap_zoom_step(0x100000, 1) == 0x100000,
+	CHECK(opennova::hud::spinmap_zoom_step(0x100000, 1, jo_max) == 0x100000,
 			"zoom clamps at 0x100000");
+	// dfx2.exe's zoom-out stops at 0x80000, where Jointops.exe's goes on to
+	// 0x100000; the step and the floor are the same.
+	// [orig: Input_HandleActionBinding @0x49ad50 - case 361, `cmp eax, 80000h`
+	//  @0x49bf27 / @0x49bf57 (dfx2.exe)]
+	CHECK(opennova::hud::spinmap_zoom_step(0x7A000, 1, 0x80000) == 0x80000 &&
+			opennova::hud::spinmap_zoom_step(0x7A000, 1, jo_max) == 0x8C4CC,
+			"dfx2.exe's zoom-out caps at 0x80000");
+	opennova::hud::HudMapControl map;
+	map.zoom_q16 = 0x7A000;
+	map.big_zoom_q16 = 0x7A000;
+	CHECK(map.zoom_step(1, 0x80000) == 0x80000 && map.big_zoom_q16 == 0x7A000,
+			"the radar's zoom takes the title's cap with no map up");
+	map.cycle(false);
+	CHECK(map.zoom_step(1, 0x80000) == 0x80000 && map.zoom_q16 == 0x80000,
+			"the big map's zoom takes it while a map mode is up");
 
 	// The live retail probe observes 00TRa's authored 0.61 as the
 	// complementary 0.39 Q16 value. The per-frame scale divides that value
@@ -1537,6 +1598,45 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 		CHECK(brief.lines[1].x0 == 200.0f && brief.lines[1].y0 == 96.0f &&
 						brief.lines[1].y1 == 104.0f,
 				"the tick spans +-fontH/4 around the projected point");
+	}
+
+	// dfx2.exe's modes reach by range (DFX2-87): FAR/BRIEF names every tag; FULL names a tag
+	// within its reach (50 u an AI organic, 300 u a player, 1000 u a player of the local slot's
+	// +0x3C word) or the cursor's, and ticks beyond; BRIEF ticks [orig: HUD_DrawEntityLabel
+	// @0x5A27F0 - @0x5A288C..0x5A28C1, @0x5A2E47, @0x5A2F04, @0x5A309A (dfx2.exe)].
+	{
+		const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+		const opennova::Title *jo = opennova::title_by_code("jo");
+		CHECK(dfx2 != nullptr && dfx2->hud_tag_ranges && jo != nullptr && !jo->hud_tag_ranges,
+				"the reach is dfx2.exe's");
+		CHECK(opennova::hud::friendly_tag_reach_q16(false, true) == 0x320000 &&
+						opennova::hud::friendly_tag_reach_q16(true, false) == 0x12C0000 &&
+						opennova::hud::friendly_tag_reach_q16(true, true) == 0x3E80000,
+				"50 / 300 / 1000 u");
+		HudFrameState ranged = state;
+		ranged.title = dfx2;
+		opennova::hud::HudFriendlyTag &t = ranged.friendly_tags[0];
+		t.name = "Joe";
+		const auto form = [&](int mode, int32_t dist_u, bool player, bool same, bool cursor) {
+			ranged.friendly_tag_mode = mode;
+			t.dist_q16 = dist_u << 16;
+			t.player = player;
+			t.same_account = same;
+			t.cursor_target = cursor;
+			const HudDrawList &l = compiler.compile(ranged, 1024.0f, 768.0f);
+			return l.glyphs.empty() ? (l.lines.size() == 3 ? 't' : '-') : 'n';
+		};
+		CHECK(form(1, 400, false, false, false) == 'n', "dfx2's FAR/BRIEF names past 300 u");
+		CHECK(form(2, 40, false, false, false) == 'n', "an organic within 50 u is named");
+		CHECK(form(2, 60, false, false, false) == 't', "an organic past 50 u ticks");
+		CHECK(form(2, 60, false, false, true) == 'n', "the cursor's tag is named");
+		CHECK(form(2, 299, true, false, false) == 'n', "a player within 300 u is named");
+		CHECK(form(2, 300, true, false, false) == 't', "a player at 300 u ticks");
+		CHECK(form(2, 999, true, true, false) == 'n', "a same-word player within 1000 u is named");
+		CHECK(form(3, 10, true, true, true) == 't', "BRIEF ticks");
+		ranged.title = jo;
+		CHECK(form(2, 999, false, false, false) == 'n', "JO's FULL names every tag");
+		CHECK(form(1, 400, true, true, true) == '-', "JO's FAR/BRIEF draws nothing past 300 u");
 	}
 
 	// A slot entry with an empty callsign draws the single bar.
@@ -2566,6 +2666,41 @@ void test_message_log_element(const fnt_font_t *font) {
 		if (g.color == opennova::hud::half_bright_argb(0xFF80A0FFu)) chat_y = g.y_top;
 	CHECK(std::fabs(chat_y - (expected_y - 0.5f)) < 1.0f,
 			"a single line sits in the bottom row, not the top");
+
+	// The CHAT column draws its tags off under Jointops.exe (a '<' a glyph) and parses them under
+	// dfx2.exe; the SYSTEM column parses them in both (DFX2-88) [orig: HUD_DrawMessageLog
+	// `push 100h` @0x5b9e9d, flags 0 @0x5b9ecc] [orig: HUD_DrawMessageLog - `push 0` @0x5b8ded
+	// (dfx2.exe)].
+	const auto column_glyphs = [&](const opennova::Title *title, uint32_t *system_glyphs) {
+		HudLayout wide = layout; // one display line: no wrap
+		wide.chat_box_x1 = 32;
+		wide.chat_box_x2 = 1000;
+		HudFrameCompiler tagged;
+		tagged.configure(wide, font);
+		tagged.configure_label_fonts(font, font, font, 1.0f, 1.0f);
+		tagged.push_chat_line("a<ch>b", 0xFF80A0FFu, 0);
+		tagged.push_feed_line("c<ch>d", 0xFFAFAFAFu, 0);
+		HudFrameState s;
+		s.message_log_shown = true;
+		s.title = title;
+		// The window's rows only (the feed draws the same lines up top): the CHAT column left of
+		// the middle, the SYSTEM column right of it.
+		uint32_t chat = 0;
+		*system_glyphs = 0;
+		for (const auto &g : tagged.compile(s, 1024.0f, 768.0f).glyphs) {
+			if (g.y_top < 300.0f) continue;
+			if (g.x_top_left < 512.0f) ++chat;
+			else ++*system_glyphs;
+		}
+		return chat;
+	};
+	uint32_t jo_system = 0, dfx2_system = 0;
+	const uint32_t jo_chat = column_glyphs(opennova::title_by_code("jo"), &jo_system);
+	CHECK(jo_chat == 6,
+			"JO's chat column draws its '<ch>' as glyphs");
+	CHECK(column_glyphs(opennova::title_by_code("dfx2"), &dfx2_system) == 2,
+			"dfx2's chat column parses its '<ch>'");
+	CHECK(jo_system == 2 && dfx2_system == 2, "the system column parses its tags in both");
 }
 
 // A mission start zeroes the main-frame counter (world::HudFrameCounters), and the same start
@@ -3064,6 +3199,17 @@ void test_scope_details(const fnt_font_t *font) {
     CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "whole HUD hide suppresses scope details");
     state.hud_detail_level = 0; scope.active = false;
     CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "lowered or unavailable optics show no readouts");
+    // dfx2.exe's overlay draws no magnification readout (DFX2-86) [orig:
+    // HUD_DrawScopeOverlayDetails @0x59CEE0 (dfx2.exe)]; Jointops.exe's draws it [orig: @0x59E9AC].
+    const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+    const opennova::Title *jo = opennova::title_by_code("jo");
+    CHECK(dfx2 != nullptr && dfx2->hud_scope_no_magnification, "dfx2.exe drops the readout");
+    CHECK(jo != nullptr && !jo->hud_scope_no_magnification, "Jointops.exe draws it");
+    scope.active = true; scope.rangefinder = false; scope.zeroable = false; scope.scoped = true;
+    state.title = jo;
+    CHECK(compiler.compile(state, 1024, 768).glyphs.size() == 3, "JO's scope draws 10x");
+    state.title = dfx2;
+    CHECK(compiler.compile(state, 1024, 768).glyphs.empty(), "dfx2's scope draws no 10x");
 }
 
 // The installed STROVER_DIST format uses a Win32 long conversion. Assert
@@ -3255,6 +3401,35 @@ void test_bordered_image_sites(const fnt_font_t *font) {
 			if (q.texture == kHudTexStance0 + 6 || q.texture == kHudTexStance0 + 7) ++n;
 		return n;
 	};
+	// dfx2.exe tints the frame by the HUD info's health band, the stance triple, where
+	// Jointops.exe takes stanceicon_color (DFX2-85) [orig: HUD_DrawStanceIndicator @0x5A1A50 -
+	// @0x5A1AB0..0x5A1AD4 (dfx2.exe)] [orig: HUD_DrawStanceIndicator @0x599F76].
+	{
+		const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+		const opennova::Title *jo = opennova::title_by_code("jo");
+		CHECK(dfx2 != nullptr && dfx2->hud_stance_health_tint, "dfx2.exe tints by health");
+		CHECK(jo != nullptr && !jo->hud_stance_health_tint, "Jointops.exe takes stanceicon_color");
+		HudLayout tinted = layout;
+		tinted.stance_good = 0xFF00FF01u;
+		tinted.stance_middle = 0xFF00FF02u;
+		tinted.stance_bad = 0xFF00FF03u;
+		compiler.update_layout(tinted);
+		auto stance_rgb = [&](const opennova::Title *title, float health) {
+			HudFrameState s = state;
+			s.session = {};
+			s.title = title;
+			s.health_fraction = health;
+			for (const auto &q : compiler.compile(s, 1024, 768).quads)
+				if (q.texture == kHudTexStance0 + 2) return q.color & 0x00FFFFFFu;
+			return 0xFFFFFFFFu;
+		};
+		CHECK(stance_rgb(jo, 0.2f) == 0x00FF8020u, "JO's stance keeps stanceicon_color");
+		CHECK(stance_rgb(dfx2, 1.0f) == 0x0000FF01u, "dfx2's healthy stance is good");
+		CHECK(stance_rgb(dfx2, 0.75f) == 0x0000FF02u, "0xC000 itself is middle");
+		CHECK(stance_rgb(dfx2, 0.4375f) == 0x0000FF02u, "0x7000 is still middle");
+		CHECK(stance_rgb(dfx2, 0.4f) == 0x0000FF03u, "a low health is bad");
+		compiler.update_layout(layout);
+	}
 	CHECK(tile_count(0x10000u, true, 1) == 1, "team 1 draws its tile");
 	CHECK(tile_count(0x30000u, true, 1) == 0, "a game type with 0x20000 draws none");
 	CHECK(tile_count(0x00000u, true, 1) == 0, "a game type without 0x10000 draws none");

@@ -30,4 +30,8 @@ bool decode_heightmap_depth(const std::string &name, const std::vector<uint8_t> 
 bool encode_heightmap_depth16(const std::vector<uint16_t> &raw16, double top, std::vector<uint16_t> &samples,
                               std::string &why);
 
+// The game's own 16-bit `.raw` of `raw16`: 2 bytes a height, little-endian, in its order (the top row first), which
+// decode_heightmap_depth reads back exactly (a sculpted .raw written again, a .cpt's heights exported).
+std::vector<uint8_t> encode_heightmap_raw16(const std::vector<uint16_t> &raw16);
+
 } // namespace opennova::trngen

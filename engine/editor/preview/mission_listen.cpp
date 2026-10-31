@@ -47,12 +47,13 @@ constexpr uint8_t kListenView = audio::kListenerViewFirstPerson;
 constexpr const char *kHours[4] = { "morning", "day", "evening", "night" };
 constexpr const char *kShots[4] = { "dawnshot", "dayshot", "duskshot", "nightshot" };
 constexpr size_t kFiredKept = 16;
-// The scripted voice's volume at the listener, as the game's voice channel plays it: its gain byte, (210 * the
-// dialogue volume + 128) >> 8 at full, through the distance curve at the local anchor's 100-unit radius, the
-// distance 0 [orig: Wac_PlayScriptedVoiceWave @ 0x4ed688; Audio_Play3DPositionalSound @ 0x4ecc90..0x4ecc96;
-// Audio_UpdateAmbientStream @ 0x4edb22] (world::ScriptVoiceChannel::frame's, the runtime's own).
-int32_t script_voice_volume_at_listener() {
-	return audio::calc_distance_volume(0, int64_t(100) * io::kFp16OneInt, (world::kScriptVoiceVolume * 255 + 128) >> 8, 255);
+// The scripted voice's volume at the listener, as the game's voice channel plays it: its gain byte (the title's,
+// world::TitleRules::script_voice_volume, DFX2-42), (gain * the dialogue volume + 128) >> 8 at full, through the
+// distance curve at the local anchor's 100-unit radius, the distance 0 [orig: Wac_PlayScriptedVoiceWave @ 0x4ed688;
+// Audio_Play3DPositionalSound @ 0x4ecc90..0x4ecc96; Audio_UpdateAmbientStream @ 0x4edb22]
+// (world::ScriptVoiceChannel::frame's, the runtime's own).
+int32_t script_voice_volume_at_listener(int32_t gain) {
+	return audio::calc_distance_volume(0, int64_t(100) * io::kFp16OneInt, (gain * 255 + 128) >> 8, 255);
 }
 
 float distance_between(const PreviewVec3 &a, const PreviewVec3 &b) {
@@ -377,7 +378,7 @@ std::vector<ClipSoundFired> MissionListen::fire_sounds(const AssetScan *scan, au
 		// A script's voice wave: at the listener (the scripted voice channel's anchor is the local player, a radio's
 		// too), at the voice channel's volume there (script_voice_volume_at_listener).
 		if (sound.kind == MissionScriptSound::Kind::Voice) {
-			const int32_t voice_volume = script_voice_volume_at_listener();
+			const int32_t voice_volume = script_voice_volume_at_listener(script_.script_voice_volume());
 			ClipSoundFired fired;
 			fired.tick = sound.tick;
 			fired.slot = -1;

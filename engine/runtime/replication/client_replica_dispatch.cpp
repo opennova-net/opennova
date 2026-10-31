@@ -15,7 +15,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		if (decode_session_config(body.data(), body.size(), config)) {
 			game_type_ = static_cast<uint32_t>(config.fields[3]);
 			game_type_known_ = true;
-			// [orig: `mov dword_A821C0, esi` @0x428218 — the second rule dword]
+			// [orig: `mov g_JoinerTimeLimitMinutes, esi` @0x428218 — the second rule dword]
 			state_.session_time_limit_minutes = config.fields[1];
 			const bool permanent_death = (config.bitflags & 0x8000u) != 0;
 			const bool spectators_allowed = (config.bitflags & 0x2000u) != 0;
@@ -95,7 +95,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		//  `if (game_flags & 1) g_DeployScreenActive = !g_DeathScreenActive`
 		//  @0x42e2f8]
 		// The talk keys' reset hold clears on every 0x0F, authority or not
-		// [orig: `mov dword_24C195C, eax` (0) @0x42e396].
+		// [orig: `mov g_RoundResetHold, eax` (0) @0x42e396].
 		state_.round_reset_hold = false;
 		// The session status is reset at the mission start, ahead of this
 		// 0x0F: its completion burst's C2S 0x2D asks the host for the fresh
@@ -117,8 +117,12 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			for (const std::string &name : wsl.team_names)
 				state_.location_names.push_back(name.substr(0, kLocationNameSlotBytes - 1));
 			state_.deploy_check_secured_spawn = (wsl.game_flags & 2u) != 0;
+			// A DFX2 joiner raises it on every 0x0F (ProtocolInMatch::s2c_0f)
+			// [orig: `mov g_DeployScreenActive, al` (1) @0x42fdc8 in NapiNPClientMsg_0x00F
+			//  @0x42fcf0 (dfx2.exe)].
 			state_.deploy_overlay_active =
-					(wsl.game_flags & 0x01u) != 0 && !state_.death_screen_active;
+					protocol_in_match(protocol_).s2c_0f.deploy_screen_always ||
+					((wsl.game_flags & 0x01u) != 0 && !state_.death_screen_active);
 			// The authoritative local-player pose and (waypoint gametype only)
 			// the route list, retained for the joiner frame's once-per-revision
 			// landing on L — retail writes them onto g_LocalPlayerEntity and
@@ -137,7 +141,7 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			// records, the last one's slot kept (DFX2-9, TitleRules::route_done_records).
 			// [orig: NapiNPClientMsg_0x00F @0x42fe82, @0x42ffe7..0x42fffc (dfx2.exe)]
 			ws.waypoint_done_stored =
-					(rules_ != nullptr ? *rules_ : world::title_rules({})).route_done_records;
+					world::require_title_rules(rules_, "ClientReplicaPipeline").route_done_records;
 			if (ws.waypoint_done_stored) {
 				state_.coop_checkpoint = kCoopCheckpointNone;
 				for (const WorldStateWaypoint &wp : ws.waypoints)
@@ -351,15 +355,19 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		// A client raises the talk keys' reset hold until the next 0x0F and
 		// the round-over latch; the authority's arm only counts
 		// [orig: NapiNPClientMsg_GameReset @0x422800 — the is_authority test
-		// @0x422803, `g_RoundOver = 1` @0x422849, `dword_24C195C = 1`
+		// @0x422803, `g_RoundOver = 1` @0x422849, `g_RoundResetHold = 1`
 		// @0x42284e].
 		if (!authority_recipient_) {
 			state_.round_reset_hold = true;
 			state_.spawn_success_gate = true;
-			// The reset ends the end-round linger: the next client frame's
-			// countdown stores mission exit 4 [orig: `mov g_EndRoundLingerTimer,
-			//  ebx` (0) @0x42281f -> Client_ProcessNetworkFrame @0x42c3d3].
-			state_.end_round_linger_ticks = 0;
+			// The reset sets the end-round linger the protocol's joiner keeps (JO's 0, so
+			// the next client frame's countdown stores mission exit 4; DFX2's 1240 ticks
+			// first) [orig: `mov g_EndRoundLingerTimer, ebx` (0) @0x42281f ->
+			//  Client_ProcessNetworkFrame @0x42c3d3] [orig: `mov g_EndRoundLingerTimer, 4D8h`
+			//  @0x42269d in NapiNPClientMsg_GameReset @0x422650 (dfx2.exe); the countdown
+			//  @0x42e21e..0x42e22e in sub_42DFF0 (dfx2.exe)].
+			state_.end_round_linger_ticks =
+					protocol_in_match(protocol_).s2c_25.end_round_linger_ticks;
 		}
 		break;
 	case s2c::DIALOG_LINE: { // the co-op dialog line (0x28)
@@ -427,6 +435,15 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		break;
 	case s2c::SCORE_DELTA_SOUND:
 		apply_score_delta_sound(body);
+		break;
+	case s2c::SCORE_TRACKER_RESET:
+		apply_score_tracker_reset(body);
+		break;
+	case s2c::SCORE_TRACKER_TIME:
+		apply_score_tracker_time(body);
+		break;
+	case s2c::GAME_START_SIGNAL: // the score tracker's leg; the join leg is the connection's
+		apply_game_start_signal(body);
 		break;
 	case s2c::SCRIPT_REMOTE_COMMAND: // the host VM's replicated WAC command
 		apply_script_remote_command(body);

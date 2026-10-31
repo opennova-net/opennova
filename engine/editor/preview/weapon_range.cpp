@@ -6,7 +6,6 @@
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
 #include <base/io/strutil.h>
-#include <base/title/title.h>
 #include <base/resource_index/resource_index.h>
 #include <editor/preview/preview_units.h>
 #include <formats/def/def.h>
@@ -152,7 +151,9 @@ bool WeaponRange::configure(const WeaponRangeSetup &setup) {
 	const bool same_files = setup.files == setup_.files && setup.files && !reads_.moved(*setup.files);
 	const bool same = same_files && strutil::iequals(setup.catalog, setup_.catalog) &&
 	                  strutil::iequals(setup.weapon, setup_.weapon) && strutil::iequals(setup.ammo, setup_.ammo) && read_;
-	if (same && setup.view == setup_.view && setup.enemy == setup_.enemy && setup.target == setup_.target) return false;
+	if (same && setup.game == setup_.game && setup.view == setup_.view && setup.enemy == setup_.enemy &&
+	    setup.target == setup_.target)
+		return false;
 	setup_ = setup;
 	if (!same) {
 		ready_ = false;
@@ -294,9 +295,8 @@ void WeaponRange::reset_() {
 	if (!ready_ || !tables_) return;
 	world_ = std::make_unique<world::World>();
 	world::World &world = *world_;
-	// The rules its rounds run (world::TitleRules): the default title's; the preview names no
-	// project's game.
-	world.rules.title_rules = &world::title_rules(default_title().code);
+	// The rules its rounds run (world::TitleRules): the project's target game's.
+	world.rules.title_rules = &world::title_rules(setup_.game);
 	// The range fires as the game's single player does, out of a session: its rules
 	// word, whose 0x4000 spreads a player's shot by the weapon's ERROR
 	// (world::weapon_spread_rule).

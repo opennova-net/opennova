@@ -681,7 +681,7 @@ int main() {
 		header.minutes_per_day = 120;
 		const uint32_t start = static_cast<uint32_t>(header.start_time) << 16;
 		int phase = 0;
-		weather.run_mission_start_boundary(&env, &mission, header, [&]() {
+		weather.run_mission_start_boundary(&env, &mission, header, nullptr, [&]() {
 			ok &= expect(phase++ == 0 && mission.tod_fixed24 == start &&
 					mission.fog_target_q16() == (640 << 16) &&
 					mission.core.oscillator.intensity == 128,
@@ -698,6 +698,44 @@ int main() {
 		});
 		ok &= expect(phase == 2, "each mission boundary callback runs once");
 	}
+	// A clock a host's map change kept (time-of-day continuity) replaces the header's: the time
+	// as Environment_SetCurrentTime sets it (its tickdown 10), the advance as
+	// Environment_SetTodRate stores it, both ahead of the hook. The night phase is neither clock's:
+	// the World keeps the one the last mission left through the hook and the T0 publish, so the
+	// eager WAC pass reads it, until a tick computes the new clock's.
+	// [orig: Game_StartMission @0x524360 - @0x5253B7, @0x5253C3, the eager WAC pass @0x525CB3;
+	//  g_EnvIsNightPhase @0x26C645C, written only by Environment_ComputeTimeOfDayColors
+	//  @0x57DEAE..0x57E061 and the WAC set]
+	{
+		EnvironmentState env;
+		const opennova::env::Config cfg = make_config();
+		env.set_config(&cfg, true);
+		WeatherRuntime weather;
+		opennova::world::WeatherState mission;
+		mission.night_phase = 1; // the last mission's night (the kernel's carry)
+		opennova::bms::Header header{};
+		header.start_time = (9 << 8) | 128;
+		header.minutes_per_day = 120;
+		const opennova::world::TodClock kept{ 0x0D123456u, 77u }; // 13:04, day
+		bool seen = false;
+		bool held = false;
+		weather.run_mission_start_boundary(
+				&env, &mission, header, &kept,
+				[&]() {
+					seen = mission.tod_fixed24 == kept.tod_fixed24 &&
+							mission.tod_advance_per_tick == kept.tod_advance_per_tick &&
+							mission.tod_epoch_tickdown == 10 &&
+							mission.fog_target_q16() == (640 << 16) && mission.night_phase == 1;
+					weather.attach_state(&mission, &env);
+					weather.set_world_tick_driven(true);
+				},
+				[&]() { held = mission.night_phase == 1; });
+		ok &= expect(seen, "a kept clock replaces the header's ahead of the hook, the night carried");
+		ok &= expect(held, "the T0 publish leaves the carried night phase for the eager WAC pass");
+		opennova::world::WeatherTickEvents events;
+		mission.tick_sim(nullptr, events);
+		ok &= expect(mission.night_phase == 0, "the first tick computes the kept day clock's phase");
+	}
 	{
 		EnvironmentState env;
 		const opennova::env::Config cfg = make_config();
@@ -708,11 +746,12 @@ int main() {
 		const uint32_t advance = weather.state().tod_advance_per_tick;
 		int callbacks = 0;
 		const auto unexpected = [&]() { ++callbacks; };
-		weather.run_mission_start_boundary(&env, nullptr, {}, unexpected, unexpected);
+		weather.run_mission_start_boundary(&env, nullptr, {}, nullptr, unexpected, unexpected);
 		ok &= expect(callbacks == 0 && weather.state().tod_fixed24 == start + 255u * advance,
 				"an absent mission retains the standalone 255-tick settle without callbacks");
 		const uint32_t settled = weather.state().tod_fixed24;
-		weather.run_mission_start_boundary(nullptr, &weather.state(), {}, unexpected, unexpected);
+		weather.run_mission_start_boundary(
+				nullptr, &weather.state(), {}, nullptr, unexpected, unexpected);
 		ok &= expect(callbacks == 0 && weather.state().tod_fixed24 == settled,
 				"an absent environment leaves weather and callbacks untouched");
 	}
@@ -723,7 +762,7 @@ int main() {
 		mission.tod_fixed24 = 3u << 24;
 		mission.set_wind_scale(91);
 		int completions = 0;
-		weather.run_mission_start_boundary(&env, &mission, {}, [&]() {
+		weather.run_mission_start_boundary(&env, &mission, {}, nullptr, [&]() {
 			weather.attach_state(&mission, &env);
 		}, [&]() { ++completions; });
 		ok &= expect(completions == 1 && mission.tod_fixed24 == (3u << 24) &&

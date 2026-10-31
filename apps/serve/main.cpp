@@ -19,6 +19,7 @@
 #include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <base/proc/child_process.h>
+#include <base/version/one_build.h>
 #include <net/novaworld/lobby_identity.h> // read_primary_screen_size
 #include <runtime/world/tick_accumulator.h>
 
@@ -37,6 +38,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <optional>
 #include <string>
@@ -59,6 +61,17 @@ BOOL WINAPI on_console_ctrl(DWORD type) {
 		WaitForSingleObject(g_done, 4500);
 	return TRUE;
 }
+
+// The console's output code page as the process found it (0: untouched). The log and the status
+// page are UTF-8 (the version line's middle-dot separators among them), which a console left in
+// the system's OEM code page (437 on a US machine) shows as other glyphs; the server sets the
+// console to UTF-8 while it runs and gives it back its own at the exit, as the shell that
+// started it expects. A platform primitive.
+UINT g_console_output_cp = 0;
+void restore_console_output_cp() {
+	if (g_console_output_cp != 0)
+		SetConsoleOutputCP(g_console_output_cp);
+}
 #endif
 
 // `ns` of the steady clock.
@@ -73,6 +86,13 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 	using namespace opennova;
 	serve::Server server(options);
 	io::logf(io::LogLevel::kInfo, "opennova-serve: %s", server.version_line().c_str());
+	// The build it runs, for its supervisor (--build-file): written once, before anything that
+	// could end the start.
+	if (!options.build_file.empty()) {
+		std::string why;
+		if (!io::write_file_atomic(options.build_file, serve::build_file_json(one_build()), why))
+			io::logf(io::LogLevel::kWarn, "opennova-serve: --build-file: %s", why.c_str());
+	}
 	std::string error;
 	if (!server.start(error, &g_stop)) {
 		io::logf(io::LogLevel::kError, "opennova-serve: %s", error.c_str());
@@ -101,10 +121,10 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 	const auto started = clock::now();
 	auto previous_start = started;
 	int code = 0;
-	// The status page stands in for the scene a retail dedicated host draws;
-	// stdin is its chat input line (status_console.h). A supervised server
-	// (--status-page off) has neither.
-	serve::StatusConsole status(stdout);
+	// The status page stands in for the scene a retail dedicated host draws, each print headed
+	// by the server's version line; stdin is its chat input line (status_console.h). A
+	// supervised server (--status-page off) has neither.
+	serve::StatusConsole status(stdout, server.version_line());
 	serve::ConsoleInput input;
 	if (options.status_page)
 		input.start();
@@ -176,7 +196,15 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options, std::strin
 } // namespace
 
 int main(int argc, char **argv) {
-	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
+	opennova::games::install(); // every game's titles and protocols (games/games.h)
+	opennova::games::install_rules(); // and the rules each runs: this program runs a match
+#ifdef _WIN32
+	if (const UINT cp = GetConsoleOutputCP();
+			cp != 0 && cp != CP_UTF8 && SetConsoleOutputCP(CP_UTF8)) {
+		g_console_output_cp = cp;
+		std::atexit(restore_console_output_cp);
+	}
+#endif
 	using namespace opennova;
 	std::vector<std::string> args(argv + 1, argv + argc);
 	serve::ServeOptions options;
@@ -189,6 +217,12 @@ int main(int argc, char **argv) {
 	if (parsed > 0) {
 		std::fprintf(stderr, "opennova-serve: %s\n%s", error.c_str(), serve::serve_usage());
 		return 2;
+	}
+	// --version: the line the server would log as it starts, then the exit (opennova-hostd's
+	// form: "opennova-serve ONE 0.0.22.123 (a1b2c3d, staging)" with no game named).
+	if (options.print_version) {
+		std::printf("opennova-serve %s\n", serve::serve_version_line(options).c_str());
+		return 0;
 	}
 	// The primary desktop (server.h ServeOptions::desktop_width / desktop_height); a platform that
 	// reports none leaves the headless pair.

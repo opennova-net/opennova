@@ -55,15 +55,17 @@ inline std::string slot_dir(int slot) {
 
 // What opennova-serve leaves its machine's agent in the slot's working
 // directory (apps/serve/run_reports.h): the tick health it rewrites once a
-// minute (--stats-file), the error a non-zero exit ended on (--exit-file), and
-// its second listing's state, rewritten whenever it changes
-// (--second-listing-file). The service names the first two on every hosted
+// minute (--stats-file), the error a non-zero exit ended on (--exit-file), its
+// second listing's state, rewritten whenever it changes
+// (--second-listing-file), and ONE's build, written once as it starts
+// (--build-file). The service names the first two and the last on every hosted
 // start and the third on a server whose owner asked to be listed on
 // NovaLogic's NovaWorld (hosted/model/hosted_settings.h render_serve_args); the
 // agent reads them there.
 inline constexpr const char *kTickStatsFileName = "tick-stats.json";
 inline constexpr const char *kExitFileName = "exit.txt";
 inline constexpr const char *kSecondListingFileName = "second-listing.json";
+inline constexpr const char *kBuildFileName = "build.json";
 
 // The two port ranges never meet: every game port lies below the first admin port.
 static_assert(slot_game_port(kMaxSlots - 1) < kSlotAdminPortBase,

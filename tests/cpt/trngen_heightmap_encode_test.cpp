@@ -57,12 +57,32 @@ int test_refusals() {
 	return 0;
 }
 
+// The game's 16-bit .raw: 2 MiB, each height little-endian in its place, read back exactly under any white.
+int test_raw16() {
+	std::vector<uint16_t> raw16(kTexels);
+	for (size_t i = 0; i < kTexels; ++i) raw16[i] = static_cast<uint16_t>(i * 7);
+	raw16[3 * size_t(kDepthSide) + 5] = 0xABCD;
+	const std::vector<uint8_t> bytes = encode_heightmap_raw16(raw16);
+	TEST_EXPECT(bytes.size() == kTexels * 2);
+	const size_t at = (3 * size_t(kDepthSide) + 5) * 2;
+	TEST_EXPECT(bytes[at] == 0xCD && bytes[at + 1] == 0xAB);
+	for (double top : {kDepth8Top, 32.0}) {
+		HeightmapDepth back;
+		std::string why;
+		TEST_EXPECT(decode_heightmap_depth("island_h.raw", bytes, top, back, why));
+		TEST_EXPECT(back.depth8.empty() && back.depth16 == raw16);
+	}
+	std::printf("raw16: every height reads back as written, little-endian, the top row first\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	int failures = 0;
 	for (double top : {0.25, 32.0, 64.0, 100.0, kDepth8Top, 128.0, 255.99}) failures += check_top(top);
 	failures += test_refusals();
+	failures += test_raw16();
 	if (failures == 0) std::printf("heightmap_depth_encode16: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

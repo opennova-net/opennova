@@ -545,7 +545,6 @@ function pickFleetServer(value: unknown): FleetServer | null {
     base_tree_id: isCount(v.base_tree_id) ? v.base_tree_id : null,
     expansion_tree_id: isCount(v.expansion_tree_id) ? v.expansion_tree_id : null,
     outdated: v.outdated === true,
-    generation: isCount(v.generation) ? v.generation : 0,
     tick: pickTick(v.tick),
   };
 }

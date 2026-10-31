@@ -123,6 +123,16 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	// A file the game could never read as the build would ship it (a NovaWorld screen, read through the
 	// archives alone, under a name no archive can store): the build leaves it out, refusing nothing (S16).
 	{ C::BuildUnread, about_the_file("build.unread", G::Build, F::None) },
+	// A file the build ships (an archive's entry, a loose file) whose name the release's command file cannot
+	// carry: the package's row of it names the file, and the stock updater reads a row's fields with strtok
+	// over space, comma, CR and LF, so it would read another name (formats/update/command_file.h
+	// command_name_refusal, the rule opennova-update-tool's writer refuses it by). It gates: no release of the
+	// project can ship it. The finding says what UPDATE.EXE would read.
+	{ C::BuildUpdateName,
+	  the_game_fails(about_the_file("build.update_name", G::Build, F::Rename),
+	                 "the stock updater, UPDATE.EXE, reads a command row's fields with strtok over space, comma, CR and "
+	                 "LF, so a release's row of a file whose name holds one names another file, and the release cannot "
+	                 "be built [orig: CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE), strtok \" ,\\r\\n\" @0x404ffd]") },
 	{ C::BuildVerify, code("build.verify", G::Build) },
 	{ C::BuildWrite, code("build.write", G::Build) },
 	{ C::CreateMissingExists, code("create_missing.exists", G::CreateMissing) },
@@ -431,6 +441,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::NovaWorldRefused, code("novaworld.refused", G::NovaWorld) },
 	{ C::NovaWorldFailed, code("novaworld.failed", G::NovaWorld) },
 	{ C::NovaWorldConflicts, code("novaworld.conflicts", G::NovaWorld) },
+	// An export_heights that cannot land: a value of no key it takes, a file not a .raw or inside the project, a
+	// file no .cpt of the project, a .cpt that does not read, a write the disk refuses.
+	{ C::HeightsExport, code("terrain_heights.export", G::TerrainHeights) },
 };
 
 static_assert(std::size(kEntries) == kCoreFindingCount, "every CoreFinding has exactly one row");

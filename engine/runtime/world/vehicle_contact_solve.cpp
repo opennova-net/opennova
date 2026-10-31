@@ -535,7 +535,11 @@ void ground_contact_solve(World &world, Entity &veh, const VehicleTraits &traits
 	const int32_t sev =
 			plat_probe_pass(world, veh, ProbeForcePass::CheckCollisionState, probes, radii, soft,
 					hard, forces, px, py, pz, &hit_entity);
-	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz);
+	// The impact speed in the title's order (DFX2-113).
+	vehicle_contact_impact(world, veh, traits, sev, hit_entity, px, py, pz,
+			sev == 3 ? tracked_impact_speed(m.vel_x, m.vel_y, m.slide_z,
+							   world.rules.title().tracked_impact_speed_xz_first)
+					 : 0);
 	// The decay per severity [orig: @0x47CC31 (1), @0x47CC71 (2), @0x47CCA1 (3)]. The shared
 	// impact fold owns damage, scrape sound and momentum. The terrain-only quarter-speed cut
 	// keeps its strongest-probe distance gate [orig: flt_7C333C @0x47D0DE].

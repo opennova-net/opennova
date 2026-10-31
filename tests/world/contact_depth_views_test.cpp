@@ -246,6 +246,23 @@ void test_the_bike_wall_leg_only_halves_the_speed() {
 	CHECK(m.speed == 0x4000);
 }
 
+// DFX2-113: the tracked hull's severity-3 impact speed sums its squares in the title's x87 order,
+// Jointops.exe's vx^2 + (vy^2 + vz^2), dfx2.exe's (vx^2 + vz^2) + vy^2, then the root, the
+// 0x7FFF0000 cap and the truncation. At the port's 53-bit double (Q3-11) the orders part only
+// where a square or a sum leaves the mantissa: this Pythagorean quadruple's |v| is exactly
+// 264059807, which Jointops.exe's order rounds a hair under.
+// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - @0x47CCC7..0x47CCE4] [orig:
+//  Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - @0x47CCC7..0x47CCD3 (dfx2.exe)]
+void test_the_tracked_impact_speed_order() {
+	CHECK(detail::tracked_impact_speed(121972811, 117600498, -202534782, false) == 264059806);
+	CHECK(detail::tracked_impact_speed(121972811, 117600498, -202534782, true) == 264059807);
+	for (const bool xz_first : {false, true}) {
+		CHECK(detail::tracked_impact_speed(3, 4, 12, xz_first) == 13);
+		CHECK(detail::tracked_impact_speed(0, 0, 0, xz_first) == 0);
+		CHECK(detail::tracked_impact_speed(2000000000, 2000000000, 0, xz_first) == 2147418112);
+	}
+}
+
 // D-NET-1120: the upright grounded bike's landing compression. Each of the two wheels whose
 // probe gap is positive gives the gap back from its compression, floored at 0, and its extension
 // becomes 0xFFFF less the compression; only while the handbrake latch holds or the contact
@@ -289,6 +306,7 @@ int main() {
 	test_the_tank_hull_bottom_carries_wheel_0s_compression();
 	test_the_bike_wall_leg_only_halves_the_speed();
 	test_the_bike_landing_compression();
+	test_the_tracked_impact_speed_order();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

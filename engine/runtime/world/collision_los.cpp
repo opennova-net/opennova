@@ -62,9 +62,11 @@ EntityHandle CollisionWorld::clip_segment_to_nearest_collision(
             // then the model. A row with no bound stamp takes its model's radius, so it resolves
             // its model first (not a retail case: every retail row carries its
             // Entity_InitFromModel stamp); the gates are pure, so the accepted set is the order's
-            // alone. [orig: Entity_RaycastCollision @0x413760 - the def test @0x4138DD, Y / X / Z
-            //  @0x4138E7..0x413948 on +8 / +4 / +0xC against +0, the line distance through
-            //  @0x413A5D]
+            // alone. Retail's first gate, the row's def (@0x4138DD), has no row to refuse here: the
+            // slice builder lists only a def'd row (a def-less row is a synthetic world's, ours).
+            // [orig: Entity_RaycastCollision @0x413760 - the def test `cmp [ebp+20h], 0`
+            //  @0x4138DD, Y / X / Z @0x4138E7..0x413948 on +8 / +4 / +0xC against +0, the line
+            //  distance through @0x413A5D]
             TargetModel target;
             bool resolved = false;
             int32_t bound_radius = ce->bound_radius.q16;

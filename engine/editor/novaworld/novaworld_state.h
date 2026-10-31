@@ -60,6 +60,16 @@ bool read_novaworld_state(
 bool write_novaworld_state(
 		const NovaWorldPaths &paths, const NovaWorldWorkingCopy &copy, std::string &error);
 
+// A service's working copy of the folder: the service's folder under `.opennova/novaworld/` (its host,
+// novaworld_service_folder) and what its state says.
+struct NovaWorldServiceCopy {
+	std::string host;
+	NovaWorldWorkingCopy copy;
+};
+
+// Every service's working copy of the folder, by host: a state that does not read is left out.
+std::vector<NovaWorldServiceCopy> read_novaworld_copies(const ProjectPaths &paths);
+
 // The base revision's files: none (true) while the folder has no base file; false with `error`
 // when the file is no manifest.
 bool read_novaworld_base(

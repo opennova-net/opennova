@@ -32,19 +32,31 @@ void ArmoryLoadout::populate(MenuRuntime &menu, const def::DefWeaponsFile &weapo
 		const std::string &none_label, const hud::GameTextLookup &text) {
 	const int32_t class_mask = world::armory_class_filter_mask(selected_class);
 	const int32_t team_mask = armory_team_mask(entity_team);
+	// DFX2-73: dfx2.exe's populate inserts no NONE row [orig: UI_PopulateThreeCategoryLists
+	//  @0x565d10 - the sorts @0x565e33..0x565e4d, then the ammo populate @0x565e55 (dfx2.exe)].
+	const std::string *none =
+			title != nullptr && !title->armory_lists_none_row ? nullptr : &none_label;
 	for (int i = 0; i < 3; ++i)
 		slot_rows[i] = loadout_fill_slot(menu, weapons, kCategories[i], kCategorySlots[i],
-				class_mask, team_mask, availability, none_label, text);
-	armory_populate_page(menu, weapons, slot_rows, buffers.page(selected_class), pairs, text);
-	grenade_rows = armory_fill_grenades(menu, weapons, class_mask, team_mask, pairs,
-			availability, text);
+				class_mask, team_mask, availability, none, text);
+	grenade_rows = armory_populate_page(
+			menu, weapons, slot_rows, buffers.page(selected_class), pairs, text);
+	const std::vector<int> filled =
+			armory_fill_grenades(menu, weapons, class_mask, team_mask, pairs, availability, text);
+	for (size_t i = 0; i < filled.size() && i < grenade_rows.size(); ++i)
+		grenade_rows[i] = filled[i];
+}
+
+bool ArmoryLoadout::every_grenade_position() const {
+	return title != nullptr && title->death_screen_loadout;
 }
 
 void ArmoryLoadout::flip_class(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 		int entity_team, int from_class, int to_class, const WeaponAvailability &availability,
 		const std::string &none_label, const hud::GameTextLookup &text) {
-	buffers.store(from_class, armory_serialize_page(menu, weapons, slot_rows, grenade_rows,
-			pairs, entity_team, from_class));
+	buffers.store(from_class,
+			armory_serialize_page(menu, weapons, slot_rows, grenade_rows, pairs, entity_team,
+					from_class, every_grenade_position()));
 	populate(menu, weapons, entity_team, to_class, availability, none_label, text);
 }
 
@@ -97,8 +109,9 @@ double ArmoryLoadout::weight(const MenuRuntime &menu, const def::DefWeaponsFile 
 
 const playersav::KitPage &ArmoryLoadout::accept(const MenuRuntime &menu,
 		const def::DefWeaponsFile &weapons, int entity_team, int selected_class) {
-	buffers.store(selected_class, armory_serialize_page(menu, weapons, slot_rows, grenade_rows,
-			pairs, entity_team, selected_class));
+	buffers.store(selected_class,
+			armory_serialize_page(menu, weapons, slot_rows, grenade_rows, pairs, entity_team,
+					selected_class, every_grenade_position()));
 	return buffers.page(selected_class);
 }
 

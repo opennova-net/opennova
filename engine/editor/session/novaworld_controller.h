@@ -32,6 +32,7 @@
 
 #include <editor/novaworld/novaworld_account.h>
 #include <editor/novaworld/novaworld_jobs.h>
+#include <editor/novaworld/novaworld_scan.h>
 #include <editor/novaworld/novaworld_transport.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/session_operation.h>
@@ -69,7 +70,7 @@ public:
 	void sign_in(const EditorRequest &request);
 	void sign_out();
 	void check();
-	void get(const EditorRequest &request);
+	void sync(const EditorRequest &request);
 	void put(const EditorRequest &request);
 	void pull();
 	void resolve(const EditorRequest &request);
@@ -81,6 +82,8 @@ public:
 	void open_site(const EditorRequest &request);
 	void submit(const EditorRequest &request);
 	void make_own();
+	void rejoin();
+	void keep_folder();
 	void make_missing_base(const EditorRequest &request);
 
 	// The poll's: the calls outside the slot (a sign-in, a project list, the project's ask, a put,
@@ -135,11 +138,18 @@ private:
 	// The account as the view shows it, and kept by the store.
 	void show_account();
 	void keep_account(const NovaWorldAccountUpdate &update);
+	// What a job settled about its session, kept where that is still the account's: a sign-in or a
+	// sign-out made while it ran stands, and an ended session is an account change.
+	void keep_job_account(const NovaWorldAccountUpdate &update);
 	// The account signed in, out, or to another service: the open project's working copy read again
 	// for it, and the project asked again (or its setup due).
 	void account_changed();
 	// The project list asked of the service (the account's view of it).
 	void list_projects();
+	// The project `key` in a person's words: its name as listed or as the service last answered, the open
+	// project's as its file has it, and the key only where nothing says more. The key is the identity
+	// underneath, and no window's word for a project.
+	std::string project_name(const std::string &key) const;
 	// The open project's export folder (ProjectPaths::export_dir), which no scan of it reads.
 	std::string export_dir() const;
 	// The open project's working copy on the account's service: the state there of the key its
@@ -164,12 +174,20 @@ private:
 	void track(bool then_check);
 	// The open project's working copy checked (the slot free); false, nothing started, with none.
 	bool start_check();
+	// The changes counted again after the project's files moved (a save, an import, a pull's files read
+	// in): a scan stepped a little at each poll, holding nothing, since a check holds the files and asks
+	// the service. Dropped as an operation starts, and started again once none runs.
+	void recount();
 	// A put's answer: the key written and the folder a working copy at revision 0, once nothing
 	// holds the project (put_waiting_), and a check due.
 	void finish_put();
 	// A pull's paused plan's conflicts into the view.
 	void show_conflicts();
 	void finish_pull(NovaWorldPull &pull);
+	// The project file in `root` made to name `key`, the project the folder was got as: a revision's own
+	// file may name another (a key changed on the service since) or none, and a folder is the working
+	// copy of what its file names. A rewritten file is a change, which the next push carries to every copy.
+	void name_project(const std::string &root, const std::string &key);
 	void finish_push(NovaWorldPush &push);
 	// A check, a pull or a push that found the store reset (NovaWorldJob::reset): said, and the
 	// setup started, a check after it.
@@ -177,14 +195,14 @@ private:
 	// The one resolver of a mod's base game (the New project form's A mod of, a got mod's base): the
 	// NovaWorld game setup.key (`game` its title code) made a project in setup.dir as an
 	// operation (BaseSetupOperation), setup.then going on once it is in. A game NovaWorld lists the
-	// account as none of NovaLogic's (novalogic_project) is got from it; NovaLogic's, or one the
-	// account may not read (never listed), is imported from `install`, false with `why` (nothing started) where that holds
-	// no install of `game`.
+	// account with a revision to get is got from it, so the folder is its working copy; one the account
+	// may not read (never listed: NovaLogic's are private), or NovaLogic's with nothing pushed yet, is
+	// imported from `install`, false with `why` (nothing started) where that holds no install of `game`.
 	bool make_base(BaseSetup setup, const std::string &game, const std::string &install, std::string &why);
 	// A project of the NovaWorld game `game` on this computer already, for a mod made in `dir` to be
-	// made on (a recent project, or one in the folder `dir` is made in): one whose project file names
-	// the game's key, else for a game make_base would import, one of its game's own files (a
-	// standalone project of its title code naming no key, its files imported from a game
+	// made on (a recent project, a working copy, or one in the folder `dir` is made in): one whose project file names
+	// the game's key, else for a game of NovaLogic's or one the account may not read, one of its game's
+	// own files (a standalone project of its title code naming no key, its files imported from a game
 	// install: its archives recorded). "" none.
 	std::string local_base(const std::string &dir, const RemoteGame &game) const;
 	// A reply that says the account's session ended (401): signed out, said so; false for any other.
@@ -237,6 +255,7 @@ private:
 	std::string put_key_;
 	std::string put_code_;
 	bool put_create_ = false;
+	std::string put_taken_; // a new project's refusal for a key taken, while that key is asked after
 	RemoteProject put_project_;
 	bool put_waiting_ = false;
 	// A project New project makes to be put on NovaWorld (make_project): the put it waits for and
@@ -252,15 +271,17 @@ private:
 	bool check_after_track_ = false;
 	bool put_due_ = false;
 	uint64_t files_seen_ = 0; // the project's files' view revision as the last check started
+	std::unique_ptr<NovaWorldScan> recount_; // the changes being counted again (recount)
+	bool recount_due_ = false;
 	std::string new_base_asked_; // what the view's new_base was found for (show_new_base)
 	// A pull stopped on conflicts, for the author to settle; and the folder a get's pull opens once
 	// it lands
 	// ("" a pull of the open project).
 	std::unique_ptr<NovaWorldPull> paused_;
-	std::string get_dir_;
+	std::string sync_dir_;
 	// A get of a mod's project: its base game's project's key, made next where the mod's project file
 	// names it (make_base), the mod opened once it is in.
-	std::string get_base_key_;
+	std::string sync_base_key_;
 };
 
 } // namespace opennova::editor

@@ -1,5 +1,5 @@
 # Build stage
-FROM node:21-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
@@ -7,7 +7,7 @@ COPY . .
 RUN npm run build
 
 # Runtime stage
-FROM nginx:1.25-alpine
+FROM nginx:1.28-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY cloudflare-realip.conf /etc/nginx/cloudflare-realip.conf
 COPY edge-auth.conf /etc/nginx/edge-auth.conf

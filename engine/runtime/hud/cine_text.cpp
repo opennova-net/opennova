@@ -1,6 +1,7 @@
 #include <runtime/hud/cine_text.h>
 
 #include <runtime/hud/end_round_statistics.h> // epilog_counter_value_text
+#include <runtime/hud/feed_format.h> // sprintf_first_s
 #include <runtime/hud/hud_frame.h> // wrapped_text_layout
 #include <runtime/hud/hud_math.h>
 
@@ -65,23 +66,25 @@ GameFontRun cine_text_fade_run(const GameFont &font, float scale, const std::str
 
 GameFontRun cine_epilog_counter_run(const GameFont &font, float scale, const std::string &label,
 		const std::string &value, const std::string &count, int32_t label_x, int32_t value_x,
-		int32_t count_x, int32_t row_y, const CineViewport &view) {
+		int32_t count_x, int32_t row_y, uint32_t label_color, uint32_t value_color,
+		const CineViewport &view) {
 	GameFontRun out;
 	if (font.font() == nullptr) return out;
 	// [orig: @0x573460..0x5734d3; HUD_DrawTextLeft_HalfBright's colour of -1 @0x5804D8..0x5804F0]
 	const float y = static_cast<float>(static_cast<int>(over_height(row_y, view)));
-	const uint32_t argb = half_bright_argb(0xFFFFFFFFu);
+	const uint32_t label_argb = half_bright_argb(label_color);
+	const uint32_t value_argb = half_bright_argb(value_color);
 	const auto column = [&](int32_t v) {
 		return static_cast<float>(static_cast<int>(over_width(v, view)));
 	};
 	if (!label.empty())
-		append(out, font.layout(label.c_str(), column(label_x), y, scale, scale, 0u, argb));
+		append(out, font.layout(label.c_str(), column(label_x), y, scale, scale, 0u, label_argb));
 	if (!value.empty())
 		append(out, font.layout(value.c_str(), column(value_x), y, scale, scale, kFontAlignRight,
-				argb));
+				value_argb));
 	if (!count.empty())
 		append(out, font.layout(count.c_str(), column(count_x), y, scale, scale, kFontAlignRight,
-				argb));
+				value_argb));
 	return out;
 }
 
@@ -90,19 +93,63 @@ std::string cine_epilog_count_text(int32_t points_target, int32_t points_rate, i
 	return std::to_string(points);
 }
 
-GameFontRun cine_event_text_run(const world::CineEvent &e, const std::string &text,
-		const GameFont &font, float scale, const CineViewport &view) {
+std::string cine_event_line(const world::CineEvent &e, const std::string &game_text,
+		const std::string &banner) {
+	switch (e.text_source) {
+	case world::CineTextSource::Banner:
+		return banner;
+	case world::CineTextSource::GameTextFormat:
+		return sprintf_first_s(game_text, e.text);
+	case world::CineTextSource::Text:
+		return e.text;
+	case world::CineTextSource::GameText:
+	default:
+		return game_text;
+	}
+}
+
+GameFontRun cine_event_text_run(const world::CineEvent &e, const std::string &game_text,
+		const std::string &banner, const GameFont &font, float scale, const CineViewport &view) {
 	switch (e.kind) {
-	case world::CineEventKind::TextFade:
-		return cine_text_fade_run(font, scale, text, e.x, e.y, e.box_width, e.box_height,
-				world::cine_text_fade_argb(e), view);
+	case world::CineEventKind::TextFade: {
+		// The y the build's cursor gave, moved by a stored banner (world::CineEvent::banner_y).
+		const int32_t y = e.banner_y >= 0 && !banner.empty() ? e.banner_y : e.y;
+		return cine_text_fade_run(font, scale, cine_event_line(e, game_text, banner), e.x, y,
+				e.box_width, e.box_height, world::cine_text_fade_argb(e), view);
+	}
 	case world::CineEventKind::EpilogCounter:
-		return cine_epilog_counter_run(font, scale, text, epilog_counter_value_text(e.value, e.max),
+	case world::CineEventKind::EpilogCounterFont:
+		return cine_epilog_counter_run(font, scale, game_text,
+				epilog_counter_value_text(e.value, e.max),
 				cine_epilog_count_text(e.points_target, e.points_rate, e.points), e.label_x,
-				e.value_x, e.count_x, e.row_y, view);
+				e.value_x, e.count_x, e.row_y, e.label_color, e.value_color, view);
 	default:
 		return GameFontRun{};
 	}
+}
+
+int32_t cine_event_font(const world::CineEvent &e) {
+	return e.kind == world::CineEventKind::TextFade ||
+					e.kind == world::CineEventKind::EpilogCounterFont
+			? e.font
+			: -2;
+}
+
+const char *cine_font_file(const HudLabelFontChoice &choice, int32_t font) {
+	switch (font) {
+	case -3:
+		return choice.impact38_fnt;
+	case -2:
+		return choice.large_fnt;
+	case -1:
+		return choice.bold_fnt;
+	default:
+		return "";
+	}
+}
+
+float cine_font_scale(const HudLabelFontChoice &choice, int32_t font) {
+	return font == -1 ? choice.scale : choice.large_scale;
 }
 
 } // namespace opennova::hud

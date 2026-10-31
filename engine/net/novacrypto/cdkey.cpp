@@ -3,6 +3,8 @@
 #include <net/novacrypto/nwu.h>
 #include <net/novacrypto/pubcrypto.h>
 
+#include <base/os_registry/os_registry.h>
+
 #include <base/io/strutil.h>
 
 #include <cstddef>
@@ -101,18 +103,6 @@ std::vector<uint8_t> bytes_of(std::string_view text) {
 	return std::vector<uint8_t>(text.begin(), text.end());
 }
 
-// A decoded value as the client keeps it: a C string, so up to its first NUL.
-// [orig: CDKey_WriteActivationFromNWACT @0x411f37 (dfx2.exe), Napi_CopyString to +16]
-std::string c_string_of(const std::vector<uint8_t> &bytes) {
-	std::string out;
-	for (const uint8_t b : bytes) {
-		if (b == 0)
-			break;
-		out.push_back(static_cast<char>(b));
-	}
-	return out;
-}
-
 } // namespace
 
 bool is_fingerprint(std::string_view text) {
@@ -150,23 +140,88 @@ bool decode_wire_key(const KeyChains &chains, std::string_view wire_key, std::st
 
 std::string make_activation(
 		const KeyChains &chains, std::string_view wire_key, std::string_view fingerprint) {
-	std::string registry = encode_key_chain(bytes_of(wire_key), chains.registry);
+	std::vector<uint8_t> plaintext = bytes_of(wire_key);
+	plaintext.push_back(0);
+	std::string registry = encode_key_chain(plaintext, chains.registry);
 	mix_up(registry, fingerprint);
 	return registry;
 }
 
-bool read_activation(const KeyChains &chains, std::string_view nwact, std::string_view fingerprint,
-		std::string &wire_key) {
+bool activation_wire_key(const KeyChains &chains, std::string_view nwact,
+		std::string_view fingerprint, std::string &wire_key) {
+	// The +16 copy's bound: Napi_CopyString(this + 16, decoded, 0x800) keeps 0x7FF characters.
+	// [orig: CDKey_WriteActivationFromNWACT @0x411f37 (dfx2.exe); Napi_CopyString @ 0x617e10]
+	constexpr size_t kWireKeyCopy = kDecodeRoom - 1;
 	wire_key.clear();
 	std::string registry(nwact);
 	mix_down(registry, fingerprint);
-	// [orig: CDKey_Decode @0x411af0 (dfx2.exe): NapiNP_DecodeEncryptedString under the
-	//  descriptor's +20 chain @0x411b38]
 	std::vector<uint8_t> plaintext;
 	if (!decode_key_chain(registry, chains.registry, plaintext, kDecodeRoom))
 		return false;
-	wire_key = c_string_of(plaintext);
+	for (const uint8_t b : plaintext) {
+		if (b == 0 || wire_key.size() == kWireKeyCopy)
+			break;
+		wire_key.push_back(static_cast<char>(b));
+	}
 	return true;
+}
+
+KeyInfo &process_key_info() {
+	static KeyInfo info;
+	return info;
+}
+
+KeyStore machine_key_store(const KeyChains &chains, const std::string &stand_in_dir) {
+	// The value's room: the read's 0x2000-byte buffer [orig: CDKey_ReadRegistry @0x411bd6
+	//  (dfx2.exe), the size pushed to the read].
+	static constexpr size_t kValueRoom = 0x2000;
+	const std::string key = chains.registry_key != nullptr ? chains.registry_key : "";
+	const std::string value = chains.registry_value != nullptr ? chains.registry_value : "";
+	std::string stand_in;
+	if (chains.stand_in_file != nullptr && !stand_in_dir.empty())
+		stand_in = stand_in_dir + "/" + chains.stand_in_file;
+	KeyStore store;
+	store.read = [key, value, stand_in](std::string &out) {
+		return os_registry_read_string(key, value, kValueRoom, stand_in, out);
+	};
+	store.write = [key, value, stand_in](const std::string &text) {
+		return os_registry_write_string(key, value, text, stand_in);
+	};
+	return store;
+}
+
+int32_t read_registry(KeyInfo &info, const KeyChains &chains, std::string_view fingerprint,
+		const KeyStore &store) {
+	std::string value; // the buffer's first byte cleared [orig: @0x411bf1 (dfx2.exe)]
+	if (!store.read || !store.read(value)) {
+		value.clear();
+		if (store.read)
+			(void)store.read(value);
+	}
+	std::string wire;
+	(void)activation_wire_key(chains, value, fingerprint, wire);
+	const size_t n = wire.size();
+	info.multiplayer = n >= 3 && wire[n - 3] == '/' && wire[n - 2] == 'M' && wire[n - 1] == 'P';
+	info.status = 1;
+	info.keys.cdkiid = wire;
+	return info.status;
+}
+
+int32_t write_activation(KeyInfo &info, const KeyChains &chains, std::string_view nwact,
+		std::string_view fingerprint, const KeyStore &store) {
+	const std::string text(nwact);
+	if (!store.write || (!store.write(text) && !store.write(text))) {
+		info.status = -1;
+		return info.status;
+	}
+	std::string wire;
+	if (!activation_wire_key(chains, text, fingerprint, wire)) {
+		info.status = -3;
+		return info.status;
+	}
+	info.status = 1;
+	info.keys.cdkiid = wire;
+	return info.status;
 }
 
 LanJoinVerdict check_lan_join(const KeyChains &chains, const WireKeys &joiner, const WireKeys &host,

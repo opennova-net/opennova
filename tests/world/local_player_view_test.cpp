@@ -2293,9 +2293,9 @@ void test_default_wheel_binding_zooms_in_away_from_the_player() {
     PlayerViewState view;
     ScopeZoomLimits limits;
     limits.scope_min_mag = 2;
-    BindingSet bindings;
-    std::size_t count = 0;
-    const auto *rows = catalog(&count);
+    BindingSet bindings(opennova::controls::default_catalog());
+    const std::size_t count = bindings.catalog().count;
+    const ActionDef *rows = bindings.catalog().rows;
     const auto step = [&](uint16_t wheel, int expected) {
         // The wheel's event (256 up, 512 down) takes its row by the binding walk; its record
         // names the row's request (BindingSet::mouse_click_action, player_action_request).
@@ -2303,8 +2303,8 @@ void test_default_wheel_binding_zooms_in_away_from_the_player() {
                 [](int) { return false; });
         CHECK(index >= 0 && static_cast<std::size_t>(index) < count);
         if (index < 0 || static_cast<std::size_t>(index) >= count) return;
-        const auto request = player_action_request(InputEventRecord{
-                action_code(rows[index].id), 0, 0, 0, false});
+        const auto request = player_action_request(opennova::controls::default_catalog(), InputEventRecord{
+                rows[index].code, 0, 0, 0, false});
         CHECK(request && request->action == PlayerAction::WeaponCycle);
         if (!request) return;
         CHECK(local_player_weapon_cycle_route(lw.w, weapon, view, limits, request->value) == WeaponCycleRoute::kZoomStep);
@@ -2381,6 +2381,17 @@ void test_frame_carries_the_framefx_dispatch_facts() {
     CHECK(f.frame_fx.death_elapsed_ticks == 250);
     CHECK(f.frame_fx.camera_mode == 0);
     CHECK(!f.frame_fx.thermal_view && !f.frame_fx.monitor_view); // no optical view yet
+    // DFX2-48's health pair: the local player's word and its ceiling, 1 without a
+    // definition, the def hp with one [orig: the twin of Render_ProcessMainSceneFrame
+    // @0x5c98e2..0x5c9909 (dfx2.exe)].
+    CHECK(f.frame_fx.local_present && f.frame_fx.local_health == 100);
+    CHECK(f.frame_fx.local_max_health == 1);
+    lw.entity().has_item_def = true;
+    lw.entity().health_max = 400;
+    lw.w.rules.mp_session = true;
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.frame_fx.local_max_health == 400);
+    lw.w.rules.mp_session = false;
     // A raised, settled sight is the CanFire verdict: both latches follow it.
     v.local_dead = false;
     CHECK(player_view_set_engaged(v, true, false));

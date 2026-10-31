@@ -273,9 +273,6 @@ int test_settings_rules() {
 		c.expansion_id = 2;
 		c.missions = { "second.bms", "ESCAL.BMS" };
 	})));
-
-	TEST_EXPECT(hosted::split_missions(hosted::join_missions(s.missions)) == s.missions);
-	TEST_EXPECT(hosted::split_missions("").empty());
 	return 0;
 }
 
@@ -311,7 +308,7 @@ int test_renders() {
 	plan.admin_port = hosted::slot_admin_port(3);
 	plan.admin_allowed_ip = "10.1.2.3";
 	TEST_EXPECT(plan.game_port == 32771 && plan.admin_port == 32803);
-	const std::string cfg_text = hosted::render_game_cfg(plan, s);
+	const std::string cfg_text = hosted::render_game_cfg(plan, s, "jo");
 	const auto cfg = opennova::gamecfg::load(cfg_text.data(), cfg_text.size(), {});
 	TEST_EXPECT(!cfg.version_reset);
 	TEST_EXPECT(cfg.cfg.networkconnecttype == 1);
@@ -356,7 +353,7 @@ int test_renders() {
 	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
-		"--send-holdoff-ticks", "12", "--entity-send-budget", "600",
+		"--build-file", "build.json", "--send-holdoff-ticks", "12", "--entity-send-budget", "600",
 		"--rotation-first", "/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(spec.serve_args == args);
 	TEST_EXPECT(hosted::render_serve_args(s, "jo", "jox01", "203.0.113.5", 7597, in.novalogic) == args);
@@ -389,8 +386,8 @@ int test_renders() {
 					copy.entity_send_budget == 1000 && copy.send_holdoff_ticks == 0 &&
 					copy.options.get_string("server_message", "") == "Keep this setting");
 		}
-		for (const auto table : { opennova::gamecfg::ConfigTable::Jo, opennova::gamecfg::ConfigTable::Dfx2 }) {
-			const auto schema = hosted::hosted_settings_schema(table);
+		for (const char *title : { "jo", "dfx2" }) {
+			const auto schema = hosted::hosted_settings_schema(title);
 			const auto packet = std::find_if(schema.array.begin(), schema.array.end(),
 					[](const auto &row) { return row.get_string("key", "") == "max_packet_size"; });
 			TEST_EXPECT(packet != schema.array.end());
@@ -499,12 +496,12 @@ int test_renders() {
 	const std::vector<std::string> dfx2_args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
-		"--send-holdoff-ticks", "12", "--entity-send-budget", "600",
+		"--build-file", "build.json", "--send-holdoff-ticks", "12", "--entity-send-budget", "600",
 		"--rotation-first", "/game", "dfx2" };
 	TEST_EXPECT(dfx2.serve_args == dfx2_args);
 	const hosted::LaunchSpec on = hosted::render_launch(s, "jo", "", in);
-	TEST_EXPECT(on.serve_args.size() == 21 && on.serve_args[18] == "--rotation-first" &&
-			on.serve_args[19] == "/game" && on.serve_args[20] == "jo");
+	TEST_EXPECT(on.serve_args.size() == 23 && on.serve_args[20] == "--rotation-first" &&
+			on.serve_args[21] == "/game" && on.serve_args[22] == "jo");
 	return 0;
 }
 
@@ -602,6 +599,53 @@ int test_products() {
 	return 0;
 }
 
+// The server build a server runs (the serve image every start pins, ADR 0053): one pinned to an
+// older image than the fleet's, its data current, has a server build update; the owner's update
+// takes it (where no data waits it is no up_to_date) and places the server again at once, no
+// restart counted, on the same trees and the fleet's image, a new generation; then nothing waits.
+// An image not known on either side is no update.
+int test_server_build_update() {
+	Rig rig("hosted_build_update");
+	Database &db = rig.db;
+	const int64_t id = rig.request("rebuild_owner", rig.settings());
+	TEST_EXPECT(id > 0 && !rig.to_running(id, 9401).empty());
+	auto row = rig.server(id);
+	TEST_EXPECT(row && row->serve_image == kServeImage &&
+			!hosted::server_build_outdated(*row, kServeImage));
+	TEST_EXPECT(hosted::request_update(db, id, kServeImage) == hosted::UpdateOutcome::UpToDate);
+	// A release since: the server runs the image its start pinned, older than the fleet's now.
+	const std::string older = "ghcr.io/opennova-net/opennova-serve:sha-older";
+	hosted::set_serve_image(db, id, older);
+	row = rig.server(id);
+	TEST_EXPECT(hosted::server_build_outdated(*row, kServeImage) && !hosted::server_outdated(db, id));
+	TEST_EXPECT(!hosted::server_build_outdated(*row, ""));
+	TEST_EXPECT(hosted::request_update(db, id, "") == hosted::UpdateOutcome::UpToDate);
+	const auto base = row->base_tree_id;
+	const int64_t generation = row->generation;
+	TEST_EXPECT(hosted::request_update(db, id, kServeImage) == hosted::UpdateOutcome::Requested);
+	rig.step();
+	TEST_EXPECT(rig.state(id) == State::Provisioning &&
+			contains(last_detail(db, id), "current data and server build"));
+	TEST_EXPECT(!rig.to_running(id, 9402).empty());
+	row = rig.server(id);
+	TEST_EXPECT(row->serve_image == kServeImage && row->generation == generation + 1 &&
+			row->base_tree_id == base && row->restarts == 0 && !row->update_requested &&
+			!hosted::server_build_outdated(*row, kServeImage));
+	{
+		const FakeAgent::Container *c = rig.running_container(id);
+		TEST_EXPECT(c && c->desired.image == kServeImage);
+	}
+	TEST_EXPECT(hosted::request_update(db, id, kServeImage) == hosted::UpdateOutcome::UpToDate);
+	// The admin's update-all takes a server build update too, once, and none without the
+	// fleet's image.
+	hosted::set_serve_image(db, id, older);
+	TEST_EXPECT(hosted::request_update_all(db, std::nullopt, "") == 0);
+	TEST_EXPECT(hosted::request_update_all(db, std::nullopt, kServeImage) == 1);
+	TEST_EXPECT(hosted::request_update_all(db, std::nullopt, kServeImage) == 0);
+	TEST_EXPECT(rig.server(id)->update_requested);
+	return 0;
+}
+
 // The trees a server is pinned to (ADR 0064): its first start takes its products'
 // current trees; a crash restart and a fleet-caused replace keep them
 // while newer data arrives (the owner's view says an update waits); the
@@ -618,7 +662,7 @@ int test_pins_and_updates() {
 	auto row = rig.server(id);
 	TEST_EXPECT(row->base_tree_id == rig.data.jo_tree && row->expansion_tree_id == rig.data.jox_tree &&
 			row->generation == 1 && !hosted::server_outdated(db, id));
-	TEST_EXPECT(hosted::request_update(db, id) == hosted::UpdateOutcome::UpToDate);
+	TEST_EXPECT(hosted::request_update(db, id, kServeImage) == hosted::UpdateOutcome::UpToDate);
 
 	// Newer data for the base: the server is outdated, runs on, and a crash
 	// restart keeps its pins (its generation moves on, its restart counted).
@@ -651,7 +695,7 @@ int test_pins_and_updates() {
 
 	// The owner's update: placed again at once, no restart counted, the next
 	// start on the current trees with a new generation; the flag cleared.
-	TEST_EXPECT(hosted::request_update(db, id) == hosted::UpdateOutcome::Requested);
+	TEST_EXPECT(hosted::request_update(db, id, kServeImage) == hosted::UpdateOutcome::Requested);
 	TEST_EXPECT(rig.server(id)->update_requested);
 	rig.step();
 	row = rig.server(id);
@@ -687,7 +731,7 @@ int test_pins_and_updates() {
 	TEST_EXPECT(other > 0 && !rig.to_running(other, 9305).empty());
 	const int64_t jox_tree2 = seed_tree(db, rig.data.jox, "1.1", { "escal.bms" }, { "jox01.pff", "jox01L.pff", "version.txt" });
 	TEST_EXPECT(jox_tree2 != 0 && hosted::server_outdated(db, id) && !hosted::server_outdated(db, other));
-	TEST_EXPECT(hosted::request_update_all(db, std::nullopt) == 1);
+	TEST_EXPECT(hosted::request_update_all(db, std::nullopt, kServeImage) == 1);
 	rig.step();
 	TEST_EXPECT(rig.state(id) == State::Provisioning && rig.state(other) == State::Running);
 	TEST_EXPECT(!rig.to_running(id, 9306).empty());
@@ -1105,7 +1149,7 @@ int test_lifecycle_and_stop() {
 	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
-		"--send-holdoff-ticks", "12", "--entity-send-budget", "600",
+		"--build-file", "build.json", "--send-holdoff-ticks", "12", "--entity-send-budget", "600",
 		"--rotation-first", "/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(c->desired.args == args);
 	{
@@ -1204,6 +1248,30 @@ int test_two_servers_one_machine() {
 	TEST_EXPECT(cb && cb->desired.uid == 10002 && cb->desired.slot == 1);
 	const auto holders = hosted::slot_holders(rig.db, *ra->machine_ref);
 	TEST_EXPECT(holders.size() == 2 && holders[0].server_id == a && holders[1].server_id == b);
+	return 0;
+}
+
+// A stored configuration that does not read (a key no binary takes, here) fails that server
+// alone: the row reads with the defaults and the reason, the pass fails it (its agent stops its
+// container) and every other server's pass goes on.
+int test_unreadable_configuration() {
+	Rig rig("hosted_unreadable_config");
+	const int64_t bad = rig.request("unreadable_a");
+	const int64_t good = rig.request("unreadable_b");
+	TEST_EXPECT(bad > 0 && good > 0);
+	TEST_EXPECT(!rig.to_running(bad, 5111).empty());
+	rig.db.exec("UPDATE hosted_servers SET configuration = configuration || '{\"no_such_key\": 1}' "
+				"WHERE id = $1;",
+			{ BindValue(bad) });
+	const auto unread = rig.server(bad);
+	TEST_EXPECT(unread && unread->settings_error == "no_such_key: Unknown settings field.");
+	TEST_EXPECT(!rig.to_running(good, 5112).empty());
+	const auto row = rig.server(bad);
+	TEST_EXPECT(row && row->state == State::Failed &&
+			row->failure_reason ==
+					"its stored configuration does not read (no_such_key: Unknown settings field.)" &&
+			!row->machine_ref);
+	TEST_EXPECT(rig.state(good) == State::Running);
 	return 0;
 }
 
@@ -3028,6 +3096,7 @@ int main(int argc, char **argv) {
 		{ "products", { test_products } },
 		{ "no_data", { test_no_data } },
 		{ "pins_and_updates", { test_pins_and_updates } },
+		{ "server_build_update", { test_server_build_update } },
 		{ "service_accounts", { test_service_accounts } },
 		{ "requests", { test_requests } },
 		{ "fleet_room", { test_fleet_room } },
@@ -3048,6 +3117,7 @@ int main(int argc, char **argv) {
 		{ "timeouts_and_health", { test_timeouts_and_health } },
 		{ "listing_lost", { test_listing_lost } },
 		{ "machine_lost_replaces", { test_machine_lost_replaces } },
+		{ "unreadable_configuration", { test_unreadable_configuration } },
 		{ "listing_waits_while_lost", { test_listing_waits_while_lost } },
 		{ "waits_for_lobby", { test_waits_for_lobby } },
 		{ "owner_changes", { test_owner_changes } },

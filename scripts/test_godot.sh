@@ -114,12 +114,15 @@ behind=()
 if [[ "$windowed" == "1" ]]; then
   behind=(python "$root/scripts/mcp/game_mcp.py" run --)
 fi
-# The game's own files (the player profile's player.sav and weapon.sav, and
-# game.cfg) live in the directory it runs in (LaunchFlags.working_dir), for a
+# The game's own files (the player profile's player.sav and weapon.sav, game.cfg,
+# the menu's cookie jar nw_cdata.coo, the catalog's hiscore.txt, which the quit
+# saves, and admin_log.txt, which a GameWorld's start truncates) live in the
+# directory it runs in (LaunchFlags.working_dir), for a
 # GUT run the project (Godot's --path makes it the process's working directory;
 # GUT refuses a --working-dir after its own options). A run starts without them
 # and leaves none behind (git ignores them for a direct single-file run).
-profile_files=("$root/godot/player.sav" "$root/godot/weapon.sav" "$root/godot/game.cfg")
+profile_files=("$root/godot/player.sav" "$root/godot/weapon.sav" "$root/godot/game.cfg"
+  "$root/godot/nw_cdata.coo" "$root/godot/hiscore.txt" "$root/godot/admin_log.txt")
 rm -f "${profile_files[@]}"
 rm -f "$root"/godot/expansion/*/weapon.sav 2>/dev/null || true
 set +e

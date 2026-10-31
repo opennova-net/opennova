@@ -3,7 +3,6 @@
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/lobby_session.h>      // LobbyState, HostRosterSlot
-#include <net/novaworld/lobby_update.h>       // LobbyStatusBlob
 
 #include <cstddef>
 #include <cstdint>
@@ -20,7 +19,7 @@ namespace opennova {
 // prepared-statement path as the rest of engine/net/novaworld. The handle is
 // the calling thread's own connection (the standalone server leases one per
 // thread from a db::ConnectionPool); a write that spans several statements
-// (clear_unheld, replace_roster, apply_status_blob) is one db::Transaction on it,
+// (clear_unheld, replace_roster) is one db::Transaction on it,
 // so readers on other connections see it whole. A caller that writes a host
 // row and its roster puts both in one Transaction (replace_roster's own then
 // nests as a savepoint), so the row's player count and its roster agree; a
@@ -29,7 +28,6 @@ namespace opennova {
 // Lifecycle (the lobby-session dispatch):
 //   ClientHostRequest  -> upsert_host() (insert, or update in place) + replace_roster()
 //   ClientHostUpdate   -> update_host() (refresh the Host columns) + replace_roster()
-//   POST status blob   -> apply_status_blob() (the Host columns, keyed by HostKey)
 //   GOODBYE / timeout  -> remove_host_by_rid() (lobby_session's teardown)
 //   /NWJoin.dll        -> add_player() (the joiner's account, which its retail login names)
 //                         + mint_join_ticket() (its PUBJOINTICKET)
@@ -152,13 +150,6 @@ std::vector<HostRosterSlot> list_roster(db::Database &db, uint32_t host_rid);
 // A RID with no roster rows maps to nothing.
 std::map<uint32_t, std::vector<HostRosterSlot>> list_rosters(
 		db::Database &db, const std::vector<uint32_t> &host_rids);
-
-// Fold a parsed POST status blob (the plaintext Lobby_UpdateServerInfo
-// heartbeat) into the host row that owns its HostKey. Returns false when no
-// active host carries that key (the blob is then ignored). The blob's values
-// are lobby-sanitized on the wire (' ', '?', '@', '=' -> '+', empty -> "---")
-// and are stored as received.
-bool apply_status_blob(db::Database &db, const LobbyStatusBlob &blob);
 
 std::vector<HostRow>   list_hosts(db::Database &db);
 // Hosts for one lobby (active_hosts.game, the listing's LobbyName, == game)

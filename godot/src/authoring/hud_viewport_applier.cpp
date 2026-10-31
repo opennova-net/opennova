@@ -18,6 +18,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_follow.h>
+#include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/view/session_view.h>
 #include <runtime/hud/hud_elements.h>
@@ -160,9 +161,13 @@ void HudViewportApplier::rebuild(const opennova::editor::ViewportModel &model, c
 	clear();
 	HudOverlay *hud = overlay();
 	if (!hud || !view.findings.assets) return;
-	// The project's files, the open documents standing in for theirs, each read noted with its stamp.
+	// The project's files, the open documents standing in for theirs, each read noted with its stamp,
+	// mounted as the project's target game: the HUD's label fonts and its variants are that title's
+	// (ResourceRoot::session_title), as the game's are its launch title's.
 	stamped_ = std::make_shared<opennova::StampedFiles>(view.findings.assets);
-	root_->mount_files(stamped_);
+	root_->mount_files(stamped_, view.project.document
+					? opennova::to_gd(view.project.document->target_game)
+					: String());
 	Ref<HudPos> layout;
 	layout.instantiate();
 	if (layout->load_from_resource_root(root_, String(opennova::editor::basename_of(model.path()).c_str())) != OK) return;

@@ -110,10 +110,18 @@ void WeatherState::seed(const WeatherSeed &seed) {
     cloud_scroll_rate_target = seed.cloud_scroll_rate_target;
     tod_fixed24 = seed.tod_fixed24 % kTodDayFixed24;
     tod_keyframed = seed.tod_keyframed;
-    night_phase = 0;
-    compute_night_phase();
+    // The night phase is left as it stands: no mission start writes it, so the World starts on
+    // the phase the process's last mission left (MissionKernel::carry_across_load_from), 0 in a
+    // fresh process, until a tick computes it (tick_sim). [orig: g_EnvIsNightPhase @0x26C645C
+    //  (0 in the image), written only by Environment_ComputeTimeOfDayColors @0x57DEAE..0x57E061
+    //  and the WAC set (the named-value table @0x82EFAC); Environment_SnapStateToTargets
+    //  @0x57D1E0 does not touch it]
     tod_advance_per_tick = seed.tod_advance_per_tick;
-    tod_epoch_tickdown = kTodEpochTicks;
+    // The mission start sets its clock through Environment_SetCurrentTime, which leaves the
+    // minute counter at 10 (Environment_SnapStateToTargets touches neither).
+    // [orig: Game_StartMission @0x524360 - Environment_SetCurrentTime @0x5253D5 (the header's),
+    //  @0x5253B7 (a kept clock's); Environment_SetCurrentTime @0x57C4B9]
+    tod_epoch_tickdown = kClockSetTickdown;
     tod_epoch = 0;
     quake_ticks = 0;
     precipitation_kind = static_cast<uint32_t>(PrecipitationKind::Rain);
@@ -282,7 +290,7 @@ void WeatherState::command_time_of_day_minutes(int32_t minute_of_day) {
 
 void WeatherState::set_current_time(uint32_t fixed24) {
     tod_fixed24 = fixed24;
-    tod_epoch_tickdown = 10;
+    tod_epoch_tickdown = kClockSetTickdown;
     bump_command();
 }
 

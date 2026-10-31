@@ -8,8 +8,12 @@
 
 #include <runtime/hud/hud_frame.h>
 
+#include <base/title/title.h> // Title::hud_game_info_board
+
+#include <array>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace opennova::hud {
 
@@ -140,7 +144,7 @@ void HudFrameCompiler::element_game_info(const HudFrameState &state, float w, fl
 		// restamped twin on a tie — the two literals carry NO alpha, which the
 		// half-bright drawer forces to FF [orig: @0x59CDF4..0x59CE11,
 		// 0x4060FF / unk_FF2020].
-		const int32_t diff = wrap32(static_cast<int64_t>(s.team_score1[0]) - s.team_score1[1]);
+		const int32_t diff = wrap32(static_cast<int64_t>(s.teams[1].score1) - s.teams[2].score1);
 		const uint32_t color = diff > 0 ? 0x004060FFu : (diff < 0 ? 0x00FF2020u : hud_colors_active_);
 		// Overlays/STROVER53 in the LARGE slot at ZONEINFO [orig: @0x59CE16..0x59CE46].
 		const HudPosRecord &zi = layout_.zone_info;
@@ -152,7 +156,10 @@ void HudFrameCompiler::element_game_info(const HudFrameState &state, float w, fl
 	// through the X axis [orig: GameFont_MeasureCharHeight('0', bold) @0x59CE65
 	// into both outX and outY; Viewport_ScreenToVirtual @0x59CE81; the y step
 	// reads outX @0x59CF60].
-	if (game_type == 0x10001u) {
+	if (state.title != nullptr && state.title->hud_game_info_board) {
+		// dfx2.exe's rewrite below the zone line (DFX2-114).
+		drew = game_info_board(state, w, h) || drew;
+	} else if (game_type == 0x10001u) {
 		const bool have_bold = label_font_bold_.font() != nullptr;
 		const GameFont &bold = have_bold ? label_font_bold_ : font_;
 		const float bold_scale = have_bold ? label_scale_ : hud_font_scale_;
@@ -162,10 +169,12 @@ void HudFrameCompiler::element_game_info(const HudFrameState &state, float w, fl
 		// 60*T less its score1 [orig: `edi = ebx*60` @0x59CE95..0x59CEA4;
 		// dword_A85AFC / dword_A85B0C].
 		const int32_t total = wrap32(60LL * s.time_limit_minutes);
-		const int32_t rem1 = wrap32(static_cast<int64_t>(total) - s.team_score1[0]);
-		const int32_t rem2 = wrap32(static_cast<int64_t>(total) - s.team_score1[1]);
-		const std::string line1 = format_team_timer(rem1, s.text.team_names[1], s.team_koth[0]);
-		const std::string line2 = format_team_timer(rem2, s.text.team_names[2], s.team_koth[1]);
+		const int32_t rem1 = wrap32(static_cast<int64_t>(total) - s.teams[1].score1);
+		const int32_t rem2 = wrap32(static_cast<int64_t>(total) - s.teams[2].score1);
+		const std::string line1 =
+				format_team_timer(rem1, s.text.team_names[1], s.teams[1].koth_hold);
+		const std::string line2 =
+				format_team_timer(rem2, s.text.team_names[2], s.teams[2].koth_hold);
 		// Both lines bold at GAMEINFO in its alignment, the second one step
 		// lower [orig: @0x59CF2D..0x59CF4F, @0x59CFE8..0x59D007].
 		emit_text_at_virtual_pos(label_font_bold_, label_scale_, line1.c_str(), gi.x, gi.y, w, h,
@@ -175,6 +184,139 @@ void HudFrameCompiler::element_game_info(const HudFrameState &state, float w, fl
 		drew = true;
 	}
 	if (drew) ++draw_list_.elements_drawn;
+}
+
+std::vector<std::string> game_info_leader_lines(const HudSessionState &s) {
+	// Four places, score and row each -1 [orig: HUD_DrawGameTimerOverlay @0x59B4B3..0x59B4DE
+	// (dfx2.exe)]; a non-spectator row (the record's bit-0 byte +0x34 clear) takes the first place
+	// whose score it beats, signed, and REPLACES its row [orig: @0x59B4F0..0x59B514 (dfx2.exe)].
+	std::array<int32_t, 4> top;
+	std::array<int, 4> place;
+	top.fill(-1);
+	place.fill(-1);
+	for (size_t r = 0; r < s.rows.size(); ++r) {
+		if (s.rows[r].spectator) continue;
+		const int32_t score = s.rows[r].score1;
+		for (size_t i = 0; i < top.size(); ++i) {
+			if (score > top[i]) {
+				top[i] = score;
+				place[i] = static_cast<int>(r);
+				break;
+			}
+		}
+	}
+	// "%2i:%02i %s" of 60 * T less score1 under g_ScoreboardFlags & 2, else "%3i %s" (score1,
+	// the record's name) [orig: @0x59B575..0x59B5D1, @0x59B684..0x59B6E6 (dfx2.exe)].
+	const int32_t total = wrap32(60LL * s.time_limit_minutes);
+	const auto line = [&](const ScoreboardEntry &e) {
+		char buf[160];
+		if (s.timed) {
+			const int32_t remaining = wrap32(static_cast<int64_t>(total) - e.score1);
+			const int32_t minutes = remaining / 60;
+			const int32_t seconds = wrap32(static_cast<int64_t>(remaining) - 60LL * minutes);
+			std::snprintf(buf, sizeof(buf), "%2i:%02i %s", minutes, seconds, e.name.c_str());
+		} else {
+			std::snprintf(buf, sizeof(buf), "%3i %s", static_cast<int>(e.score1), e.name.c_str());
+		}
+		return std::string(buf);
+	};
+	// The places in order, noting a row whose slot id (+0x30) is the local player entity's
+	// slot byte [orig: @0x59B530..0x59B617, the compare @0x59B55F (dfx2.exe)].
+	std::vector<std::string> out;
+	bool local_placed = false;
+	for (const int r : place) {
+		if (r < 0) continue;
+		const ScoreboardEntry &e = s.rows[static_cast<size_t>(r)];
+		if (static_cast<int>(e.slot_id) == s.local_slot) local_placed = true;
+		out.push_back(line(e));
+	}
+	// Else the local slot's first non-spectator row [orig: @0x59B61D..0x59B70F; the dead
+	// g_DebugCheatFlags 0x8000000 arm @0x59B624 (dfx2.exe)].
+	if (!local_placed) {
+		for (const ScoreboardEntry &e : s.rows) {
+			if (static_cast<int>(e.slot_id) == s.local_slot && !e.spectator) {
+				out.push_back(line(e));
+				break;
+			}
+		}
+	}
+	return out;
+}
+
+bool HudFrameCompiler::game_info_board(const HudFrameState &state, float w, float h) {
+	// dfx2.exe's GAMEINFO board, past the zone line it shares with Jointops.exe's: every line
+	// bold at GAMEINFO's x in its alignment, half-bright in the twin as this frame restamped it
+	// [orig: HUD_DrawGameTimerOverlay @0x59ABF0 - the restamp @0x59AC25..0x59AC3A into
+	// `g_HUDColors.active` and the frame's copy, read @0x59AE29 / @0x59AFB7 (dfx2.exe)].
+	const HudSessionState &s = state.session;
+	const HudPosRecord &gi = layout_.game_info;
+	const uint32_t color = hud_colors_active_;
+	// The pitch: the bold '0' height back to design through the X axis [orig:
+	// GameFont_MeasureCharHeight @0x59ADD3, Viewport_ScreenToVirtual @0x59ADEF (dfx2.exe)].
+	const bool have_bold = label_font_bold_.font() != nullptr;
+	const GameFont &bold = have_bold ? label_font_bold_ : font_;
+	const float bold_scale = have_bold ? label_scale_ : hud_font_scale_;
+	const int step = screen_to_design_x(static_cast<int>(bold.char_height('0', bold_scale)),
+			static_cast<int32_t>(w));
+	int y = gi.y;
+	bool drew = false;
+	// Under the MSNTITLE slot: in a session the game type's label, one line; then the mission
+	// name with the expansion's in brackets when one is mounted [orig:
+	// `cmp g_HUDDeclutterVisible, 0` (slot 0) @0x59ADF7; is_in_session @0x59AE04;
+	// HUD_GetGameTypeOverlayLabel @0x59AE0E, drawn @0x59AE42; "%s (%s)" @0x59AE6B, "%s" @0x59AE84,
+	// drawn @0x59AEAB (dfx2.exe)].
+	if (state.declutter_visible[kDeclutterMsnTitle]) {
+		if (s.in_session) {
+			emit_text_at_virtual_pos(label_font_bold_, label_scale_, s.text.game_type_label.c_str(),
+					gi.x, y, w, h, color, gi.align);
+			y += step;
+		}
+		std::string mission = s.mission_name;
+		if (!s.expansion.empty()) mission += " (" + s.expansion + ")";
+		emit_text_at_virtual_pos(label_font_bold_, label_scale_, mission.c_str(), gi.x, y, w, h,
+				color, gi.align);
+		drew = true;
+	}
+	// One line lower whether or not the slot drew; the rest under the TRGTCNT slot, none for
+	// the waypoint family [orig: @0x59AEB3; `cmp dword_2725040, 0` (slot 18) @0x59AEB7; the
+	// 0xFFFDFFFF test @0x59AEC4..0x59AED2 (dfx2.exe)].
+	y += step;
+	if (!state.declutter_visible[kDeclutterTrgtCnt]) return drew;
+	const uint32_t g = s.game_type;
+	if ((g & 0xFFFDFFFFu) == 0x10020u) return drew;
+	// Types 0, 1 and 8: the leader lines, with the inline tags off [orig: @0x59AED8..0x59AEEC;
+	// HUD_DrawTextAligned(.., align, 0x100) @0x59B5FA / @0x59B70F (dfx2.exe)].
+	if (g == 0u || g == 1u || g == 8u) {
+		for (const std::string &l : game_info_leader_lines(s)) {
+			emit_text_aligned(label_font_bold_, label_scale_, l.c_str(), gi.x, y, w, h, color,
+					gi.align, kFontTagsDisabled);
+			y += step;
+			drew = true;
+		}
+		return drew;
+	}
+	// Every other type: the Tab board's team lines, line for line: TDM's and FlagBall's "%3i %s"
+	// scores, TKOTH's timers (four teams' when the table counts four), CTF's and S&D's two "%i %s
+	// %i)" lines, A&D's one [orig: TDM @0x59B2BC..0x59B3F6, TKOTH @0x59AF0A..0x59B222, CTF /
+	// S&D @0x59B403..0x59B4AE, A&D @0x59B24F..0x59B2AB / @0x59B45B (dfx2.exe); the Tab board's
+	// HUD_DrawGameScoreOverlay @0x4232B4..0x4238F2, hud::scoreboard_team_score_lines].
+	ScoreboardHeaderInput in;
+	in.game_type = g;
+	in.team_count = s.team_count;
+	in.time_limit = s.time_limit_minutes;
+	in.teams = s.teams;
+	ScoreboardHeaderText text;
+	for (size_t t = 0; t < text.team_names.size(); ++t)
+		text.team_names[t] = s.text.team_names[t + 1];
+	text.of_team_a = s.text.of_team_a;
+	text.of_team_b = s.text.of_team_b;
+	for (const std::string &l : scoreboard_team_score_lines(in, text)) {
+		emit_text_at_virtual_pos(label_font_bold_, label_scale_, l.c_str(), gi.x, y, w, h, color,
+				gi.align);
+		y += step;
+		drew = true;
+	}
+	return drew;
 }
 
 void HudFrameCompiler::element_clock(const HudFrameState &state, float w, float h) {

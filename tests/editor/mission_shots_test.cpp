@@ -194,6 +194,7 @@ struct ShotRig {
 		mission->items.push_back(item_at(6190, crate[0], crate[1], crate[2]));
 		mission->items.push_back(item_at(6191, frail[0], frail[1], frail[2]));
 		setup.files = files;
+		setup.game = "jo";
 		setup.key = 1;
 		setup.mission = mission;
 		setup.ground = &ground;

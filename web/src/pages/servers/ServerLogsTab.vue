@@ -27,12 +27,13 @@
 </template>
 
 <script setup lang="ts">
-// An admin's server page's Logs tab (GET /api/admin/logs?subject=server): the
+// A server page's Logs tab for an admin, on the admin's page and on the
+// owner's page of an admin's session (GET /api/admin/logs?subject=server): the
 // output of one of its starts (its generations, newest first; the newest
 // followed while the server lives).
 import { computed, ref, watch } from 'vue';
 import LogViewer from '../../components/LogViewer.vue';
-import type { FleetServer, HostedServer } from '../../types/hostedServer';
+import type { HostedServer } from '../../types/hostedServer';
 
 const props = defineProps<{
   server: HostedServer;
@@ -46,8 +47,7 @@ defineEmits<{
   (e: 'session-ended'): void;
 }>();
 
-// The admin's page reads a FleetServer.
-const newest = computed(() => (props.server as FleetServer).generation ?? 0);
+const newest = computed(() => props.server.generation);
 const generations = computed(() => Array.from({ length: newest.value }, (_, i) => newest.value - i));
 const picked = ref(newest.value);
 

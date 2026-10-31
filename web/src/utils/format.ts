@@ -13,8 +13,10 @@ export function timeMs(value: string | number): number {
   return Date.parse(text);
 }
 
-function plural(n: number, unit: string): string {
-  return `${n} ${unit}${n === 1 ? '' : 's'}`;
+// "1 task", "3 servers", "1,284 players", "2 static addresses": a count and its noun, the
+// site's one plural rule (the count as formatCount spells it).
+export function countLabel(n: number, one: string, many = `${one}s`): string {
+  return `${formatCount(n)} ${n === 1 ? one : many}`;
 }
 
 // "45 seconds", "4 minutes", "1 hour 5 minutes", "3 days 2 hours": a length of
@@ -23,17 +25,17 @@ export function formatDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return 'unknown';
   const seconds = Math.round(ms / 1000);
   if (seconds < 1) return 'less than a second';
-  if (seconds < 60) return plural(seconds, 'second');
+  if (seconds < 60) return countLabel(seconds, 'second');
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return plural(minutes, 'minute');
+  if (minutes < 60) return countLabel(minutes, 'minute');
   const hours = Math.floor(minutes / 60);
   if (hours < 24) {
     const rest = minutes % 60;
-    return rest ? `${plural(hours, 'hour')} ${plural(rest, 'minute')}` : plural(hours, 'hour');
+    return rest ? `${countLabel(hours, 'hour')} ${countLabel(rest, 'minute')}` : countLabel(hours, 'hour');
   }
   const days = Math.floor(hours / 24);
   const rest = hours % 24;
-  return rest ? `${plural(days, 'day')} ${plural(rest, 'hour')}` : plural(days, 'day');
+  return rest ? `${countLabel(days, 'day')} ${countLabel(rest, 'hour')}` : countLabel(days, 'day');
 }
 
 // "just now", "3 min ago", "2 hours ago", "5 days ago", or ahead of `now`
@@ -47,8 +49,8 @@ export function formatRelative(value: string | number, now: number): string {
   if (seconds < 45) return ahead ? 'in a moment' : 'just now';
   let span: string;
   if (seconds < 3600) span = `${Math.max(1, Math.round(seconds / 60))} min`;
-  else if (seconds < 86_400) span = plural(Math.round(seconds / 3600), 'hour');
-  else span = plural(Math.round(seconds / 86_400), 'day');
+  else if (seconds < 86_400) span = countLabel(Math.round(seconds / 3600), 'hour');
+  else span = countLabel(Math.round(seconds / 86_400), 'day');
   return ahead ? `in ${span}` : `${span} ago`;
 }
 
@@ -115,22 +117,6 @@ export function formatMemory(bytes: number): string {
     unit++;
   }
   if (unit === 0) return `${Math.round(value)} B`;
-  const shown = value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
-  return `${shown} ${units[unit]}`;
-}
-
-// "0 b/s", "850 kb/s", "1.2 Mb/s": a rate in bytes a second as bits a second
-// in decimal units, as network links are rated; one decimal under ten.
-export function formatBitRate(bytesPerSecond: number): string {
-  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond < 0) return 'unknown';
-  const units = ['b/s', 'kb/s', 'Mb/s', 'Gb/s'];
-  let value = bytesPerSecond * 8;
-  let unit = 0;
-  while (value >= 1000 && unit < units.length - 1) {
-    value /= 1000;
-    unit++;
-  }
-  if (unit === 0) return `${Math.round(value)} b/s`;
   const shown = value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
   return `${shown} ${units[unit]}`;
 }

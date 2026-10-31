@@ -110,6 +110,7 @@ RetailMachineInputs fallback_machine_inputs(std::string_view stable_identity);
 // (A..P, C..R, E..T in turn), NWUSID's 8 pairs, pair i in 'A'+i..'A'+i+15.
 // [orig: CDKey_GenerateHardwareFingerprint @0x4A4A00 - the bands @0x4A4BBA / @0x4A4BE3 / @0x4A4BCD;
 //  CDKey_GenerateHardwareFingerprint_0 @0x4A4D00 - the pairs @0x4A4E46..0x4A4E4B]
-LobbyMachineTokens fallback_machine_tokens(std::string_view stable_identity);
+LobbyMachineTokens fallback_machine_tokens(
+		std::string_view stable_identity, const FingerprintSerialMix &mix);
 
 } // namespace opennova

@@ -246,7 +246,8 @@ private:
 	// The clip sounds the previewed clip's events fired since the last taken, each started beside those playing
 	// (DI-04, PreviewSoundVoices); every one stopped while no project is open.
 	void pump_clip_sounds_();
-	void show_picker(opennova::editor::PickPurpose p_purpose, bool p_directory);
+	// `p_name`: the file a save dialog offers.
+	void show_picker(opennova::editor::PickPurpose p_purpose, bool p_directory, const std::string &p_name = std::string());
 	void _on_dir_selected(const String &p_dir);
 	void _on_file_selected(const String &p_file);
 	void _on_files_selected(const PackedStringArray &p_files);

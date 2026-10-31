@@ -73,7 +73,7 @@ HostRegistration serve_only_registration(int player_limit, bool met_ext, int joi
 	base.server_message = "hello";
 	base.max_players = player_limit;
 	base.published_cap = static_cast<int>(
-			inmatch::host_player_slot_limit(player_limit, false, *opennova::title_by_code("jo")));
+			inmatch::host_player_slot_limit(player_limit, false, 1, *opennova::title_by_code("jo")));
 	base.listen_host = false;
 	// The columns only: no cfg block (no ServerCommand runs here).
 	serve::ServeListing source(base, {});

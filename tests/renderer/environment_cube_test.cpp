@@ -48,11 +48,21 @@ void check_refresh_cadence() {
 }
 
 void check_eye_height() {
-	// Player + 1 without terrain; raised to terrain + 10 when that is higher.
-	CHECK(environment_cube_eye_height(34.0f, false, 0.0f) == 35.0f);
-	CHECK(environment_cube_eye_height(34.0f, true, 20.0f) == 35.0f);
-	CHECK(environment_cube_eye_height(34.0f, true, 30.0f) == 40.0f);
-	CHECK(environment_cube_eye_height(-5.0f, true, -5.0f) == 5.0f);
+	// Player + 1 without terrain; raised to terrain + the title's clearance when that is higher:
+	// Jointops.exe's 10, dfx2.exe's 5 (DFX2-43) [orig: EnvCube_Update @0x61072B; @0x60F67B
+	// (dfx2.exe)].
+	const opennova::Title &jo = *opennova::title_by_code("jo");
+	const opennova::Title &dfx2 = *opennova::title_by_code("dfx2");
+	CHECK(jo.env_cube_terrain_clearance == 0xA0000 && dfx2.env_cube_terrain_clearance == 0x50000);
+	CHECK(opennova::title_by_code("acidgambit")->env_cube_terrain_clearance == 0xA0000);
+	CHECK(environment_cube_eye_height(jo, 34.0f, false, 0.0f) == 35.0f);
+	CHECK(environment_cube_eye_height(jo, 34.0f, true, 20.0f) == 35.0f);
+	CHECK(environment_cube_eye_height(jo, 34.0f, true, 30.0f) == 40.0f);
+	CHECK(environment_cube_eye_height(jo, -5.0f, true, -5.0f) == 5.0f);
+	CHECK(environment_cube_eye_height(dfx2, 34.0f, false, 0.0f) == 35.0f);
+	CHECK(environment_cube_eye_height(dfx2, 34.0f, true, 30.0f) == 35.0f);
+	CHECK(environment_cube_eye_height(dfx2, 34.0f, true, 33.0f) == 38.0f);
+	CHECK(environment_cube_eye_height(dfx2, -5.0f, true, -5.0f) == 0.0f);
 }
 
 void check_dim_byte() {

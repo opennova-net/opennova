@@ -8,12 +8,17 @@
 // from a parsed AvatarsFile, or entry by entry by an embedder that holds the
 // tree in its own model; every lookup here is a witnessed registry walk.
 
+#include <base/title/title.h>
 #include <formats/avatars/avatars.h>
 
 #include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
+
+namespace opennova::world {
+struct CharacterTraitsTable; // runtime/world/world.h
+} // namespace opennova::world
 
 namespace opennova::inmatch {
 
@@ -99,5 +104,45 @@ struct PlayerVisualSpec {
 // The visual `character_id` resolves to over `file` and the registry built from it.
 PlayerVisualSpec resolve_player_visual_spec(const opennova::avatars::AvatarsFile &file,
 		const CharacterRegistry &registry, int character_id);
+
+// DFX2-53: the character a player person's avatar blip (entity+0x3C) names while `title`'s sector
+// render draws it: `net_id`, the spawn's pick (entity+0x15C), unless the title picks again every
+// frame (Title::player_avatar_by_viewer_side), when it is `registry`'s first combo of the good side
+// while there is no `viewer` or the person's `team` is the viewer's, else of the evil side. No
+// registry installed passes the id through. The profile sounds read the sex of the same blip, so
+// they take this pick too, through the world's character traits (install_viewer_side_pick).
+// [orig: Terrain_RenderSectorEntitiesBySide @0x5C6C20 - `test [esi+24h], 100h` @0x5C6EA6, the
+//  g_LocalPlayerEntity test @0x5C6EE6 and the Team compare `cmp dl, [eax+162h]; setnz`
+//  @0x5C6EEE..0x5C6F00, CAvatarDefs_PackFirstComboOfAlignment @0x5C6F0A (0 without a local
+//  player @0x5C6F25), CAvatarDefs_FindOrAllocCharacterBlip into +0x3C @0x5C6F3D;
+//  CAvatarDefs_PackFirstComboOfAlignment @0x5791C0 (dfx2.exe)]
+uint16_t drawn_player_character(const Title *title, const CharacterRegistry *registry,
+		uint16_t net_id, bool viewer, uint8_t team, uint8_t viewer_team);
+
+// DFX2-53, the local player: the character its own avatar blip names, which its body draws (third
+// person) and its first-person arms take (blip +8), drawn_player_character with the person its own
+// viewer. The view collect takes the local body like any person and first person skips only its
+// parts' draw, in the bone callback, after the sector render has picked the blip again, so under
+// the per-frame pick it is the good side's first combo whatever the spawn's `net_id`.
+// [orig: Terrain_CollectVisibleEntitiesForTerrain @0x5C7BD0 - only the Flags & 1 gate @0x5C7C5F..0x5C7C64;
+//  Terrain_RenderSectorEntitiesBySide @0x5C6C20 - no local-player test ahead of the pick
+//  @0x5C6EA6..0x5C6F42, the Team compare against itself @0x5C6EEE..0x5C6F00;
+//  BoneCallback_org0_World @0x4E0A40 - the first-person skip @0x4E0BB3..0x4E0BCA;
+//  Player_RenderFirstPersonViewModel @0x4DBE00 - the arms from g_LocalPlayerEntity+0x3C +8
+//  @0x4DC08F..0x4DC0A8 / @0x4DC0FF..0x4DC110 (dfx2.exe)] [orig: Player_RenderFirstPersonViewModel
+//  @0x4DED60 - the same reads @0x4DEFEF / @0x4DF05F]
+uint16_t drawn_local_player_character(const Title *title, const CharacterRegistry *registry,
+		uint16_t net_id);
+
+// DFX2-53, the profile sounds: Entity_GetProfileSlotSound takes a player's female profile by the
+// sex byte of its avatar blip, the character drawn_player_character names, so the world's traits
+// (world::CharacterTraitsTable, beside the rows) carry the same pick: `registry`'s first combo of
+// the good side and of the evil side while `title` picks every frame, else none (the spawn's pick
+// stands). Every sound path reads it (world::player_blip_character), the local player the viewer.
+// [orig: Entity_GetProfileSlotSound @0x525490 - the blip @0x52549F, its sex byte @0x5254AC;
+//  Terrain_RenderSectorEntitiesBySide @0x5C6C20 - the blip stored @0x5C6F3D..0x5C6F42 (dfx2.exe)]
+//  [orig: Entity_GetProfileSlotSound @0x528300 - @0x52830F / @0x52831C]
+void install_viewer_side_pick(world::CharacterTraitsTable &traits, const Title *title,
+		const CharacterRegistry *registry);
 
 } // namespace opennova::inmatch

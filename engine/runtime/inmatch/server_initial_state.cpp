@@ -250,8 +250,8 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 			ctx.world != nullptr && ctx.world->zones.has_spawn_zone();
 	// A DFX2 host sets bit 0 whatever the mission (DFX2-2) [orig: the flags byte's 1 in
 	//  NetPacket_WriteWorldStateLoad0x0F @0x4ffeed (dfx2.exe)].
-	const bool spawn_zone_flag =
-			has_spawn_zones || protocol_in_match(ctx.np_protocol.identity).spawn_zone_flag_always;
+	const bool spawn_zone_flag = has_spawn_zones ||
+			protocol_in_match(ctx.np_protocol.identity).s2c_0f.spawn_zone_flag_always;
 	uint8_t game_flags = spawn_zone_flag ? 0x01u : 0x00u;
 	// The session test is retail's is_in_session, 0 in its single player; ours reads the
 	// world's session fact, as the join's own 0x0A does (D-NET-817).
@@ -722,14 +722,21 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	st.chat_last_ms = 0;
 	// Bit 1, the pre-round loadout latch: set while the pre-round timer runs, always for DFX2.
 	conn.link.preround_loadout_latch =
-			world.preround_delay_seconds != 0 || in_match.join_state_fixed;
-	// Bit 0x10, undeployed: with deploy-selectable spawn zones (always for DFX2). Out of a
-	// session the hold shows nothing (its hidden bit and overlay bit both ride the per-frame
-	// 0x0A writer, which only a session runs), so the single player is never held.
-	const bool is_host_own = conn.type == NapiNPConnection::kTypeClientSide;
+			world.preround_delay_seconds != 0 || in_match.slot_state.join_state_fixed;
+	// Bit 0x10, undeployed: with deploy-selectable spawn zones (always for DFX2), every slot's,
+	// the single player's own included. Its hidden bit and overlay bit ride the per-frame 0x0A
+	// writer, which the tick's tail slot walk runs out of a session too: the walk stands outside
+	// both of the tick's session blocks, so a single player's own 0x0A holds its DEATH screen up
+	// until its pick deploys it.
+	// [orig: Server_TickUpdate @0x51D7E0 - the session blocks @0x51D9A5 and @0x51E211..0x51E383
+	//  (its `jz` @0x51E217 lands on the walk), the tail walk @0x51E385..0x51E46D, its
+	//  call @0x51E3E4 -> Server_SendPlayerSlotStateFrame @0x51BBA0 (its state-6 call @0x51BBDC)
+	//  -> Server_SendEntityStateToPlayer @0x517BA0; NetPacket_WritePlayerState @0x4FF7B8..0x4FF7BC]
+	// [orig: Server_TickUpdate @0x51a810 - the walk's call @0x51b324 ->
+	//  Server_SendPlayerSlotStateFrame @0x518bd0 (its state-6 call @0x518c0c) ->
+	//  Server_SendEntityStateToPlayer @0x514de0 (dfx2.exe)]
 	conn.link.respawn_pending =
-			(world.zones.has_spawn_zone() || in_match.join_state_fixed) &&
-			(!is_host_own || world.rules.mp_session);
+			world.zones.has_spawn_zone() || in_match.slot_state.join_state_fixed;
 	// The roster row mirrors the undeployed bit, which event 25 reads [orig:
 	//  Server_UpdateCaptureZoneProximity @0x5087A2].
 	world.match.set_player_respawn_pending(conn.link.owned_entity, conn.link.respawn_pending);

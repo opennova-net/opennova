@@ -40,6 +40,7 @@
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/infantry_ladder.h>
 #include <runtime/world/local_player.h>
+#include <runtime/world/parachute.h>
 #include <runtime/world/player_input.h>
 
 #include "channel_clip_source.h"
@@ -6472,6 +6473,123 @@ int main() {
         e->inf.vel[1] = 0;
         run_ticks(ai, w, 3, 4);
         CHECK(e->inf.vel[0] == (63 * 6400) >> 6); // 6300 — no steer, no deadzone
+    }
+
+    // ---- DFX2-112: dfx2.exe's airborne glide. The steer also adds ftol(cos/sin(angle) * Q),
+    //      Q = (-vz) >> 7, to the slide pair, and turns the body pitch (+0x90) and Roll (+0x18)
+    //      by ftol(cos/sin(dir * pi/4) * 2^22); Jointops.exe's steers the pair alone.
+    //      [orig: the twin of Entity_UpdateInfantryPlayerBody @0x4B4140 - @0x4B7933..0x4B7A13
+    //      (dfx2.exe)]
+    for (const char *code : {"jo", "dfx2"}) {
+        const bool glide = std::string(code) == "dfx2";
+        Field low([](int) { return static_cast<uint16_t>(0); });
+        TestSource src;
+        src.clips = {anim_state::kIdle};
+        src.capsule_bottom = fx(1);
+        World w;
+        w.rules.title_rules = &title_rules(code);
+        AiSystem ai;
+        ai.bind_registry(&w.registry);
+        w.registry.configure_pool(0, 8);
+        ai.terrain = &low.field;
+        ai.root_motion = &src;
+        AiEntity *e = soldier(ai);
+        e->inf.is_local_player = true;
+        e->health = 100;
+        e->inf.anim_state = anim_state::kIdle;
+        e->self->position.x.q16 = fx(100); e->self->position.y.q16 = fx(100);
+        e->self->position.z.q16 = fx(200);
+        e->inf.airborne = true;
+        e->inf.player_moving = true;
+        e->inf.player_move_dir_index = 0;
+        e->heading = 0;
+        e->inf.vel[0] = 0;
+        e->inf.vel[1] = 0;
+        e->inf.vel[2] = -0x3800; // Q = 0x3800 >> 7 = 112
+        e->body_pitch = 0;
+        e->roll = 0;
+        run_ticks(ai, w, 1, 2);
+        // JO: 64 then (63*64)>>6 = 63. DFX2: 64 + ftol(112 * 1.0) = 176, then (63*176)>>6 = 173.
+        CHECK(e->inf.vel[0] == (glide ? 173 : 63));
+        CHECK(e->inf.vel[1] == 0);
+        CHECK(e->body_pitch == (glide ? 4194304 : 0)); // ftol(cos(0) * 2^22)
+        CHECK(e->roll == 0);                           // ftol(sin(0) * 2^22)
+    }
+
+    // ---- DFX2-111: the canopy's trigger. Jointops.exe's authority opens a falling body's canopy
+    //      (vz <= -0x3800) on the carried parachute (+0x2C & 0x10), which the open canopy then
+    //      clears on every peer; dfx2.exe's on the MoveOrder jump bit (+0x12C & 0x20), clearing
+    //      nothing. [orig: Entity_UpdateInfantryPlayerBody @0x4B7AE5..0x4B7AFA, @0x4B7BC9]
+    //      [orig: the twin @0x4B4140 - @0x4B7BC1..0x4B7BD9 (dfx2.exe)]
+    {
+        const auto open = [](bool on_jump, uint32_t carry, bool jump, int32_t vz, bool authority,
+                                 uint32_t &carry_out) {
+            ParachuteState state;
+            uint32_t flags = kEntityFlagInAir;
+            int32_t vel_z = vz;
+            carry_out = carry;
+            (void)parachute_tick(state, flags, carry_out, vel_z, authority, 1, on_jump, jump);
+            return (flags & kEntityFlagParachute) != 0;
+        };
+        uint32_t carry = 0;
+        // Jointops.exe: the carried bit opens it, and the open canopy spends the bit.
+        CHECK(open(false, 0x10u, false, -0x3800, true, carry) && (carry & 0x10u) == 0);
+        CHECK(!open(false, 0u, true, -0x3800, true, carry));
+        CHECK(!open(false, 0x10u, false, -0x37FF, true, carry)); // not falling fast enough
+        // dfx2.exe: the jump bit opens it, with no parachute carried; a carried bit stands.
+        CHECK(open(true, 0u, true, -0x3800, true, carry));
+        CHECK(!open(true, 0x10u, false, -0x3800, true, carry));
+        CHECK(open(true, 0x10u, true, -0x3800, true, carry) && (carry & 0x10u) != 0);
+        // Only the authority opens it.
+        CHECK(!open(true, 0u, true, -0x3800, false, carry));
+    }
+
+    // ---- DFX2-111 through the body tick: a falling local body holding jump, with no parachute
+    //      carried, opens its canopy under dfx2.exe's rules alone (its MoveOrder jump bit, the
+    //      packed key); a carried parachute opens nothing there.
+    for (const char *code : {"jo", "dfx2"}) {
+        for (const bool carried : {false, true}) {
+            const bool dfx2 = std::string(code) == "dfx2";
+            Field flat([](int) { return static_cast<uint16_t>(0); });
+            auto storage = std::make_unique<World>();
+            World &w = *storage;
+            w.rules.title_rules = &title_rules(code);
+            w.registry.configure_pool(0, 4);
+            Entity player;
+            player.kind = EntityKind::Organic;
+            player.item_type = 3;
+            player.flags = kEntityFlagPlayer | kEntityFlagInAir;
+            player.carry_flags = carried ? 0x10u : 0u;
+            player.position = {100, 100, 80};
+            player.health = 100;
+            const auto h = w.registry.spawn(0, player);
+            AiSystem ai;
+            ai.bind_registry(&w.registry);
+            ai.terrain = &flat.field;
+            TestSource src;
+            src.clips = {31, 43, 44, 47};
+            ai.root_motion = &src;
+            AiEntity *e = soldier(ai);
+            CHECK(e->handle == h);
+            e->health = 100;
+            e->self->position.x.q16 = fx(100); e->self->position.y.q16 = fx(100);
+            e->self->position.z.q16 = fx(80);
+            e->inf.is_local_player = true;
+            e->inf.airborne = true;
+            e->inf.anim_state = anim_state::kJumpLoop;
+            e->inf.jump_held = !carried;
+            e->inf.vel[2] = -0x3800 + 208;
+            run_ticks(ai, w, 1, 2);
+            const Entity &live = *w.registry.get(h);
+            const bool deployed = (live.flags & kEntityFlagParachute) != 0;
+            CHECK(deployed == (dfx2 ? !carried : carried));
+            // Jointops.exe's open spends the carried bit; dfx2.exe's leaves it.
+            if (carried) CHECK(((live.carry_flags & 0x10u) != 0) == dfx2);
+            // Either title's open canopy puts the body in "parachute" (47): both arms store it.
+            // [orig: Entity_UpdateInfantryPlayerBody @0x4B7BAA] [orig: the twin @0x4B4140 -
+            //  @0x4B7C85 (dfx2.exe)]
+            if (deployed) CHECK(e->inf.anim_state == anim_state::kParachute);
+        }
     }
 
     // ---- stance: crouch/prone select the stance gait + idle clips (player). The

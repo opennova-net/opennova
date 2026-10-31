@@ -337,6 +337,8 @@ struct SlotReport {
 	// Its server's second listing (a hosted server's on NovaLogic's NovaWorld), when its agent
 	// reported one.
 	std::optional<SecondListingStatus> second_listing;
+	// The ONE build its server says it runs (its --build-file), when its agent reported one.
+	std::optional<ServeBuild> build;
 	std::string reported_at; // UTC 'YYYY-MM-DD HH:MM:SS'
 };
 
@@ -387,6 +389,15 @@ std::vector<SlotReport> slot_reports(db::Database &db, int64_t machine_id);
 // The slot row of the slot server `server_id` holds, when its machine's agent
 // reported one there (the stats' per-server read); nullopt otherwise.
 std::optional<SlotReport> slot_report_of(db::Database &db, int64_t server_id);
+// The ONE build each running hosted server says it runs, by its service account (the account
+// its listing's HostKey names: active_hosts.host_user_id): its own container's slot row's
+// (`build`, the container the server's row names now, so a slot's earlier server never
+// answers for it). A server whose agent reported no build is not in it.
+std::map<int64_t, ServeBuild> running_builds_by_account(db::Database &db);
+// The ONE build a running server on serve image `image` says it runs (its own container's slot
+// row's, the newest report), the build a start on that image runs: an image is pinned by
+// digest, so every server on it runs the one build. nullopt while no such server reported one.
+std::optional<ServeBuild> reported_build_of_image(db::Database &db, const std::string &image);
 
 // --- the slots ---
 

@@ -11,6 +11,7 @@
 #include <editor/novaworld/novaworld_account.h>
 #include <editor/project/base_project.h>
 #include <editor/project/project_document.h>
+#include <editor/session/novaworld_standing.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/workspace_parts.h>
@@ -220,17 +221,20 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 		                                        "you may push."
 		                                      : "Sign in to NovaWorld (its window) to put the project there.");
 	} else {
-		std::string line = novaworld.key + " on " + novaworld_host(novaworld.server);
-		if (novaworld.tracked) line += ", revision " + std::to_string(novaworld.revision);
+		const NovaWorldStanding standing = novaworld_standing(novaworld);
+		std::string line = novaworld_host(novaworld.server) + ": " + standing.line;
 		if (novaworld.remote_known) line += novaworld.remote.is_public ? ", Public" : ", Private";
-		ui_kit::clipped_text(line, "The project file names it, so every copy of the project finds it.");
+		ui_kit::clipped_text(line, standing.tip);
+		if (ImGui::TreeNodeEx("Details", ImGuiTreeNodeFlags_NoAutoOpenOnLog)) {
+			ui_kit::clipped_text("Key: " + novaworld.key, "How NovaWorld and every copy of the project name it.");
+			ImGui::TreePop();
+		}
 		if (novaworld.remote_known && novaworld.remote.lobby) {
 			ui_kit::clipped_text("Lobby: " + novaworld.remote.lobby->display_name);
 			ui_kit::quiet_text(novaworld.remote.lobby_locked
 							? "Lobby fixed by the first release build."
 							: "Manage the lobby on the site before the first release build.");
 		}
-		if (!novaworld.tracked && !novaworld.head_error.empty()) ui_kit::refusal_text(novaworld.head_error);
 		const bool site = novaworld.available && novaworld.signed_in && v.allows(EditorRequestKind::NovaWorldOpenSite);
 		ImGui::BeginDisabled(!site);
 		if (ImGui::Button("Open on the site") && site) workspace.request(request::novaworld_open_site("project"));

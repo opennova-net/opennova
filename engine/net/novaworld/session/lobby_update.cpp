@@ -1,6 +1,5 @@
 #include <net/novaworld/lobby_update.h>
 
-#include <base/io/strutil.h>
 #include <net/napi/envelope.h>
 #include <net/novaworld/gate_response.h>
 
@@ -84,48 +83,6 @@ std::vector<uint8_t> lobby_update_build_datagram(const GateResponse &gate,
 	}
 	packet.resize(packet_size);
 	return packet;
-}
-
-bool lobby_update_parse(std::string_view text, LobbyStatusBlob &out) {
-	out = LobbyStatusBlob{};
-	// Sanitized keys/values never contain a space, so the blob tokenizes on
-	// single spaces; the double space before HostKey yields an empty token.
-	std::vector<std::string_view> tokens;
-	size_t pos = 0;
-	while (pos <= text.size()) {
-		const size_t next = text.find(' ', pos);
-		const std::string_view tok = text.substr(pos, next == std::string_view::npos
-		                                              ? std::string_view::npos : next - pos);
-		if (!tok.empty()) tokens.push_back(tok);
-		if (next == std::string_view::npos) break;
-		pos = next + 1;
-	}
-	// <lobby> HostKey = <hk>
-	if (tokens.size() < 4 || tokens[1] != "HostKey" || tokens[2] != "=") return false;
-	out.lobby_name = std::string(tokens[0]);
-	out.host_key   = std::string(tokens[3]);
-
-	size_t i = 4;
-	while (i < tokens.size()) {
-		if (tokens[i].size() >= 2 && tokens[i][0] == 'p' && tokens[i][1] == '=') break;
-		if (i + 2 >= tokens.size() || tokens[i + 1] != "=") return false;
-		out.host_vars.emplace_back(std::string(tokens[i]), std::string(tokens[i + 2]));
-		i += 3;
-	}
-	out.send_player_names = i < tokens.size();
-	for (; i < tokens.size(); ++i) {
-		const std::string_view tok = tokens[i];
-		if (tok.size() < 2 || tok[0] != 'p' || tok[1] != '=') return false;
-		if (tok.size() > 2) out.player_names.emplace_back(tok.substr(2));
-	}
-	return true;
-}
-
-std::string lobby_status_value(const LobbyStatusBlob &blob, std::string_view key) {
-	for (const auto &kv : blob.host_vars) {
-		if (strutil::iequals(kv.first, key)) return kv.second;
-	}
-	return {};
 }
 
 } // namespace opennova

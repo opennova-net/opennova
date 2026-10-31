@@ -24,6 +24,9 @@ using namespace opennova::world;
 
 namespace {
 
+// Jointops.exe's rates, the JO row (TitleRules::part_spin's defaults).
+const PartSpinRates kJo{};
+
 int failures = 0;
 #define CHECK(c, m)                                                            \
 	do {                                                                       \
@@ -37,31 +40,31 @@ int failures = 0;
 void test_player_control_rotor_symmetry() {
 	RotorState s;
 	CHECK(!rotor_rate_needs_roll(s, true), "a player-control item never rolls");
-	rotor_seed_rate(s, true, true, 0);
+	rotor_seed_rate(s, true, true, 0, kJo);
 	CHECK(s.rate == kRotorRateFull, "occupied: the full rate");
-	for (int i = 0; i < 5; ++i) rotor_tick(s, true);
+	for (int i = 0; i < 5; ++i) rotor_tick(s, true, kRotorDecayGround);
 	CHECK(s.speed == kRotorRateFull * 5, "spin-up is linear");
 	CHECK(s.angle == kRotorRateFull * (1 + 2 + 3 + 4 + 5),
 			"the angle accumulates the speed every tick");
 
-	for (int i = 0; i < 5; ++i) rotor_tick(s, false);
+	for (int i = 0; i < 5; ++i) rotor_tick(s, false, kRotorDecayGround);
 	CHECK(s.speed == 0, "spin-down takes the same number of ticks");
 	CHECK(s.rate == 0, "an unoccupied tick clears the rate");
 
 	// Unoccupied, a player-control item seeds NOTHING.
 	RotorState idle;
-	rotor_seed_rate(idle, true, false, 0);
+	rotor_seed_rate(idle, true, false, 0, kJo);
 	CHECK(idle.rate == 0, "unoccupied player-control seeds no rate");
 
 	// Both ends clamp rather than running away.
 	RotorState fast;
 	fast.rate = kRotorRateFull;
 	fast.speed = kRotorSpeedMax;
-	rotor_tick(fast, true);
+	rotor_tick(fast, true, kRotorDecayGround);
 	CHECK(fast.speed == kRotorSpeedMax, "spin-up caps");
 	RotorState low;
 	low.speed = kRotorRateFull / 2;
-	rotor_tick(low, false);
+	rotor_tick(low, false, kRotorDecayGround);
 	CHECK(low.speed == 0, "the last step down lands on zero, not below");
 }
 
@@ -69,37 +72,37 @@ void test_player_control_rotor_symmetry() {
 // stream: three rates by percentage band, and it re-rolls every unoccupied
 // tick because the rate is reset to zero.
 void test_rolled_rate() {
-	CHECK(rotor_rate_from_roll(0) == kRotorRateFull, "0% -> full");
-	CHECK(rotor_rate_from_roll(33) == kRotorRateFull, "33 -> full (> 33 is the edge)");
-	CHECK(rotor_rate_from_roll(34) == kRotorRateMid, "34 -> mid");
-	CHECK(rotor_rate_from_roll(66) == kRotorRateMid, "66 -> mid (> 66 is the edge)");
-	CHECK(rotor_rate_from_roll(67) == kRotorRateLow, "67 -> low");
-	CHECK(rotor_rate_from_roll(99) == kRotorRateLow, "99 -> low");
-	CHECK(rotor_rate_from_roll(100) == kRotorRateFull, "the roll is % 100");
+	CHECK(rotor_rate_from_roll(0, kJo) == kRotorRateFull, "0% -> full");
+	CHECK(rotor_rate_from_roll(33, kJo) == kRotorRateFull, "33 -> full (> 33 is the edge)");
+	CHECK(rotor_rate_from_roll(34, kJo) == kRotorRateMid, "34 -> mid");
+	CHECK(rotor_rate_from_roll(66, kJo) == kRotorRateMid, "66 -> mid (> 66 is the edge)");
+	CHECK(rotor_rate_from_roll(67, kJo) == kRotorRateLow, "67 -> low");
+	CHECK(rotor_rate_from_roll(99, kJo) == kRotorRateLow, "99 -> low");
+	CHECK(rotor_rate_from_roll(100, kJo) == kRotorRateFull, "the roll is % 100");
 
 	RotorState s;
 	CHECK(rotor_rate_needs_roll(s, false), "zero rate on a non-player item rolls");
-	rotor_seed_rate(s, false, false, kRotorRateLow);
+	rotor_seed_rate(s, false, false, kRotorRateLow, kJo);
 	CHECK(s.rate == kRotorRateLow, "the rolled rate is taken even unoccupied");
 	CHECK(!rotor_rate_needs_roll(s, false), "a seeded rate does not roll again");
-	rotor_tick(s, false);
+	rotor_tick(s, false, kRotorDecayGround);
 	CHECK(s.rate == 0 && rotor_rate_needs_roll(s, false),
 			"an unoccupied tick resets the rate, so the next tick rolls again");
 
 	// Spin-up at the rolled rate, spin-down at the FULL rate: a slow-start
 	// rotor stops faster than it started.
 	RotorState r;
-	rotor_seed_rate(r, false, true, kRotorRateLow);
-	rotor_tick(r, true);
+	rotor_seed_rate(r, false, true, kRotorRateLow, kJo);
+	rotor_tick(r, true, kRotorDecayGround);
 	CHECK(r.speed == kRotorRateLow, "spin-up uses the rolled rate");
-	rotor_tick(r, false);
+	rotor_tick(r, false, kRotorDecayGround);
 	CHECK(r.speed == 0, "spin-down uses the full rate and lands on zero");
 }
 
 // The spawn seed: full speed at once, the full rate armed.
 void test_spawn_full() {
 	RotorState s;
-	rotor_spawn_full(s);
+	rotor_spawn_full(s, kJo);
 	CHECK(s.speed == kRotorSpeedMax && s.rate == kRotorRateFull,
 			"a spawned-in-flight rotor is already at full speed");
 	CHECK(kSpawnRotorFullBit == 0x20000, "the record flag");
@@ -311,8 +314,8 @@ void test_rotor_machines_by_profile_type() {
 	CHECK(rotor_machine_for_profile(1) == RotorMachine::Helo, "type 1 -> helo");
 	CHECK(rotor_machine_for_profile(3) == RotorMachine::None, "type 3 (organic) -> none");
 	CHECK(rotor_machine_for_profile(0) == RotorMachine::None, "unresolved -> none");
-	CHECK(rotor_decay_for(RotorMachine::Helo) == kRotorDecayHelo &&
-					rotor_decay_for(RotorMachine::Ground) == kRotorDecayGround,
+	CHECK(rotor_decay_for(RotorMachine::Helo, kJo) == kRotorDecayHelo &&
+					rotor_decay_for(RotorMachine::Ground, kJo) == kRotorDecayGround,
 			"each machine's decay");
 	RotorState helo;
 	helo.speed = 100000;
@@ -345,6 +348,42 @@ void test_helo_family_decays_at_the_helo_rate() {
 	r.w.vehicles.part_anim_tick(r.veh(), g);
 	CHECK(r.veh().veh.part_spin.speed == 3 * kRotorRateFull - kRotorDecayHelo - kRotorDecayGround,
 			"a ground-family row decays at the ground rate");
+}
+
+// DFX2-23: the rates are the title's. Under dfx2.exe's rules the same mover tail spins up at
+// 372827, the helo machine winds down at 93206 and the ground machine at 372827, and a roll's
+// bands take 326222 and 279619; the cap is both binaries' 0x0CCCCCC0.
+// [orig: Entity_UpdatePartSpinAccumulator @0x4928C0 - 372827 @0x492903, the decay @0x492964;
+//  Entity_UpdateHeloRotorSpin @0x48FA80 - 372827 @0x48FB1C, the decay 93206 @0x48FB77 (dfx2.exe)]
+void test_dfx2_spins_its_parts_twice_as_fast() {
+	const PartSpinRates &dfx2 = title_rules("dfx2").part_spin;
+	CHECK(dfx2.full == 372827 && dfx2.mid == 326222 && dfx2.low == 279619 &&
+					dfx2.ground_decay == 372827 && dfx2.helo_decay == 93206,
+			"dfx2.exe's rates");
+	CHECK(title_rules("jo").part_spin.full == kRotorRateFull &&
+					title_rules("jo").part_spin.helo_decay == kRotorDecayHelo,
+			"Jointops.exe's are the JO row");
+	CHECK(rotor_rate_from_roll(50, dfx2) == 326222 && rotor_rate_from_roll(80, dfx2) == 279619,
+			"a roll's bands take dfx2.exe's rates");
+	Rig r;
+	r.w.rules.title_rules = &title_rules("dfx2");
+	VehicleTraits t = buggy_traits(true);
+	t.family = VehicleFamily::Helicopter;
+	r.w.ai.release(r.veh_h); // a row with no brain: its family stands in
+	r.mount();
+	for (int i = 0; i < 3; ++i) r.w.vehicles.part_anim_tick(r.veh(), t);
+	CHECK(r.veh().veh.part_spin.speed == 3 * 372827, "occupied: dfx2.exe's full rate");
+	CHECK(r.w.vehicles.detach(r.drv_h), "dismount");
+	r.w.vehicles.part_anim_tick(r.veh(), t);
+	CHECK(r.veh().veh.part_spin.speed == 3 * 372827 - 93206, "unoccupied: dfx2.exe's helo decay");
+	VehicleTraits g = buggy_traits(true);
+	r.w.vehicles.part_anim_tick(r.veh(), g);
+	CHECK(r.veh().veh.part_spin.speed == 3 * 372827 - 93206 - 372827,
+			"a ground-family row decays at dfx2.exe's ground rate");
+	RotorState spawned;
+	rotor_spawn_full(spawned, dfx2);
+	CHECK(spawned.rate == 372827 && spawned.speed == kRotorSpeedMax,
+			"an EngineRunning spawn seeds dfx2.exe's full rate [orig: @0x40ECD0 (dfx2.exe)]");
 }
 
 // A predicted aircraft row skips the mover but still runs its tail's rotor call,
@@ -480,7 +519,7 @@ void test_suspension_registers_and_rotor_threshold_tick() {
 	RotorState rotor;
 	rotor.angle = INT32_MAX;
 	rotor.speed = 1;
-	rotor_tick(rotor, true);
+	rotor_tick(rotor, true, kRotorDecayGround);
 	CHECK(rotor.angle == INT32_MIN, "rotor angle wraps at the signed boundary");
 
 	Rig r;
@@ -916,6 +955,7 @@ int main() {
 	test_register_projection_through_the_mover();
 	test_rotor_machines_by_profile_type();
 	test_helo_family_decays_at_the_helo_rate();
+	test_dfx2_spins_its_parts_twice_as_fast();
 	test_predicted_aircraft_rotor_keeps_the_movers_gate();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

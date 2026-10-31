@@ -114,6 +114,8 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stop"), &NovaWorldClient::stop);
 	ClassDB::bind_method(D_METHOD("escape_connect"), &NovaWorldClient::escape_connect);
 	ClassDB::bind_method(D_METHOD("disconnect_at_exit"), &NovaWorldClient::disconnect_at_exit);
+	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("is_novaworld_domain_host", "host"),
+			&NovaWorldClient::is_novaworld_domain_host);
 	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("forget_gate_response"),
 			&NovaWorldClient::forget_gate_response);
 	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("create_cookie_jar", "dir"),
@@ -432,6 +434,10 @@ void NovaWorldClient::start() {
 	lobby_.probe(opennova::to_std(host_), static_cast<uint16_t>(gate_port_));
 }
 
+bool NovaWorldClient::is_novaworld_domain_host(const String &host) {
+	return opennova::is_novaworld_domain_host(host.utf8().get_data());
+}
+
 void NovaWorldClient::forget_gate_response() {
 	opennova::process_gate_memory().forget();
 }
@@ -580,6 +586,9 @@ void NovaWorldClient::_process(double) {
 	// one clock (engine world/tick_count_clock.h), never a sum of the engine's capped process
 	// steps, which lost the time of every hitch past the cap.
 	clock_ms_ = opennova::world::frame_tick_count_ms() - clock_origin_ms_;
+	// The screen's update writes an NWACT a page handed it as this machine's activation and
+	// clears it from the jar (engine consume_activation carries the witness).
+	(void)consume_cd_key_activation(lobby_.protocol());
 	if (state_ == STATE_IDLE || state_ == STATE_DISCONNECTED || state_ == STATE_ERROR) {
 		// A leg whose session a punt, the reap or an error ended still ends its wait on the
 		// session's state (engine: NwuHostRole::poll_request, connect_or_host.h's
@@ -727,9 +736,12 @@ void NovaWorldClient::on_gate_response(const opennova::GateResponse &parsed) {
 // engine flow, so cookies issued during login/NWJoin reach the UDP session too.
 std::vector<std::pair<std::string, std::string>> NovaWorldClient::make_cookie_vars() {
 	if (identity_vars_.empty()) {
+		// The lobby speaks its protocol, whose session part (NWPSSK's serial term among it) is
+		// complete: the connect refused any other.
 		const opennova::LobbyIdentityParams idp = collect_lobby_identity_params(
 				game_config_.is_valid() ? game_config_->native().cfg()
-										: opennova::gamecfg::defaults());
+										: opennova::gamecfg::defaults(),
+				*lobby_.protocol());
 		identity_vars_ = opennova::make_lobby_identity_vars(idp);
 	}
 	sync_flow_context();
@@ -1572,6 +1584,12 @@ void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
 	cfg.lan_only = options->get_server_lan_only();
 	cfg.expansion = opennova::to_std(options->get_expansion());
 	cfg.region_index = options->get_region_index();
+	// DFXCATEGORY1, where the protocol's lists carry it (NwuHostRole sets category_var): the
+	// game.cfg word mpdfxcategory, as opennova-serve's registration takes it (engine
+	// Protocol::host_category_var, games/dfx2/dfx2_protocol.cpp, carries the witness).
+	cfg.category =
+			(game_config_.is_valid() ? game_config_->native().cfg() : opennova::gamecfg::defaults())
+					.mp_dfx_category;
 	const String mission = options->get_mission_name().is_empty()
 			? options->get_mission_file().get_file().get_basename()
 			: options->get_mission_name();

@@ -159,7 +159,10 @@ int synthetic_every_key() {
 	// [orig: HUD_ParseHudposToken @0x59FAE9..0x59FB32].
 	CHECK(hud.connect_status[0] == 1012 && hud.connect_status[1] == 10 && hud.connect_status[2] == 1);
 	CHECK(text.find("CONNECTSTATUS\t1012,10,right\r\n") != std::string::npos);
-	CHECK(text.find("EXPPOINTS\t8,96,0,left\r\n") != std::string::npos);
+	// EXPPOINTS is four numbers, its fourth the pulse percent, no alignment word
+	// [orig: HUD_ParseHudposToken @0x59F370 (@0x5A0463..0x5A04AF)].
+	CHECK(hud.exp_points[0] == 8 && hud.exp_points[1] == 96 && hud.exp_points[3] == 200);
+	CHECK(text.find("EXPPOINTS\t8,96,0,200\r\n") != std::string::npos);
 	CHECK(text.find("fonthud1_lo\t\"my font.fnt\"\r\n") != std::string::npos);
 	CHECK(text.find("alphafade\t40,70.25,1.5\r\n") != std::string::npos);
 	CHECK(text.find("HUDHEALTHBORDER\t90,200,201,202\r\n") != std::string::npos);

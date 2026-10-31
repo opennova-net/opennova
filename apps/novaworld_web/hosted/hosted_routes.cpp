@@ -61,7 +61,7 @@ void put_id(crow::json::wvalue &out, const char *key, std::optional<int64_t> id)
 }
 
 crow::json::wvalue settings_json(const HostedSettings &s) {
-	return crow::json::wvalue(crow::json::load(io::json_write(settings_document(s))));
+	return to_crow(settings_document(s));
 }
 
 crow::json::wvalue range_json(const SettingRange &range) {
@@ -149,10 +149,11 @@ void put_owner(crow::json::wvalue &out, db::Database &db, std::optional<int64_t>
 	out["owner"] = std::move(owner);
 }
 
-crow::response server_reply(int code, db::Database &db, int64_t id, bool admin) {
+crow::response server_reply(
+		int code, db::Database &db, int64_t id, bool admin, const std::string &serve_image) {
 	crow::json::wvalue out;
 	if (const auto server = find_server(db, id))
-		out["server"] = server_json(db, *server, admin);
+		out["server"] = server_json(db, *server, admin, serve_image);
 	else
 		out["server"] = nullptr;
 	return json_reply(code, out);
@@ -186,9 +187,8 @@ crow::json::wvalue offered_product_json(const OfferedProduct &d) {
 	// alone; the list's novalogic_listing says whether the service offers it at all).
 	out["novalogic_listing"] = novalogic_lists(d);
 	out["missions"] = missions_json(d.missions);
-	out["settings_schema"] = crow::json::wvalue(
-			crow::json::load(io::json_write(hosted_settings_schema(title_config_table(d.title)))));
-	out["weapons"] = crow::json::wvalue(crow::json::load(encode_tree_weapons(d.weapons)));
+	out["settings_schema"] = to_crow(hosted_settings_schema(d.title));
+	out["weapons"] = to_crow(encode_tree_weapons(d.weapons));
 	const HostLimits limits = host_limits_for_title(d.title);
 	crow::json::wvalue ranges;
 	ranges["max_players"] = range_json(limits.max_players);
@@ -206,18 +206,32 @@ crow::json::wvalue offered_product_json(const OfferedProduct &d) {
 		item["display_name"] = e.display_name;
 		item["version"] = e.version;
 		item["missions"] = missions_json(e.missions);
-		item["weapons"] = crow::json::wvalue(crow::json::load(encode_tree_weapons(e.weapons)));
+		item["weapons"] = to_crow(encode_tree_weapons(e.weapons));
 		expansions.push_back(std::move(item));
 	}
 	out["expansions"] = std::move(expansions);
 	return out;
 }
 
+crow::json::wvalue serve_build_json(const ServeBuild &build) {
+	crow::json::wvalue b;
+	if (build.version.empty())
+		b["version"] = nullptr;
+	else
+		b["version"] = build.version;
+	if (build.commit.empty())
+		b["commit"] = nullptr;
+	else
+		b["commit"] = build.commit;
+	return b;
+}
+
 // A hosted server for its owner (GET /api/me/servers and /api/me/servers/<id>,
 // the start, stop and update replies) or, with `admin`, for the fleet view:
 // its owner (with its tier), its service account, its place in the fleet, its
 // pins and its listed players besides. Never its admin password.
-crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin, const std::string &zone) {
+crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin,
+		const std::string &serve_image, const std::string &zone) {
 	crow::json::wvalue e;
 	e["id"] = s.id;
 	e["state"] = state_name(s.state);
@@ -275,8 +289,31 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 	data["base"] = pinned_json(db, s.base_tree_id);
 	data["expansion"] = pinned_json(db, s.expansion_tree_id);
 	e["data"] = std::move(data);
+	// What a waiting update brings: newer data than its pins, a newer server build than its
+	// start pinned, or both; the owner's one update takes all of it.
 	const bool outdated = is_live(s.state) && server_outdated(db, s.id);
-	e["update_available"] = outdated;
+	const bool build_outdated = server_build_outdated(s, serve_image);
+	e["update_available"] = outdated || build_outdated;
+	std::vector<crow::json::wvalue> kinds;
+	if (outdated)
+		kinds.emplace_back(std::string("content"));
+	if (build_outdated)
+		kinds.emplace_back(std::string("server_build"));
+	e["update_kinds"] = std::move(kinds);
+	// The build it says it runs (its own container's report), and the one the update moves it
+	// to (a server's already on the release's image).
+	const auto report = is_live(s.state) ? slot_report_of(db, s.id) : std::nullopt;
+	const bool own_report = report && report->container == s.container;
+	if (own_report && report->state == ContainerState::Running && report->build)
+		e["build"] = serve_build_json(*report->build);
+	else
+		e["build"] = nullptr;
+	const auto available =
+			build_outdated ? reported_build_of_image(db, serve_image) : std::optional<ServeBuild>{};
+	if (available)
+		e["build_available"] = serve_build_json(*available);
+	else
+		e["build_available"] = nullptr;
 	e["update_requested"] = s.update_requested;
 	e["restarts"] = s.restarts;
 	text_or_null(e, "failure_reason", s.failure_reason);
@@ -312,6 +349,8 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 	} else {
 		e["novalogic"] = nullptr;
 	}
+	// Its starts so far, each its own log (an admin's Logs tab picks one on either page).
+	e["generation"] = s.generation;
 	if (!admin)
 		put_phase(e, db, s, wall_now_s() * 1000, false);
 	if (admin) {
@@ -333,15 +372,13 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 			e["game_port"] = s.game_port;
 		else
 			e["game_port"] = nullptr;
-		e["generation"] = s.generation;
 		text_or_null(e, "serve_image", s.serve_image);
 		put_id(e, "base_tree_id", s.base_tree_id);
 		put_id(e, "expansion_tree_id", s.expansion_tree_id);
 		e["outdated"] = outdated;
 		// Its last minute of ticks as its slot's report carries it (its own
 		// container's, as put_phase reads it), null with none.
-		const auto report = is_live(s.state) ? slot_report_of(db, s.id) : std::nullopt;
-		if (report && report->container == s.container && report->tick) {
+		if (own_report && report->tick) {
 			crow::json::wvalue t;
 			t["p99_ms"] = report->tick->p99_ms;
 			t["late"] = report->tick->late;
@@ -486,7 +523,8 @@ void HostedRoutes::register_routes(WebApp &app) {
 // display_name} or null), expansion ({id, code, display_name} or null),
 // game_display_name, expansion_display_name, data ({base: {tree_id, version} or
 // null, expansion: likewise}: the trees it is pinned to), update_available
-// (newer data than its pins, while live), update_requested, restarts,
+// (newer data than its pins, or an older serve image than the release's, while
+// live), update_kinds, build, build_available (server_json), update_requested, restarts, generation,
 // failure_reason, created_at, updated_at, running_at, ended_at (UTC, null until
 // set), listing ({rid, server_name, mission_name, players, max_players,
 // host_ip, host_port} while listed, else null), phase ({name: queued,
@@ -551,7 +589,7 @@ crow::response HostedRoutes::me_servers(const crow::request &req) {
 		out["products"] = std::move(sets);
 		std::vector<crow::json::wvalue> servers;
 		for (const HostedServer &s : list_servers_of(*db_conn, owner, kEndedShown))
-			servers.push_back(server_json(*db_conn, s, false, address_zone_));
+			servers.push_back(server_json(*db_conn, s, false, serve_image_, address_zone_));
 		out["servers"] = std::move(servers);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] GET /api/me/servers failed: %s\n", e.what());
@@ -575,7 +613,7 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 		db::ReadSnapshot snapshot(*db_conn);
 		const auto server = owned_server(*db_conn, path_id(id), access.user->id);
 		if (!server) return json_error(404, "not_found", "this account has no hosted server with this id");
-		crow::json::wvalue e = server_json(*db_conn, *server, false, address_zone_);
+		crow::json::wvalue e = server_json(*db_conn, *server, false, serve_image_, address_zone_);
 		std::vector<crow::json::wvalue> events;
 		for (const HostedEvent &ev : list_events(*db_conn, server->id, kEventsShown)) {
 			crow::json::wvalue j;
@@ -700,7 +738,7 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 			case RequestOutcome::Created:
 				log_owner(user, "start",
 						"server " + std::to_string(result.id) + " requested" + (own_machine ? " (dedicated machine)" : ""));
-				return server_reply(202, *db_conn, result.id, false);
+				return server_reply(202, *db_conn, result.id, false, serve_image_);
 			case RequestOutcome::InvalidSettings:
 				// check_settings passed above, and request_server runs the same
 				// check: unreachable, so a fault of the service's own.
@@ -780,7 +818,7 @@ crow::response HostedRoutes::me_stop(const crow::request &req, uint64_t id) {
 		const bool asked =
 				request_stop(*db_conn, server->id, "stopped by its owner", StartCause::OwnerStop);
 		log_owner(user, "stop", "server " + std::to_string(server->id) + (asked ? " stopping" : " already stopping"));
-		return server_reply(202, *db_conn, server->id, false);
+		return server_reply(202, *db_conn, server->id, false, serve_image_);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/me/servers/%llu/stop failed: %s\n",
 				static_cast<unsigned long long>(id), e.what());
@@ -789,13 +827,13 @@ crow::response HostedRoutes::me_stop(const crow::request &req, uint64_t id) {
 }
 
 // POST /api/me/servers/<id>/update — the owner's move of one of the account's
-// live servers to its products' current data (ADR 0064): the row's
-// update_requested, which the supervisor honours at its next pass (the server
-// placed again on the current trees, a new generation; players drop). Idempotent.
-// require_user (401, 403 without the CSRF header); 404 not_found for an id that
-// is not the account's; 409 not_live once it has ended, 409 up_to_date when
-// its pins are its products' current trees already; 202 {"server"} (one
-// already asked included).
+// live servers to its products' current data (ADR 0064) and the release's server
+// build: the row's update_requested, which the supervisor honours at its next pass
+// (the server placed again on the current trees and the fleet's serve image, a new
+// generation; players drop). Idempotent. require_user (401, 403 without the CSRF
+// header); 404 not_found for an id that is not the account's; 409 not_live once it
+// has ended, 409 up_to_date when its pins are its products' current trees and its
+// image the release's already; 202 {"server"} (one already asked included).
 crow::response HostedRoutes::me_update(const crow::request &req, uint64_t id) {
 	auto access = access_.require_user(req);
 	if (access.refusal) return std::move(*access.refusal);
@@ -807,7 +845,7 @@ crow::response HostedRoutes::me_update(const crow::request &req, uint64_t id) {
 			log_owner(user, "update", "not_found");
 			return json_error(404, "not_found", "this account has no hosted server with this id");
 		}
-		switch (request_update(*db_conn, server->id)) {
+		switch (request_update(*db_conn, server->id, serve_image_)) {
 			case UpdateOutcome::NotFound:
 				log_owner(user, "update", "not_found");
 				return json_error(404, "not_found", "this account has no hosted server with this id");
@@ -816,12 +854,13 @@ crow::response HostedRoutes::me_update(const crow::request &req, uint64_t id) {
 				return json_error(409, "not_live", "this hosted server has ended");
 			case UpdateOutcome::UpToDate:
 				log_owner(user, "update", "server " + std::to_string(server->id) + " up_to_date");
-				return json_error(409, "up_to_date", "this hosted server runs its game's current data");
+				return json_error(409, "up_to_date",
+						"this hosted server runs its game's current data and server build");
 			case UpdateOutcome::Requested:
 				break;
 		}
 		log_owner(user, "update", "server " + std::to_string(server->id) + " update requested");
-		return server_reply(202, *db_conn, server->id, false);
+		return server_reply(202, *db_conn, server->id, false, serve_image_);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/me/servers/%llu/update failed: %s\n",
 				static_cast<unsigned long long>(id), e.what());
@@ -858,7 +897,7 @@ crow::response HostedRoutes::admin_stop(const crow::request &req, uint64_t id) {
 		if (!server) return json_error(404, "not_found", "no hosted server has this id");
 		if (!is_live(server->state)) return json_error(409, "not_live", "this hosted server has ended");
 		request_stop(*db_conn, server_id, "stopped by an admin", StartCause::AdminStop);
-		return server_reply(202, *db_conn, server_id, true);
+		return server_reply(202, *db_conn, server_id, true, serve_image_);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/admin/hosted/%llu/stop failed: %s\n",
 				static_cast<unsigned long long>(id), e.what());

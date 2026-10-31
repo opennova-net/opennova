@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildOf,
-  buildText,
   hostdBuilds,
   imagesOnRelease,
   parseAgentVersion,
@@ -18,8 +17,6 @@ import { program, programTask } from '../test/usageFixtures';
 describe('the builds the deployment runs', () => {
   it('spells a build as ONE version and short sha, the sha alone with no version', () => {
     expect(versionText({ version: '0.0.22.5922', commit: 'b0c2b38' })).toBe('ONE 0.0.22.5922');
-    expect(buildText({ version: '0.0.22.5922', commit: 'b0c2b38' })).toBe('ONE 0.0.22.5922 b0c2b38');
-    expect(buildText({ version: null, commit: 'b0c2b38' })).toBe('b0c2b38');
     expect(buildOf('0.0.22', 'b0c2b38f00d')).toEqual({ version: '0.0.22', commit: 'b0c2b38' });
     expect(buildOf(null, null)).toBeNull();
     expect(buildOf('', 'not a sha')).toBeNull();

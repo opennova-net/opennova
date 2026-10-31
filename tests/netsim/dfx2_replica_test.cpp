@@ -92,7 +92,6 @@ void host_fan_writes_the_checkpoint() {
 	               jo_fu.complete && !jo_fu.objective.has_coop_checkpoint,
 	       "JO's host writes the four values alone");
 	expect(jo_body.size() + 4 == dfx2_body.size(), "the checkpoint is DFX2's four bytes");
-	expect(phase3_frame(nullptr) == jo_body, "a host with no title writes JO's");
 	const std::vector<uint8_t> marked_body = phase3_frame(dfx2(), 7);
 	FrameUpdate marked;
 	expect(decode_frame_update(marked_body.data(), marked_body.size(), ns::class_for_type_id, marked,
@@ -214,6 +213,30 @@ void world_state_folds_the_done_records() {
 	       "the JO route keeps its own done flags");
 }
 
+// A DFX2 joiner's 0x0F raises the deploy screen whatever the flags byte and the death screen; a
+// JO joiner's clears it and raises it only for bit 0 with no death screen up (DFX2-34,
+// ProtocolInMatch::s2c_0f). [orig: NapiNPClientMsg_0x00F @0x42e2d8, @0x42e2ed..0x42e2f8]
+// [orig: `mov g_DeployScreenActive, al` (1) @0x42fdc8 in NapiNPClientMsg_0x00F @0x42fcf0
+//  (dfx2.exe)]
+void world_state_raises_the_deploy_screen() {
+	std::vector<uint8_t> body = coop_world_state_load(); // its flags byte 0
+	const auto folded = [&](const Protocol *protocol, const char *code, bool death_screen) {
+		auto view = std::make_unique<ns::ClientReplicaPipeline>();
+		view->set_protocol(protocol);
+		view->set_rules(&world::title_rules(code));
+		view->set_game_type(0x30020u);
+		view->state().death_screen_active = death_screen;
+		view->apply(s2c::WORLD_STATE_LOAD, body);
+		return view->state().deploy_overlay_active;
+	};
+	expect(folded(dfx2(), "dfx2", false) && folded(dfx2(), "dfx2", true),
+	       "a DFX2 joiner's 0x0F raises the deploy screen, flags 0 or the death screen up");
+	expect(!folded(jo(), "jo", false), "a JO joiner's 0x0F with flags 0 leaves it down");
+	body[22] = 1;
+	expect(folded(jo(), "jo", false) && !folded(jo(), "jo", true),
+	       "a JO joiner's bit 0 raises it unless the death screen is up");
+}
+
 } // namespace
 
 int main() {
@@ -221,6 +244,7 @@ int main() {
 	joiner_view_keeps_the_checkpoint();
 	weapon_restrictions_keep_the_titles_armory_value();
 	world_state_folds_the_done_records();
+	world_state_raises_the_deploy_screen();
 	if (g_failures == 0) {
 		std::printf("netsim_dfx2_replica: all checks passed\n");
 		return 0;

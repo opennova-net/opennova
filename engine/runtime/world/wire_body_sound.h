@@ -21,6 +21,9 @@ class World;
 // dipped by the frame's capsule bottom, through the shared slot pick
 // [orig: the dip @0x4b77d3]. `on_entity` is the decoded wire carrier link
 // (PF_CARRIER_HANDLE >= 0), the wire's stand-in for Entity::ground_target.
+// `character_id` is the character a player's avatar blip names, whose sex picks
+// the female binding (a listen host's PF_CHARACTER_ID, a joiner's
+// player_blip_character; DFX2-53), 0 for an org1 body.
 void wire_body_slot_sounds(World &world, const uint32_t *words, int count,
                            int32_t capsule_bottom, int32_t item_id,
                            uint16_t character_id, uint16_t source_handle,

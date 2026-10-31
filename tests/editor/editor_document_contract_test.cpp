@@ -1349,7 +1349,7 @@ void check_project_check(const DocumentType &type, const Fixture &fixture, TypeC
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	const AssetScan scan = scan_project_assets(paths, project);
 	ProjectAssetSource files;
-	files.set_scan(root, scan, project.target_game);
+	files.set_scan(root, scan);
 	AssetGraph graph;
 	ValidationCache cache;
 	const std::vector<std::shared_ptr<const DocumentBase>> open;

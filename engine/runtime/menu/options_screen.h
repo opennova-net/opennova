@@ -7,6 +7,10 @@
 #include <formats/playersav/player_sav.h>
 #include <runtime/controls/binding_set.h>
 
+namespace opennova {
+struct Title;
+}
+
 namespace opennova::menu {
 
 // Device events have already crossed the Godot/OS key and button translation. A joystick
@@ -58,12 +62,14 @@ public:
 		// material 0xA51 (twice the vertex colour, the texture's alpha) until
 		// the next mission's HUD init
 		// [orig: UI_IngameOptionsDialogEventHandler @0x554e40 - the find
-		//  @0x5551c3, the gate @0x5551ca, the old art released (sub_59EF10)
-		//  @0x5551d8, "cross%02d.tga" @0x5551f4, sub_59EEF0 @0x555201 ->
+		//  @0x5551c3, the gate @0x5551ca, the old art released (HUD_ReleaseCrosshairTexture)
+		//  @0x5551d8, "cross%02d.tga" @0x5551f4, HUD_LoadCrosshairTextureAlpha @0x555201 ->
 		//  HUD_LoadTextureWithInfo(name, 1, ...) @0x59eefc] (D-HUD-48).
 		ReloadCrosshairAlpha = 64,
 	};
-	void prepare(MenuRuntime &menu, const playersav::ProfileRecord *record);
+	// `catalog` is the title's (controls::title_catalog): the working records follow its rows.
+	void prepare(MenuRuntime &menu, const playersav::ProfileRecord *record,
+			const controls::Catalog &catalog);
 	bool is_surface() const { return is_surface_; }
 	// The retail Options policy (options_policy.h) on the surface prepare() found, before any
 	// settings owner seeds its values: every witnessed slider's range, its value at the minimum;
@@ -72,6 +78,9 @@ public:
 	// controls not serviced yet locked, showing their forced checks (D-MNU-21). Nothing off the
 	// surface.
 	void apply_policy(MenuRuntime &menu) const;
+	// The title's own steps at the populate's end: under Title::options_hides_advanced (DFX2-62)
+	// the ADVANCED_OUTLINE and ADVANCED_TAB controls hidden. Nothing off the surface.
+	void apply_title(MenuRuntime &menu, const Title &title) const;
 	// The record's controls words into their widgets, after apply_policy installed the
 	// MOUSE_SENSITIVITY range the seed clamps into: INVERT_MOUSE, MOUSE_SENSITIVITY,
 	// ENABLE_JOYSTICK, INVERT_JOYSTICK and ENABLE_FORCE_FEEDBACK (those two interactive only
@@ -127,7 +136,8 @@ private:
 	// The controls words from the widgets into the record; the in-game Accept
 	// also reads the auto pair.
 	void accept_words(const MenuRuntime &menu, playersav::ProfileRecord &record, bool ingame) const;
-	controls::BindingSet bindings_;
+	// Jointops.exe's rows until the first prepare names the title's.
+	controls::BindingSet bindings_{controls::default_catalog()};
 	bool has_table_ = false, is_surface_ = false, ingame_ = false;
 	controls::Device device_ = controls::Device::Keyboard;
 	int table_ = -1, row_ = -1, action_ = -1;

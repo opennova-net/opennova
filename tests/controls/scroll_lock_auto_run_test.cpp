@@ -86,7 +86,7 @@ bool offs_are(const PlayerActionFrame &frame, std::vector<int> expected) {
 
 // The word queues the forward event every input frame it reads on and turns nothing off.
 bool test_the_word_walks_forward() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	for (int frame = 0; frame < 3; ++frame) {
 		const PlayerActionFrame out = poll_frame(actions, keys, live(true));
@@ -99,7 +99,7 @@ bool test_the_word_walks_forward() {
 
 // No input frame runs under a menu screen; an inactive frame (an overlay) takes no forward key.
 bool test_menu_and_inactive_frames() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	PlayerActionPoll menu = live(true);
 	menu.menu_open = true;
@@ -113,7 +113,7 @@ bool test_menu_and_inactive_frames() {
 // The held Last_move row queues the same forward event, with its fourth argument 1: no
 // turn-off.
 bool test_last_move_row() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	keys.held.insert("Last_move");
 	const PlayerActionFrame out = poll_frame(actions, keys, live(false));
@@ -124,7 +124,7 @@ bool test_last_move_row() {
 // A key's own forward, back and strafe events turn the toggle off every frame they are held,
 // by their case codes 152, 151, 156 and 157; the word still queues its forward event.
 bool test_movement_keys_turn_it_off() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	keys.held.insert("move_forward");
 	CHECK(offs_are(poll_frame(actions, keys, live(true)), {152}));
@@ -143,7 +143,7 @@ bool test_movement_keys_turn_it_off() {
 // The held USE row's case (0xB1) turns it off every frame it runs; its release tail turns it
 // off past no head (-1), whether or not a seat pick consumed the hold.
 bool test_use_row_and_release_tail() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	keys.held.insert("useitem");
 	CHECK(offs_are(poll_frame(actions, keys, live(false)), {177}));
@@ -152,7 +152,7 @@ bool test_use_row_and_release_tail() {
 	CHECK(offs_are(released, {-1}) && released.requests.size() == 1 &&
 			released.requests[0].action == PlayerAction::ToggleMount);
 
-	PlayerActions consumed;
+	PlayerActions consumed(opennova::controls::default_catalog());
 	keys.held = {"useitem"};
 	(void)poll_frame(consumed, keys, live(false));
 	const ChainDigitTake picked = consumed.chain_digit_key('1', false, false);
@@ -166,7 +166,7 @@ bool test_use_row_and_release_tail() {
 
 // The Respawn press's input reset turns it off by code 55, on its press edge only.
 bool test_respawn_press() {
-	PlayerActions actions;
+	PlayerActions actions(opennova::controls::default_catalog());
 	Keys keys;
 	keys.held.insert("respawn");
 	const PlayerActionFrame pressed = poll_frame(actions, keys, live(false));

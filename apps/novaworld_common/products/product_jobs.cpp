@@ -100,6 +100,10 @@ bool scan_missions(const ProductRow &product, const std::string &dir,
 		const std::map<std::string, std::string> &files, std::vector<TreeMission> &out,
         gamecfg::WeaponRoster &weapons, std::string &why) {
 	std::vector<mission_catalog::Row> rows;
+	// The catalog's order is the title's (Title::mission_list_order carries the witness); an
+	// expansion builds on Joint Operations' install, the one title that mounts one.
+	const Title *title = title_by_code(product.title);
+	const MissionListOrder order = (title != nullptr ? *title : default_title()).mission_list_order;
 	if (product.kind == ProductKind::Game) {
 		ResourceIndex index;
 		if (!index.scan(
@@ -109,7 +113,7 @@ bool scan_missions(const ProductRow &product, const std::string &dir,
 			return false;
 		}
 		// The service lists a tree's own tables: no expansion override table is installed.
-		rows = mission_catalog::build(index, nullptr);
+		rows = mission_catalog::build(index, nullptr, order);
         weapons = inmatch::game_cfg_weapon_roster(index);
 		index.clear();
 	} else {
@@ -133,7 +137,7 @@ bool scan_missions(const ProductRow &product, const std::string &dir,
 		rows = mission_catalog::archive_rows(missions_archive, &texts_archive, nullptr);
 		pff::pff_close(&missions_archive);
 		pff::pff_close(&texts_archive);
-        mission_catalog::sort_rows(rows);
+        mission_catalog::sort_rows(rows, order);
         ResourceIndex index;
         if (index.scan(dir, product.expansion_code, VfsMountMode::Packed, VfsArchiveDiscovery::RetailTable))
             weapons = inmatch::game_cfg_weapon_roster(index);

@@ -33,6 +33,7 @@
 #include <runtime/world/world.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
+#include <net/protocol/protocol.h>
 
 #include <cstdio>
 #include <memory>
@@ -64,6 +65,7 @@ struct Fixture {
 	explicit Fixture(std::vector<uint16_t> slots = {1, 2, 3}) {
 		inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
 		ctx.is_in_session = 1;
+		ctx.np_protocol.identity = title_protocol("jo");
 		ctx.config.game_type = 0x10000u; // TDM
 		ctx.config.respawn_timeout = 1;
 		ctx.config.max_players = 16; // the admin commands' slot index range
@@ -618,6 +620,33 @@ void test_the_recent_spawn_hold_reads_the_arm_on_the_frame_clock() {
 	CHECK(f.conn(0).seed_armed_clock == 1000u); // the disarm leaves the arm's stamp
 }
 
+// The holds compare signed, as retail's do: a timeout word of -1 (game.cfg takes it whole) waits 3,
+// and where a spawn zone stands a negative +364 (a 0x41's raw store of that timeout) takes the
+// hold. [orig: GameEvent_PlayerDeath - `cmp ecx, ebp` @0x516EBC, `jge` @0x516EC4, the 3
+// @0x516EC6; `cmp [edi+16Ch], eax` @0x516EE3, `jge` @0x516EE9, the store @0x516EEB;
+// NapiNPServerMsg_DeathTimeoutReset - +364 @0x510587]
+void test_a_negative_timeout_holds_three() {
+	Fixture f;
+	f.ctx.config.respawn_timeout = static_cast<uint32_t>(-1);
+	f.world.registry.configure_pool(1, 4);
+	w::Entity zone;
+	zone.kind = w::EntityKind::Item;
+	zone.team = 1;
+	zone.is_spawn_point = true; // ItemDefAttrib 0x40000
+	zone.alive = true;
+	CHECK(f.world.registry.spawn(1, zone).valid());
+	CHECK(f.world.zones.has_spawn_zone());
+	f.world.out.rounds.frame_clock = 5000u; // past the recent-spawn window
+	f.conn(0).link.spawn_target_hold_seconds = static_cast<uint32_t>(-1);
+	f.entity(0).health = 0;
+	w::RoundDeath d;
+	d.victim = f.players[0];
+	d.victim_handle = f.players[0].packed;
+	inmatch::Server_ProcessPlayerDeath(f.ctx, f.world, d);
+	CHECK(f.conn(0).link.respawn_delay_seconds == 3u);
+	CHECK(f.conn(0).link.spawn_target_hold_seconds == 3u);
+}
+
 // A row a re-add orphaned (a repeated C2S 0x02 left player 0's first row active, its body in
 // the world, while the player's connection took a fresh row) is an active row Entity_ValidatePtr
 // finds, so its body's death runs the whole transaction: the 0x13 fan, the row's own holds and
@@ -664,6 +693,7 @@ void test_an_orphaned_rows_body_runs_the_transaction() {
 
 int main() {
 	test_the_recent_spawn_hold_reads_the_arm_on_the_frame_clock();
+	test_a_negative_timeout_holds_three();
 	test_an_orphaned_rows_body_runs_the_transaction();
 	test_health_write_dies_in_its_frames_entity_update();
 	test_raise_ahead_of_the_walk_cancels_it();

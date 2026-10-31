@@ -91,7 +91,7 @@ struct MissionSoundSource {
 //   load one after another, each once the one before has held about twice its wave's length, the channel is free and
 //   its own delay has run, the dialogs interleaving in slot order; each line handed to the Shell's clip voices on the
 //   tick it loads, its subtitle in its words. A script's voice wave (SSNwave, SSNradio) plays at the scripted voice
-//   channel's volume at the listener (world::kScriptVoiceVolume through the distance curve, as
+//   channel's volume at the listener (the title's gain, TitleRules::script_voice_volume, through the distance curve, as
 //   world::ScriptVoiceChannel::frame plays it [orig: Wac_PlayScriptedVoiceWave @ 0x4ed688; Audio_UpdateAmbientStream
 //   @ 0x4edb22]).
 // The listener is the camera's eye, standing in for the player's ears (the rain's body has the eye's height, no

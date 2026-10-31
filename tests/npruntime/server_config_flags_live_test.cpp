@@ -40,6 +40,7 @@
 #include <runtime/inmatch/napi_np_protocol.h> // host_server_hello
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_initial_state.h>
+#include <runtime/inmatch/server_info.h> // read_session_listing_columns (the published cap)
 #include <runtime/inmatch/server_session.h>
 
 #include <cstdio>
@@ -255,16 +256,29 @@ bool run_the_shell_host_applies_the_block_at_a_map_change() {
 	inmatch::MissionRotation rotation;
 	rotation.map_file = "next.bms";
 	rotation.map_game_type = game_type::kTeamDeathmatch;
-	const inmatch::NextMissionStage stage =
+	const inmatch::GameConfig next =
 			inmatch::stage_next_mission(session, &block, rotation, "Next Map");
-	const inmatch::GameConfig &next = stage.config;
 	inmatch::continue_session(*ctx, next, nullptr);
-	if (!expect(stage.player_limit == 9 && next.max_players == 4 &&
+	if (!expect(next.live_slot_limit() == 9 && next.max_players == 4 &&
 	                    inmatch::stage_next_mission(session, nullptr, rotation, "Next Map")
-	                                    .player_limit ==
-	                            static_cast<int32_t>(session.player_slot_limit()),
+	                                    .live_slot_limit() == session.player_slot_limit(),
 	            "the next map's slot limit is the block's cap and dedicated word, its cap the "
 	            "session's; with no block, the session's slot limit"))
+		return false;
+	// The live session takes it (Game_StartMission's apply stores dword_24D211C @0x551B2B /
+	// @0x551B35), which the lobby's published cap and the mission request block read, while
+	// the slot table keeps the create's capacity (no map-change caller of
+	// Server_InitNewRoundState).
+	if (!expect(ctx->config.live_slot_limit() == 9 &&
+	                    ctx->config.total_player_slot_capacity() == session.player_slot_limit(),
+	            "the map change moves the live slot limit and keeps the slot table's capacity"))
+		return false;
+	// The lobby's published cap reads it [orig: Lobby_UpdateServerInfo @0x4FE8C0 -
+	//  dword_24D211C @0x4FEB03].
+	opennova::HostRegistration listing;
+	inmatch::read_session_listing_columns(listing, *ctx, opennova::hud::GameTextLookup{});
+	if (!expect(listing.published_cap == 9,
+	            "the map change's slot limit reaches the lobby's published cap"))
 		return false;
 	return expect((ctx->config.mp_attributes & kTeamChoose) != 0 &&
 	                      ctx->config.round_time_limit_minutes == 30 &&
@@ -274,6 +288,28 @@ bool run_the_shell_host_applies_the_block_at_a_map_change() {
 	                      next.mission_file == "next.bms" && next.mission_name == "Next Map",
 	              "the next mission takes the SET's block words, the rotation's map and mode, and "
 	              "keeps the session's own");
+}
+
+// A map change's live slot limit takes the apply's ceiling only under the block's network connect
+// type 1: a cap the block holds past it stands under the LAN screen's 2. The block's word rides
+// the session config as every block word does (GameConfig::network_connect_type).
+// [orig: Game_ApplySessionSettingsToGlobals @0x551B20..0x551B48 - the type test
+//  @0x551B3B..0x551B41, the cap test @0x551B43..0x551B46]
+bool run_the_map_change_ceiling_reads_the_network_type() {
+	opennova::gamecfg::GameCfg block = opennova::gamecfg::defaults();
+	block.mp_max_players = 4;
+	const opennova::Title &jo = *opennova::title_by_code("jo");
+	const inmatch::GameConfig session = inmatch::host_screen_from_block(block, jo).config;
+	inmatch::MissionRotation rotation;
+	rotation.map_file = "next.bms";
+	block.mp_max_players = 99;
+	const inmatch::GameConfig novaworld =
+			inmatch::stage_next_mission(session, &block, rotation, "Next Map");
+	block.networkconnecttype = 2;
+	const inmatch::GameConfig lan = inmatch::stage_next_mission(session, &block, rotation, "Next Map");
+	return expect(session.network_connect_type == 1 && novaworld.live_slot_limit() == 65 &&
+	                      lan.network_connect_type == 2 && lan.live_slot_limit() == 99,
+	              "the next map's ceiling applies under network connect type 1 alone");
 }
 
 } // namespace
@@ -286,6 +322,7 @@ int main() {
 	if (!run_a_map_change_keeps_the_settings_passwords()) ++failures;
 	if (!run_the_hello_reads_the_protocols_copies()) ++failures;
 	if (!run_the_shell_host_applies_the_block_at_a_map_change()) ++failures;
+	if (!run_the_map_change_ceiling_reads_the_network_type()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

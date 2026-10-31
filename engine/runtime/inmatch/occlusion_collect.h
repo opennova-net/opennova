@@ -85,8 +85,10 @@ struct BuildingVerdict {
 // table's building rows in the batch's walk order (its prefix, as its last Pool2
 // build listed them), then the pool-2 Building rows the table does not list,
 // which no batch holds (not visible). The pool-2 decorations and foliage take
-// the entity collect instead (world::building_def_row carries the split).
-void collect_building_verdicts(const world::World &world, const world::CollisionWorld &collision,
+// the entity collect instead (world::building_def_row carries the split). A
+// visible building is drawn: its husk leg runs (world::update_item_destroy_fade),
+// as an admitted row's does in collect_view_verdicts.
+void collect_building_verdicts(world::World &world, const world::CollisionWorld &collision,
 		const world::OcclusionWorld &occlusion, std::vector<BuildingVerdict> &r_out);
 
 // What a water mirror's collect leaves for its reflected subscene to draw: the

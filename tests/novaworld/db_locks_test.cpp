@@ -11,8 +11,6 @@
 //     starts against the global cap, never both pass a count;
 //   * a website session and a hosting key minted at a credentials generation a
 //     password reset is moving (either one first) never outlive the reset;
-//   * hostdb::apply_status_blob folds a status blob into the row as the lobby
-//     last wrote it, never into the one it read before that write;
 //   * two registrations whose usernames and handles cross never both pass, and
 //     a PCID taken by a racing registration answers pcid_exists;
 //   * two first-admin promotions promote one account;
@@ -20,8 +18,7 @@
 //     admins give a key holds one, two activations of one account mint one key,
 //     one machine activated twice at once has one NWACT, a key revoked twice
 //     reports the second AlreadyRevoked;
-// and the gate's and the lobby's writes (the gate's status blob, the lobby's
-// host row) never wait on an unrelated web transaction's.
+// and the lobby's writes (its host row) never wait on an unrelated web transaction's.
 // Compiles the service's auth, web_session, cd_keys and hosted sources directly,
 // as hosted_supervisor_test does, so it runs on every service build.
 
@@ -32,7 +29,6 @@
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
-#include <net/novaworld/lobby_update.h>
 
 #include "common/test_database.h"
 #include "common/test_expect.h"
@@ -250,7 +246,7 @@ int test_mints_never_outlive_a_reset() {
 	return 0;
 }
 
-// ---- the status blob's read-modify-write --------------------------------------
+// ---- the lobby's host row ---------------------------------------------------
 
 hostdb::HostRow listed_host(const std::string &server_name, const std::string &mission) {
 	hostdb::HostRow row;
@@ -266,33 +262,8 @@ hostdb::HostRow listed_host(const std::string &server_name, const std::string &m
 	return row;
 }
 
-int test_status_blob_folds_into_the_newest_row() {
-	test_db::TestDatabase scratch;
-	Database db = scratch.open();
-	hostdb::upsert_host(db, listed_host("S-1", "m1"));
-
-	// The lobby's newer write is open when the blob comes: the fold waits for
-	// it, then keeps its columns and adds the blob's.
-	opennova::LobbyStatusBlob blob;
-	blob.lobby_name = "jop_2_consumer";
-	blob.host_key = "HK-9100";
-	blob.host_vars = { { "Players", "5" } };
-	bool applied = false;
-	Race r = race(
-			scratch, [&](Database &h) { hostdb::update_host(h, listed_host("S-2", "m2")); },
-			[&](Database &o) { applied = hostdb::apply_status_blob(o, blob); });
-	TEST_EXPECT(r.failure.empty() && applied);
-	TEST_EXPECT(r.waited);
-	const auto host = hostdb::find_host_by_rid(db, 9100);
-	TEST_EXPECT(host.has_value());
-	TEST_EXPECT(host->server_name == "S-2" && host->mission_name == "m2");
-	TEST_EXPECT(host->player_count == 5);
-	return 0;
-}
-
-// The gate's and the lobby's own writes never queue behind a web transaction they share no row
-// with: the gate's blob fold and the lobby's host row commit while a
-// registration and a start request stand open.
+// The lobby's own writes never queue behind a web transaction they share no row with: its host
+// row commits while a registration and a start request stand open.
 int test_edge_writes_do_not_wait_on_web_writes() {
 	test_db::TestDatabase scratch;
 	Database db = scratch.open();
@@ -300,11 +271,6 @@ int test_edge_writes_do_not_wait_on_web_writes() {
 	const int64_t sam = make_player(db, "sam", 1);
 	const hosted_rig::SeededData seeded = hosted_rig::seed_data(db);
 	TEST_EXPECT(sam > 0);
-	opennova::LobbyStatusBlob blob;
-	blob.lobby_name = "jop_2_consumer";
-	blob.host_key = "HK-9100";
-	blob.host_vars = { { "Players", "3" } };
-	bool applied = false;
 	bool persisted = false;
 	Race r = race(
 			scratch,
@@ -322,7 +288,6 @@ int test_edge_writes_do_not_wait_on_web_writes() {
 					throw std::runtime_error("request_server");
 			},
 			[&](Database &o) {
-				applied = hostdb::apply_status_blob(o, blob);
 				Transaction tx(o);
 				hostdb::update_host(o, listed_host("S-3", "m3"));
 				hostdb::replace_roster(o, 9100, {});
@@ -331,7 +296,7 @@ int test_edge_writes_do_not_wait_on_web_writes() {
 			});
 	TEST_EXPECT(r.failure.empty());
 	TEST_EXPECT(!r.waited);
-	TEST_EXPECT(applied && persisted);
+	TEST_EXPECT(persisted);
 	return 0;
 }
 
@@ -518,7 +483,6 @@ int main(int argc, char **argv) {
 	const Case cases[] = {
 		{ "request_server_one_count_at_a_time", test_request_server_one_count_at_a_time },
 		{ "mints_never_outlive_a_reset", test_mints_never_outlive_a_reset },
-		{ "status_blob_folds_into_the_newest_row", test_status_blob_folds_into_the_newest_row },
 		{ "edge_writes_do_not_wait_on_web_writes", test_edge_writes_do_not_wait_on_web_writes },
 		{ "crossing_names_never_both_pass", test_crossing_names_never_both_pass },
 		{ "bootstrap_promotes_one_admin", test_bootstrap_promotes_one_admin },

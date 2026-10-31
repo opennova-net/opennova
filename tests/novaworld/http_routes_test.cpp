@@ -147,6 +147,10 @@ constexpr const char *kCsrf = "X-OpenNova-Request: 1";
 constexpr const char *kMailSiteUrl = "https://site.example";
 // The task the harness's lobby runs as (its instance row's task_id).
 constexpr const char *kHarnessLobbyTask = "http-routes-lobby";
+// The serve image the first listener's release pins (ONNET_HOSTED_SERVE_IMAGE): a hosted server
+// pinned to another has a server build update (test_hosted_server_build_update). The cases'
+// servers written by hand pin none, so they have none.
+constexpr const char *kHarnessServeImage = "ghcr.io/opennova-net/opennova-serve:sha-release";
 
 struct Harness {
 	ConnectionPool &pool;
@@ -2232,7 +2236,6 @@ int test_lobby_per_title(Harness &h) {
 	};
 	const Prepared prepared[] = {
 		{ "jop:cus2", "/jop_2.gsb" },
-		{ "jopd:cus4", "/jop_2.gsb" },
 		{ "dfx2:0:cus:buffy", "/dfx2_0.gsb" },
 		{ "acidgambit:0", "/acidgambit_0.gsb" },
 		{ "mygame:0", "/mygame_0.gsb" },
@@ -2263,7 +2266,6 @@ int test_lobby_per_title(Harness &h) {
 	const Later later[] = {
 		{ "GT=acidgambit:0", "urls.htm", "/acidgambit_0.gsb" },
 		{ "GT=acidgambit:0", "dfx2_0_urls.htm", "/acidgambit_0.gsb" },
-		{ "GT=jopd:cus4", "urls.htm", "/jop_2.gsb" },
 		{ "NWPF=38", "urls.htm", "/dfx2_0.gsb" },
 		{ "NWPF=28", "urls.htm", "/jop_2.gsb" },
 		{ "NWPF=100", "urls.htm", "/acidgambit_0.gsb" },
@@ -2681,7 +2683,7 @@ int test_cd_key_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 201 && activated && !activated["reactivated"].b());
 	const std::string nwact = str(activated["nwact"]);
 	std::string wire;
-	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact, kMachine, wire) &&
+	TEST_EXPECT(opennova::cdkey::activation_wire_key(dfx2_chains(), nwact, kMachine, wire) &&
 			wire == str(made["keys"][0]["wire_key"]));
 	TEST_EXPECT(activated["key"]["activations"].i() == 1);
 	reply = post(key0 + "/activations", std::string("{\"nwpssk\":\"") + kMachine + "\"}");
@@ -2925,11 +2927,14 @@ int test_dfx2_activation(Harness &h) {
 			!nwact_a.empty() && minted.size() > 5 && minted.substr(minted.size() - 5) == "|auto");
 	const std::string wire_key = minted.substr(0, minted.size() - 5);
 	std::string recovered;
-	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact_a, kMachineA, recovered) && recovered == wire_key);
+	TEST_EXPECT(
+			opennova::cdkey::activation_wire_key(dfx2_chains(), nwact_a, kMachineA, recovered) &&
+			recovered == wire_key);
 	std::string serial;
 	TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), recovered, serial) && serial.compare(0, 5, "DFX2-") == 0);
 	// Only that machine reads it.
-	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), nwact_a, kMachineB, recovered));
+	TEST_EXPECT(
+			!opennova::cdkey::activation_wire_key(dfx2_chains(), nwact_a, kMachineB, recovered));
 
 	// The same machine again: the same NWACT, no second key; another machine its own.
 	login = retail_login(
@@ -2943,7 +2948,9 @@ int test_dfx2_activation(Harness &h) {
 	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
 	const std::string nwact_b = set_cookie_value(login.completion, "NWACT");
 	TEST_EXPECT(!nwact_b.empty() && nwact_b != nwact_a);
-	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact_b, kMachineB, recovered) && recovered == wire_key);
+	TEST_EXPECT(
+			opennova::cdkey::activation_wire_key(dfx2_chains(), nwact_b, kMachineB, recovered) &&
+			recovered == wire_key);
 	TEST_EXPECT(h.pool.acquire()
 						->query("SELECT COUNT(*) FROM cd_key_activations a JOIN cd_keys k ON k.id "
 								"= a.key_id "
@@ -3020,8 +3027,8 @@ int test_dfx2_activation(Harness &h) {
 					.code == 200);
 	login = retail_login(assigned_only.bound_port(), "act_waiting", "pw-act-waiting",
 			unactivated(kMachineB), true);
-	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), 
-			set_cookie_value(login.completion, "NWACT"), kMachineB, recovered));
+	TEST_EXPECT(opennova::cdkey::activation_wire_key(
+			dfx2_chains(), set_cookie_value(login.completion, "NWACT"), kMachineB, recovered));
 	TEST_EXPECT(recovered == str(key["keys"][0]["wire_key"]));
 
 	assigned_only.stop();
@@ -6839,6 +6846,11 @@ public:
 		delay_prefix_ = prefix;
 		delay_ms_ = ms;
 	}
+	// A line starting with `prefix` is refused ("ERROR - Bad Value."; empty: none).
+	void refuse(const std::string &prefix) {
+		std::lock_guard<std::mutex> lock(mu_);
+		refuse_prefix_ = prefix;
+	}
 	void set_scene(const std::string &scene) {
 		std::lock_guard<std::mutex> lock(mu_);
 		scene_ = scene;
@@ -6881,6 +6893,8 @@ public:
 		} else if (is(0, "GET") && is(1, "GAMESETTINGS")) {
 			replies.emplace_back("AutoBalanceOnRecycle = 1\nServerName           = Console Test\n"
 								 "ServerPassword       = s3cret\n");
+		} else if (!refuse_prefix_.empty() && line.substr(0, refuse_prefix_.size()) == refuse_prefix_) {
+			replies.emplace_back("ERROR - Bad Value.");
 		} else if (is(0, "SET")) {
 			replies.emplace_back("OK - Setting Changed.");
 		} else if (is(0, "PLAYER") && is(1, "LIST")) {
@@ -6978,6 +6992,7 @@ private:
 	std::vector<std::string> lines_;
 	std::string delay_prefix_;
 	int delay_ms_ = 0;
+	std::string refuse_prefix_;
 	std::string scene_ = "Game";
 	bool hostile_ = false;
 	std::vector<std::string> rotation_{ "ALPHA.BMS" };
@@ -7025,7 +7040,7 @@ bool curated_line(const std::string &line) {
 		});
 	}
 	static const std::set<std::string> exact = { "PLAYER LIST", "MISSION AVAILABLE", "MISSION LIST", "MISSION CYCLE",
-		"CHAT GET", "GET GAMESETTINGS", "GET GAMESTATE" };
+		"CHAT GET", "GET GAMESTATE" };
 	return exact.count(line) != 0;
 }
 
@@ -7053,6 +7068,291 @@ int test_no_agent_routes_on_public_listener(Harness &h) {
 		const std::string body = body_text(reply);
 		TEST_EXPECT(body.find("agent_secret") == std::string::npos && body.find("desired") == std::string::npos);
 	}
+	return 0;
+}
+
+// GET /api/lobbies and /api/lobbies/<rid> carry each listing's ONE build where the service knows
+// it: a running hosted server's, as its machine's agent last reported its own container's
+// --build-file (fleet_slot_reports one_version / one_commit), by the service account its
+// listing's HostKey names. Null for a listing no hosted server holds (a player's own server,
+// self-hosted or retail, whose retail listing carries no build), for a hosted server whose agent
+// reported none, and for a report from another container than the one its row names (a slot's
+// earlier server); a build that names no commit has a null commit.
+int test_lobby_hosted_build(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	using crow::json::type;
+	const int64_t owner = make_account(h, "build_owner", "pw-build-owner");
+	TEST_EXPECT(owner > 0 && nws::billing::set_comp_grants(*h.pool.acquire(), owner, { 1, 0 }));
+	hosted::HostedSettings settings;
+	settings.product_id = h.jo_id;
+	settings.game_name = "Build Hosted";
+	settings.missions = { "a.bms" };
+	const auto request = hosted::request_server(
+			*h.pool.acquire(), owner, settings, offered(h), 1000, nws::wall_now_s());
+	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
+	const int64_t server_id = request.id;
+	const auto service = nws::upsert_service_account(
+			*h.pool.acquire(), nws::service_username(server_id), "pw-build-service");
+	TEST_EXPECT(service.ok);
+	hosted::set_service_account(*h.pool.acquire(), server_id, service.id);
+
+	// The server running on slot 0 of a ready machine, its listing held by its service account;
+	// and a server its owner hosts, its listing held by the owner's own account.
+	constexpr uint32_t kHostedRid = 0x0A0000B1;
+	constexpr uint32_t kOwnRid = 0x0A0000B2;
+	const std::string container = hosted::hosted_container_name(server_id, 1);
+	int64_t machine = 0;
+	{
+		auto db = h.pool.acquire();
+		machine = hosted::create_machine(
+				*db, { "docker", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 })
+						  .id;
+		hosted::LaunchedMachine launched;
+		launched.cloud_id = "local-build-1";
+		launched.private_address = "10.56.0.40";
+		launched.public_address = "198.51.100.56";
+		launched.instance_type = "t3a.large";
+		TEST_EXPECT(hosted::mark_launched(*db, machine, launched));
+		db->exec("UPDATE hosted_servers SET state = 'running', machine_ref = $1, slot = 0, "
+				 "machine_id = $2 WHERE id = $3;",
+				{ opennova::db::BindValue(machine), opennova::db::BindValue(container),
+						opennova::db::BindValue(server_id) });
+		const struct {
+			uint32_t rid;
+			const char *name;
+			int64_t account;
+		} listings[] = { { kHostedRid, "Build Hosted", service.id },
+			{ kOwnRid, "Build Own", owner } };
+		for (const auto &l : listings) {
+			opennova::hostdb::HostRow row;
+			row.rid = l.rid;
+			row.gsid = "GSID-" + std::to_string(l.rid);
+			row.game = "jop_2_consumer";
+			row.server_name = l.name;
+			row.host_ip = "10.56.0.9";
+			row.host_port = 32768;
+			opennova::hostdb::upsert_host(*db, row);
+			db->exec("UPDATE active_hosts SET host_user_id = $1 WHERE rid = $2;",
+					{ opennova::db::BindValue(l.account),
+							opennova::db::BindValue(static_cast<int64_t>(l.rid)) });
+		}
+	}
+	// A card's build in words: "<version> <commit>" (each "null" when it is), "null" for none,
+	// "absent" with no member, "missing" with no card.
+	const auto build_words = [](const crow::json::rvalue &card) -> std::string {
+		if (!card.has("build"))
+			return "absent";
+		const auto &b = card["build"];
+		if (b.t() == type::Null)
+			return "null";
+		const auto part = [&b](const char *key) {
+			return b[key].t() == type::Null ? std::string("null") : str(b[key]);
+		};
+		return part("version") + " " + part("commit");
+	};
+	// A listing's build, from the list and from its page (both must agree to be read as one).
+	const auto build_of = [&h, &build_words](uint32_t rid) -> std::string {
+		const auto list = crow::json::load(body_text(h.send("GET", "/api/lobbies")));
+		std::string listed = "missing";
+		if (list)
+			for (const auto &game : list["games"])
+				for (const auto &host : game["hosts"])
+					if (host["id"].i() == static_cast<int64_t>(rid))
+						listed = build_words(host);
+		const auto page =
+				crow::json::load(body_text(h.send("GET", "/api/lobbies/" + std::to_string(rid))));
+		const std::string paged = page ? build_words(page) : std::string("missing");
+		return listed == paged ? listed : "list " + listed + ", page " + paged;
+	};
+	const auto report = [&h, machine](
+								const std::string &name, std::optional<hosted::ServeBuild> build) {
+		hosted::ContainerReport running;
+		running.name = name;
+		running.slot = 0;
+		running.state = hosted::ContainerState::Running;
+		running.build = std::move(build);
+		return hosted::record_sync(*h.pool.acquire(), machine, "test-agent", { running })
+				.has_value();
+	};
+
+	// Before its agent reports a build: none known, the member there and null.
+	TEST_EXPECT(build_of(kHostedRid) == "null");
+	TEST_EXPECT(report(container, std::nullopt));
+	TEST_EXPECT(build_of(kHostedRid) == "null");
+
+	// Its agent reports the build its server wrote: the list and the page carry it.
+	TEST_EXPECT(report(container, hosted::ServeBuild{ "0.0.22.123", "a1b2c3d" }));
+	const std::string reported = build_of(kHostedRid);
+	if (reported != "0.0.22.123 a1b2c3d")
+		std::fprintf(stderr, "  hosted build: %s\n", reported.c_str());
+	TEST_EXPECT(reported == "0.0.22.123 a1b2c3d");
+	// The owner's own server is no hosted server's: no build.
+	TEST_EXPECT(build_of(kOwnRid) == "null");
+
+	// A build that names no commit.
+	TEST_EXPECT(report(container, hosted::ServeBuild{ "0.0.22", "" }));
+	TEST_EXPECT(build_of(kHostedRid) == "0.0.22 null");
+
+	// A report from the slot's earlier container answers for no one.
+	TEST_EXPECT(report(hosted::hosted_container_name(server_id, 0),
+			hosted::ServeBuild{ "0.0.21", "b0c2b38" }));
+	TEST_EXPECT(build_of(kHostedRid) == "null");
+
+	// A server that is no longer running (stopping) shows none, though its report stands.
+	TEST_EXPECT(report(container, hosted::ServeBuild{ "0.0.22.123", "a1b2c3d" }));
+	h.pool.acquire()->exec("UPDATE hosted_servers SET state = 'stopping' WHERE id = $1;",
+			{ opennova::db::BindValue(server_id) });
+	TEST_EXPECT(build_of(kHostedRid) == "null");
+
+	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), kHostedRid);
+	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), kOwnRid);
+	return 0;
+}
+
+// A hosted server's server build update: one pinned to an older serve image than the release's
+// (kHarnessServeImage) has `update_available` with `update_kinds` ["server_build"] (its data
+// current), `build`, the ONE build it reports, and `build_available`, the one a server on the
+// release's image reports (null before one does); one on the release's image has none; the
+// admin's view says the same. The owner's update takes it, no data waiting.
+int test_hosted_server_build_update(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	using crow::json::type;
+	const int64_t owner = make_account(h, "rebuild_owner", "pw-rebuild-owner");
+	TEST_EXPECT(owner > 0 && nws::billing::set_comp_grants(*h.pool.acquire(), owner, { 2, 0 }));
+	const std::string session = login_token(h, "10.57.0.1", "rebuild_owner", "pw-rebuild-owner");
+	TEST_EXPECT(!session.empty());
+	// A new server's id, 0 when the request is refused.
+	const auto request = [&h, owner](const char *name) -> int64_t {
+		hosted::HostedSettings settings;
+		settings.product_id = h.jo_id;
+		settings.game_name = name;
+		settings.missions = { "a.bms" };
+		const auto made = hosted::request_server(
+				*h.pool.acquire(), owner, settings, offered(h), 1000, nws::wall_now_s());
+		return made.outcome == hosted::RequestOutcome::Created ? made.id : 0;
+	};
+	const int64_t older = request("Rebuild Older");
+	const int64_t current = request("Rebuild Current");
+	TEST_EXPECT(older > 0 && current > 0);
+	const std::string old_image = "ghcr.io/opennova-net/opennova-serve:sha-older";
+	// Both running on a ready machine on the current data, the first pinned to an older image.
+	int64_t machine = 0;
+	{
+		auto db = h.pool.acquire();
+		machine = hosted::create_machine(
+				*db, { "docker", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 })
+						  .id;
+		hosted::LaunchedMachine launched;
+		launched.cloud_id = "local-rebuild-1";
+		launched.private_address = "10.57.0.40";
+		launched.public_address = "198.51.100.57";
+		launched.instance_type = "t3a.large";
+		TEST_EXPECT(hosted::mark_launched(*db, machine, launched));
+		int slot = 0;
+		for (const auto &[id, image] : { std::pair<int64_t, std::string>{ older, old_image },
+					 { current, std::string(kHarnessServeImage) } }) {
+			hosted::set_tree_pins(*db, id, h.jo_tree, std::nullopt);
+			db->exec("UPDATE hosted_servers SET state = 'running', machine_ref = $1, slot = $2, "
+					 "machine_id = $3, serve_image = $4 WHERE id = $5;",
+					{ opennova::db::BindValue(machine), opennova::db::BindValue(int64_t{ slot }),
+							opennova::db::BindValue(hosted::hosted_container_name(id, 1)),
+							opennova::db::BindValue(image), opennova::db::BindValue(id) });
+			++slot;
+		}
+	}
+	const auto report = [&h, machine, older, current](bool current_reports) {
+		std::vector<hosted::ContainerReport> running;
+		for (const int64_t id : { older, current }) {
+			if (id == current && !current_reports)
+				continue;
+			hosted::ContainerReport r;
+			r.name = hosted::hosted_container_name(id, 1);
+			r.slot = id == older ? 0 : 1;
+			r.state = hosted::ContainerState::Running;
+			r.build = id == older ? hosted::ServeBuild{ "0.0.22.5", "abc1234" }
+								  : hosted::ServeBuild{ "0.0.22.9", "def5678" };
+			running.push_back(std::move(r));
+		}
+		return hosted::record_sync(*h.pool.acquire(), machine, "test-agent", running).has_value();
+	};
+	const auto mine = [&h, &session](int64_t id) {
+		return crow::json::load(body_text(
+				h.send("GET", "/api/me/servers/" + std::to_string(id), { with_session(session) })));
+	};
+	const auto words = [](const crow::json::rvalue &b) -> std::string {
+		if (b.t() == type::Null)
+			return "null";
+		const auto part = [&b](const char *key) {
+			return b[key].t() == type::Null ? std::string("null") : str(b[key]);
+		};
+		return part("version") + " " + part("commit");
+	};
+	const auto kinds = [](const crow::json::rvalue &server) {
+		std::string out;
+		for (const auto &k : server["update_kinds"])
+			out += (out.empty() ? "" : ",") + str(k);
+		return out;
+	};
+
+	// The older server's agent reports its build; no server on the release's image has yet.
+	TEST_EXPECT(report(false));
+	auto json = mine(older);
+	TEST_EXPECT(json && json["server"]["update_available"].b() &&
+			kinds(json["server"]) == "server_build");
+	TEST_EXPECT(words(json["server"]["build"]) == "0.0.22.5 abc1234" &&
+			words(json["server"]["build_available"]) == "null");
+	// The release's server reports: its build is the one the update moves the older to.
+	TEST_EXPECT(report(true));
+	json = mine(older);
+	const std::string available = json ? words(json["server"]["build_available"]) : "";
+	if (available != "0.0.22.9 def5678")
+		std::fprintf(stderr, "  build_available: %s\n", available.c_str());
+	TEST_EXPECT(available == "0.0.22.9 def5678");
+	json = mine(current);
+	TEST_EXPECT(json && !json["server"]["update_available"].b() && kinds(json["server"]).empty());
+	TEST_EXPECT(words(json["server"]["build"]) == "0.0.22.9 def5678" &&
+			words(json["server"]["build_available"]) == "null");
+	// The list says the same, and the admin's view.
+	{
+		const auto list = crow::json::load(
+				body_text(h.send("GET", "/api/me/servers", { with_session(session) })));
+		int seen = 0;
+		for (const auto &s : list["servers"]) {
+			if (s["id"].i() == older && kinds(s) == "server_build")
+				++seen;
+			if (s["id"].i() == current && kinds(s).empty())
+				++seen;
+		}
+		TEST_EXPECT(seen == 2);
+		const auto admin = crow::json::load(body_text(
+				h.send("GET", "/api/admin/hosted/" + std::to_string(older), { kBearer })));
+		TEST_EXPECT(admin && admin["server"]["update_available"].b() &&
+				kinds(admin["server"]) == "server_build" &&
+				str(admin["server"]["serve_image"]) == old_image);
+	}
+
+	// The owner's update takes a build-only update (no data waits); the release's server has
+	// nothing to take.
+	const auto update = [&h, &session](int64_t id) {
+		return h.send("POST", "/api/me/servers/" + std::to_string(id) + "/update",
+				{ with_session(session), kCsrf });
+	};
+	auto reply = update(older);
+	json = crow::json::load(body_text(reply));
+	if (reply.code != 202)
+		std::fprintf(stderr, "  update: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 202 && json && json["server"]["update_requested"].b() &&
+			kinds(json["server"]) == "server_build");
+	// Its starts so far, which the owner's page reads too (an admin's Logs tab there).
+	TEST_EXPECT(json && json["server"].has("generation") && json["server"]["generation"].t() == type::Number);
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), older)->update_requested);
+	reply = update(current);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "up_to_date");
+
+	// Both ended: no live server outlasts the case.
+	h.pool.acquire()->exec("UPDATE hosted_servers SET state = 'stopped', ended_at = now(), "
+						   "machine_ref = NULL, slot = NULL WHERE id IN ($1, $2);",
+			{ opennova::db::BindValue(older), opennova::db::BindValue(current) });
 	return 0;
 }
 
@@ -7996,14 +8296,17 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 200);
 	reply = get(base + "/players", { kBearer });
 	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["players"].size() == 2);
+	// The settings read the saved configuration from the database: no admin line goes out
+	// for them (no live GET GAMESETTINGS, which carries the passwords), owner or admin.
+	const size_t settings_before = fake.lines().size();
 	reply = get(base + "/settings", { kBearer });
 	json = crow::json::load(body_text(reply));
-	bool named = false;
-	if (reply.code == 200 && json) {
-		for (const auto &row : json["settings"])
-			named = named || (str(row["key"]) == "ServerName" && str(row["value"]) == "Console Test");
-	}
-	TEST_EXPECT(named);
+	TEST_EXPECT(reply.code == 200 && json && str(json["saved"]["game_name"]) == "Console Test" &&
+			!json.has("settings"));
+	reply = get(me + "/settings", as_owner);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["saved"]["game_name"]) == "Console Test");
+	TEST_EXPECT(fake.lines().size() == settings_before);
 	TEST_EXPECT(get("/api/admin/hosted/999999/players", { kBearer }).code == 404);
 
 	// A full rotation takes no more (kConsoleRotationMax, policy).
@@ -8127,11 +8430,19 @@ int test_hosted_console_routes(Harness &h) {
 	}
 
 	// Stopping: refused before the link, the console still read.
-	// The expanded routes enforce ownership and CSRF, and persist accepted TCP
-	// edits in the fleet independently of the caller's HTTP lifetime.
+	// The settings routes enforce ownership and CSRF, and persist accepted TCP
+	// edits in the fleet independently of the caller's HTTP lifetime. No admin line
+	// passes through (ADR 0053 d9): the raw command routes are gone.
 	TEST_EXPECT(get(me + "/settings", {with_session(other_s)}).code == 404);
-	TEST_EXPECT(post(me + "/command", {with_session(owner_s)}, R"({"command":"SET KillLimit 500"})").code == 403);
-	reply = post(base + "/command", {kBearer}, R"({"command":"SET KillLimit 500"})");
+	const std::string kill_limit_edit = "{\"settings_revision\":" +
+			std::to_string(hosted::find_server(*h.pool.acquire(), id)->settings_revision) +
+			",\"patch\":{\"kill_limit\":500}}";
+	TEST_EXPECT(h.send("PATCH", me + "/settings", {with_session(owner_s), kJson}, kill_limit_edit).code == 403);
+	// No route serves them: the portal's GET catch-all (/<path>, http_listener.cpp) answers a
+	// POST to a path no route takes 405, and nothing reaches the server.
+	TEST_EXPECT(post(me + "/command", as_owner_post, R"({"command":"SET KillLimit 500"})").code == 405);
+	TEST_EXPECT(post(base + "/command", {kBearer}, R"({"command":"QUIT"})").code == 405);
+	reply = h.send("PATCH", base + "/settings", {kBearer, kJson}, kill_limit_edit);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json["configuration_saved"].b());
 	const auto revision = json["settings_revision"].i();
@@ -8151,6 +8462,51 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(persisted->settings.send_holdoff_ticks == 2 && persisted->settings.entity_send_budget == 900 &&
 			persisted->settings.max_packet_size == 1250 && persisted->settings.lock_framerate);
 	TEST_EXPECT(h.send("PATCH", base + "/settings", {kBearer,kJson}, edit_body).code == 409);
+	// A command the server refuses stops the edit there: the fields before it saved, the rest
+	// never sent, and the reply names it rather than reading as saved. The commands go in the
+	// settings schema's order whatever the patch's (GameTime, KillLimit, MaxScore).
+	fake.refuse("SET KillLimit");
+	const auto before_refusal = hosted::find_server(*h.pool.acquire(), id);
+	const size_t refusal_lines = fake.lines().size();
+	reply = h.send("PATCH", base + "/settings", {kBearer,kJson},
+			"{\"settings_revision\":" + std::to_string(before_refusal->settings_revision) +
+					",\"patch\":{\"kill_limit\":61,\"max_score\":12,\"time_limit\":25}}");
+	fake.refuse("");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["refused_command"]) == "SET KillLimit 61" &&
+			json["configuration_saved"].b());
+	const auto after_refusal = hosted::find_server(*h.pool.acquire(), id);
+	TEST_EXPECT(after_refusal->settings.time_limit == 25 &&
+			after_refusal->settings.kill_limit == before_refusal->settings.kill_limit &&
+			after_refusal->settings.max_score == before_refusal->settings.max_score);
+	const auto refusal_sent = fake.lines();
+	TEST_EXPECT(std::none_of(refusal_sent.begin() + static_cast<std::ptrdiff_t>(refusal_lines),
+			refusal_sent.end(), [](const std::string &l) { return l.rfind("SET MaxScore", 0) == 0; }));
+	// With no admin link (the fleet's row gone stale, as a restarting server's is), an edit no
+	// admin line applies still saves, for the next launch, and says so; one with a live command
+	// is refused until the link is back.
+	h.pool.acquire()->exec(
+			"UPDATE hosted_admin_links SET seen_at = now() - interval '1 hour' WHERE server_id = $1;",
+			{ opennova::db::BindValue(id) });
+	const auto unlinked = hosted::find_server(*h.pool.acquire(), id);
+	reply = h.send("PATCH", base + "/settings", { kBearer, kJson },
+			"{\"settings_revision\":" + std::to_string(unlinked->settings_revision) +
+					",\"patch\":{\"options\":{\"server_message\":\"Unlinked\"}}}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["next_launch_only"].b() &&
+			json["configuration_saved"].b());
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), id)->settings.options.get_string(
+						"server_message", "") == "Unlinked");
+	reply = h.send("PATCH", base + "/settings", { kBearer, kJson },
+			"{\"settings_revision\":" + std::to_string(unlinked->settings_revision + 1) +
+					",\"patch\":{\"kill_limit\":63}}");
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "admin_unavailable");
+	const auto unlinked_sent = fake.lines();
+	TEST_EXPECT(std::none_of(unlinked_sent.begin(), unlinked_sent.end(), [](const std::string &l) {
+		return l == "SET KillLimit 63" || l.rfind("SET ServerMessage", 0) == 0;
+	}));
+	h.pool.acquire()->exec("UPDATE hosted_admin_links SET seen_at = now() WHERE server_id = $1;",
+			{ opennova::db::BindValue(id) });
 	// A short-lived caller stops waiting after send; the drain still saves the reply.
 	fake.delay("SET KillLimit", 950);
 	hosted::AdminCommandOptions durable_options;
@@ -8165,8 +8521,10 @@ int test_hosted_console_routes(Harness &h) {
 	fake.delay("", 0);
 	const auto sent_lines = fake.lines();
 	TEST_EXPECT(std::count(sent_lines.begin(),sent_lines.end(),"SET KillLimit 42") == 1);
-	reply = post(base + "/command", {kBearer}, R"({"command":"QUIT"})");
-	TEST_EXPECT(reply.code == 200);
+	// The service's own QUIT (the link's own command) ends the session; the link reconnects.
+	hosted::AdminCommandOptions quit_options;
+	quit_options.record = false;
+	(void)hosted::run_console_command(h.pool, id, "QUIT", quit_options, std::chrono::milliseconds(3000));
 	TEST_EXPECT(wait_until([&] { return h.links->find(id)->status().state == hosted::AdminLinkState::Up; }, 5000));
 	TEST_EXPECT(hosted::find_server(*h.pool.acquire(),id)->state == hosted::State::Running);
 	TEST_EXPECT(hosted::request_stop(*h.pool.acquire(), id, "stopped by the test",
@@ -9641,6 +9999,8 @@ int run(Harness &h, const char *part) {
 		{ "hosted", "hosted_stats_routes", test_hosted_stats_routes },
 		{ "hosted", "hosted_usage_route", test_hosted_usage_route },
 		{ "hosted", "no_agent_routes_on_public_listener", test_no_agent_routes_on_public_listener },
+		{ "hosted", "lobby_hosted_build", test_lobby_hosted_build },
+		{ "hosted", "hosted_server_build_update", test_hosted_server_build_update },
 		{ "billing", "billing_routes", test_billing_routes },
 		{ "billing", "billing_checkout_guard", test_billing_checkout_guard },
 		{ "billing", "billing_capacity", test_billing_capacity },
@@ -9855,6 +10215,8 @@ int with_harness(const char *part) {
 		http.set_addresses(true, "play.test");
 		// The usage view's slot limits: 256 MiB and 2 CPUs a container.
 		http.set_fleet_slots(256, 2.0);
+		// The release's serve image (test_hosted_server_build_update).
+		http.set_fleet_release({ "", "", kHarnessServeImage });
 		// The games catalogue read again at every request (test_lobby_per_title's lobby added
 		// after the start).
 		http.set_games_refresh(std::chrono::milliseconds(0));

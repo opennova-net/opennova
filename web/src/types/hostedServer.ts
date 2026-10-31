@@ -4,6 +4,7 @@
 import type { ServerAddress } from './addresses';
 import type { TierNumber } from './billing';
 import type { ServerOptions, ServerSetting, ServerWeapon } from '../utils/serverConfiguration';
+import type { Build } from '../utils/buildView';
 import type { Protocol } from './products';
 
 // requested -> provisioning -> booting -> listing -> running -> stopping ->
@@ -295,12 +296,25 @@ export interface HostedServer {
   expansion: HostedServerExpansion | null;
   // The trees it runs on.
   data: HostedServerData;
-  // Its game (or expansion) has a newer release than the trees it runs on: the
-  // owner may update it (POST /api/me/servers/<id>/update), which restarts it.
+  // An update waits: its game (or expansion) has a newer release than the trees
+  // it runs on, or the fleet starts servers on a newer server build than its
+  // own (update_kinds says which). The owner may update it (POST
+  // /api/me/servers/<id>/update), which restarts it on both.
   update_available: boolean;
+  // What the update brings: 'content' (newer data), 'server_build' (a newer
+  // opennova-serve image); empty when none waits.
+  update_kinds: UpdateKind[];
+  // The ONE build the server says it runs (null before it reports one).
+  build: Build | null;
+  // The build a server_build update moves it to, as a server already on that
+  // image reports it; null when none does yet, or no such update waits.
+  build_available: Build | null;
   // An update was asked for: the supervisor restarts it on the current data
   // shortly.
   update_requested: boolean;
+  // Its starts so far (each start a new generation with its own log; 0 before
+  // its first).
+  generation: number;
   // Crash restarts counted toward the limit (3 in the restart window).
   restarts: number;
   // Why it failed, in the service's words; null unless it did.
@@ -327,6 +341,8 @@ export interface HostedServer {
 // support tier (with or without a grant beside it), or an admin's comp grant
 // alone (every account gets one when it registers).
 export type EntitlementSource = 'none' | 'tier' | 'comp';
+
+export type UpdateKind = 'content' | 'server_build';
 
 // The account's hosting entitlement, as GET /api/me/servers counts it: its
 // servers on shared machines (its tier's and an admin's grant, added up) and
@@ -379,11 +395,6 @@ export interface HostedServersResponse {
   // The live servers by id, oldest first, then the newest 10 ended ones,
   // newest first; without their events.
   servers: HostedServer[];
-}
-
-// GET /api/me/servers/<id>, and the start and stop replies.
-export interface HostedServerReply {
-  server: HostedServer;
 }
 
 // The owner named in the fleet view, with their support tier (null for
@@ -552,8 +563,6 @@ export interface FleetServer extends HostedServer {
   expansion_tree_id: number | null;
   // It runs on an older tree than its game's current one.
   outdated: boolean;
-  // Its starts so far (each start a new generation; 0 before its first).
-  generation: number;
   // Its tick health in its slot's latest report: its frames' 99th percentile
   // time and the late ticks of the last minute; null with no report or no
   // tick in it.
@@ -588,12 +597,6 @@ export interface FleetQuery {
   // An owner's username.
   owner?: string;
   state?: 'live' | 'ended' | 'all';
-}
-
-// POST /api/admin/hosted/stop-all.
-export interface StopAllReply {
-  // How many live servers were asked to stop.
-  stopping: number;
 }
 
 // The console routes (apps/novaworld_web/hosted/console_routes.cpp, README

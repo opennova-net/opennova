@@ -2,12 +2,15 @@
 // docs/titles/dfx2-vs-jo-re.md section 9.7 (the wire key of a serial, a
 // CDKIIDEXP1 under the empty chain, the nested NWACT for a sample NWPSSK and the
 // boot-only one), the hardware mix's direction and inverse, the client's
-// reading of an NWACT, and the LAN host's join codes 10 to 13.
+// reading of an NWACT (over the registry, on Windows, as a user whose token is
+// not elevated), and the LAN host's join codes 10 to 13.
 
+#include <base/os_registry/os_registry.h>
 #include <net/novacrypto/cdkey.h>
 #include <net/protocol/protocol.h>
 #include <net/novacrypto/pubcrypto.h>
 
+#include "common/scratch_registry.h"
 #include "common/test_expect.h"
 
 #include <cstdint>
@@ -28,10 +31,10 @@ constexpr const char *kSerial = "OPENNOVA-0001";
 constexpr const char *kWire = "BMCCDKDKDLFFNGFDJHMFMMALJCLEFPADLPHHDHEEDHOGCIDLKC";
 constexpr const char *kFingerprint = "ABCDEFGHIJKLMNOPQRSTUVW";
 constexpr const char *kNestedNwact =
-		"DQNWWKWDHZJHKFVXIHNJKEKYNSFFRIPKCOWFBPZIRXDVUSBLDCQDIQMRPDVQLBCDOPZRAYEREPP"
-		"LAQYUYTMKDPRRYKCYXQGRVNIDZDVWMBTYOWSPQWUNOGWSNYIWCUOQJILP";
+		"IQOZVFQWOFFZNCGBSFXHDBUINYCJHJYHFZTXETTKNWOQVKOAWPJDHDJBNJCEOBKATKFYPDGTZNO"
+		"HMKWZCWZKEMCKHQQAZRLPTHVMZRXYZAWUSEPVLZMNOXCSZFMTWVIMAVAYWV";
 constexpr const char *kBootOnlyNwact =
-		"CLCCYBAPFHAGHGAZHFWCHVGDJTDFFVUTBVBTPNEFMTIDNHEXTBVYYAOROHKMDZBVMMMVEX";
+		"HVKAWAMRQFJMDJZQLHWFMURZJDOJFJCTKSSEJXRJSTJCKTHFZRPBWZZVGKCICDIGVXAWDCOO";
 
 std::vector<uint8_t> bytes(const std::string &text) {
 	return std::vector<uint8_t>(text.begin(), text.end());
@@ -74,36 +77,40 @@ int exp1_vector() {
 	return 0;
 }
 
-// Section 9.7: the nested (LAN-joinable) NWACT for the sample fingerprint, 2 * (50 + 4 * 4)
-// = 132 letters, and the client's reading of it back to the wire key.
+// Section 9.7: the nested (LAN-joinable) NWACT for the sample fingerprint, the wire key and its
+// NUL under the registry chain, 2 * (50 + 1 + 4 * 4) = 134 letters, and the client's reading of
+// it back to the wire key.
 int nested_activation_vector() {
 	const std::string nwact = cdkey::make_activation(dfx2_chains(), kWire, kFingerprint);
 	TEST_EXPECT(nwact == kNestedNwact);
-	TEST_EXPECT(nwact.size() == 132);
+	TEST_EXPECT(nwact.size() == 134);
 	for (const char c : nwact)
 		TEST_EXPECT(c >= 'A' && c <= 'Z');
 	std::string wire;
-	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), nwact, kFingerprint, wire));
+	TEST_EXPECT(cdkey::activation_wire_key(dfx2_chains(), nwact, kFingerprint, wire));
 	TEST_EXPECT(wire == kWire);
 	std::string serial;
 	TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), wire, serial));
 	TEST_EXPECT(serial == kSerial);
 	// The same inputs, the same NWACT: a machine activated again gets what it has.
 	TEST_EXPECT(cdkey::make_activation(dfx2_chains(), kWire, kFingerprint) == nwact);
-	// The registry chain's A-P intermediate is what the mix carries.
+	// The registry chain's A-P intermediate is what the mix carries, its plaintext the wire key
+	// and the NUL that ends it in the client's room (its decode writes none).
+	std::vector<uint8_t> plaintext = bytes(kWire);
+	plaintext.push_back(0);
 	TEST_EXPECT(mixed_down(nwact, kFingerprint) ==
-			opennova::encode_key_chain(bytes(kWire), dfx2_chains().registry));
+			opennova::encode_key_chain(plaintext, dfx2_chains().registry));
 	return 0;
 }
 
-// Section 9.7: the boot-only NWACT, a plaintext straight under the registry chain
-// (2 * (19 + 4 * 4) = 70 letters). The client reads it like any other.
+// Section 9.7: the boot-only NWACT, a plaintext and its NUL straight under the registry chain
+// (2 * (19 + 1 + 4 * 4) = 72 letters). The client reads it like any other.
 int boot_only_activation_vector() {
-	const std::string registry =
-			opennova::encode_key_chain(bytes("OPENNOVA-LOCAL-0001"), dfx2_chains().registry);
+	const std::string registry = opennova::encode_key_chain(
+			bytes(std::string("OPENNOVA-LOCAL-0001", 20)), dfx2_chains().registry);
 	TEST_EXPECT(mixed_up(registry, kFingerprint) == kBootOnlyNwact);
 	std::string value;
-	TEST_EXPECT(cdkey::read_activation(dfx2_chains(), kBootOnlyNwact, kFingerprint, value));
+	TEST_EXPECT(cdkey::activation_wire_key(dfx2_chains(), kBootOnlyNwact, kFingerprint, value));
 	TEST_EXPECT(value == "OPENNOVA-LOCAL-0001");
 	// Its value is no wire key: a LAN host refuses it (code 11).
 	std::string serial;
@@ -158,27 +165,214 @@ int mix_round_trip() {
 // client's decode fails.
 int activation_negatives() {
 	std::string wire;
-	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), kNestedNwact, "ABCDEFGHIJKLMNOPQRSTUVX", wire));
+	TEST_EXPECT(!cdkey::activation_wire_key(
+			dfx2_chains(), kNestedNwact, "ABCDEFGHIJKLMNOPQRSTUVX", wire));
 	TEST_EXPECT(wire.empty());
-	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), kNestedNwact, "BBCDEFGHIJKLMNOPQRSTUVW", wire));
+	TEST_EXPECT(!cdkey::activation_wire_key(
+			dfx2_chains(), kNestedNwact, "BBCDEFGHIJKLMNOPQRSTUVW", wire));
 	std::string damaged = kNestedNwact;
 	damaged[40] = damaged[40] == 'A' ? 'B' : 'A';
-	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), damaged, kFingerprint, wire));
-	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), std::string(kNestedNwact).substr(1), kFingerprint, wire));
-	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), "", kFingerprint, wire));
+	TEST_EXPECT(!cdkey::activation_wire_key(dfx2_chains(), damaged, kFingerprint, wire));
+	TEST_EXPECT(!cdkey::activation_wire_key(
+			dfx2_chains(), std::string(kNestedNwact).substr(1), kFingerprint, wire));
+	TEST_EXPECT(!cdkey::activation_wire_key(dfx2_chains(), "", kFingerprint, wire));
 	// The wire key itself is no NWACT (it is A-P under the wire chain, not the registry's).
-	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), kWire, kFingerprint, wire));
+	TEST_EXPECT(!cdkey::activation_wire_key(dfx2_chains(), kWire, kFingerprint, wire));
 	std::string serial;
 	// A value that decodes past the client's 0x800-byte buffer is refused, one that fits is not.
 	TEST_EXPECT(!cdkey::decode_wire_key(dfx2_chains(), cdkey::make_wire_key(dfx2_chains(), std::string(0x800, 'S')), serial));
 	TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), cdkey::make_wire_key(dfx2_chains(), std::string(0x800 - 12, 'S')), serial));
-	TEST_EXPECT(!cdkey::read_activation(dfx2_chains(), cdkey::make_activation(dfx2_chains(), std::string(0x800, 'S'), kFingerprint),
+	TEST_EXPECT(!cdkey::activation_wire_key(dfx2_chains(),
+			cdkey::make_activation(dfx2_chains(), std::string(0x800, 'S'), kFingerprint),
+			kFingerprint, wire));
+	// The activation's NUL takes a byte of that room too: past the registry chain's four CRCs, a
+	// wire key of 0x800 - 17 bytes fits and one of 0x800 - 16 does not.
+	TEST_EXPECT(cdkey::activation_wire_key(dfx2_chains(),
+						cdkey::make_activation(
+								dfx2_chains(), std::string(0x800 - 17, 'S'), kFingerprint),
+						kFingerprint, wire) &&
+			wire.size() == 0x800 - 17);
+	TEST_EXPECT(!cdkey::activation_wire_key(dfx2_chains(),
+			cdkey::make_activation(dfx2_chains(), std::string(0x800 - 16, 'S'), kFingerprint),
 			kFingerprint, wire));
 	TEST_EXPECT(!cdkey::decode_wire_key(dfx2_chains(), "", serial));
 	TEST_EXPECT(!cdkey::decode_wire_key(dfx2_chains(), "QQQQ", serial));
 	TEST_EXPECT(!cdkey::decode_wire_key(dfx2_chains(), std::string(kWire).substr(2), serial));
 	return 0;
 }
+
+// The client keeps the decoded value as a C string (Napi_CopyString into g_CDKeyInfo +16): a
+// value with a NUL in it is kept up to that NUL, and a failed read leaves nothing behind.
+int activation_c_string() {
+	std::string wire = "stale";
+	const std::string with_nul("BMCC\0DKDK", 9);
+	TEST_EXPECT(cdkey::activation_wire_key(dfx2_chains(),
+			cdkey::make_activation(dfx2_chains(), with_nul, kFingerprint), kFingerprint, wire));
+	TEST_EXPECT(wire == "BMCC");
+	wire = "stale";
+	TEST_EXPECT(!cdkey::activation_wire_key(dfx2_chains(), "NOTANWACT", kFingerprint, wire));
+	TEST_EXPECT(wire.empty());
+	return 0;
+}
+
+// A registry value in memory, as the read and the activation reach it: the reads and writes it
+// answered, each refused while `refuse_reads` / `refuse_writes` count down.
+struct MemoryStore {
+	std::string value;
+	bool present = false;
+	int reads = 0;
+	int writes = 0;
+	int refuse_reads = 0;
+	int refuse_writes = 0;
+	cdkey::KeyStore store() {
+		cdkey::KeyStore s;
+		s.read = [this](std::string &out) {
+			++reads;
+			if (refuse_reads > 0) {
+				--refuse_reads;
+				return false;
+			}
+			if (!present)
+				return false;
+			out = value;
+			return true;
+		};
+		s.write = [this](const std::string &text) {
+			++writes;
+			if (refuse_writes > 0) {
+				--refuse_writes;
+				return false;
+			}
+			value = text;
+			present = true;
+			return true;
+		};
+		return s;
+	}
+};
+
+// The boot read as the shipped dfx2.exe runs it: the stored NWACT read back to its wire key, the
+// status 1 whatever was read (the build's patch over the three refusals), a failed read tried
+// once more, the "/MP" flag.
+// [orig: CDKey_ReadRegistry @0x411b90 (dfx2.exe) - the reads @0x411bfe / @0x411c21, the patch
+//  @0x411c2b / @0x411c3f / @0x411cb9, the "/MP" test @0x411c9b..0x411cb2, the status 1 @0x411cbb]
+int registry_read() {
+	MemoryStore memory;
+	memory.value = kNestedNwact;
+	memory.present = true;
+	cdkey::KeyInfo info;
+	TEST_EXPECT(cdkey::read_registry(info, dfx2_chains(), kFingerprint, memory.store()) == 1);
+	TEST_EXPECT(info.status == 1 && info.keys.cdkiid == kWire && !info.multiplayer);
+	TEST_EXPECT(info.keys.exp1.empty() && memory.reads == 1);
+	// No value: still 1, with no key; the read tried twice.
+	MemoryStore empty;
+	cdkey::KeyInfo none;
+	none.keys.cdkiid = "stale";
+	TEST_EXPECT(cdkey::read_registry(none, dfx2_chains(), kFingerprint, empty.store()) == 1);
+	TEST_EXPECT(none.status == 1 && none.keys.cdkiid.empty() && empty.reads == 2);
+	// A first read refused, the second's value read.
+	memory.reads = 0;
+	memory.refuse_reads = 1;
+	cdkey::KeyInfo second;
+	TEST_EXPECT(cdkey::read_registry(second, dfx2_chains(), kFingerprint, memory.store()) == 1);
+	TEST_EXPECT(second.keys.cdkiid == kWire && memory.reads == 2);
+	// Another machine's value decodes to nothing here: 1, with no key.
+	cdkey::KeyInfo other;
+	TEST_EXPECT(cdkey::read_registry(
+						other, dfx2_chains(), "ABCDEFGHIJKLMNOPQRSTUVX", memory.store()) == 1);
+	TEST_EXPECT(other.keys.cdkiid.empty());
+	// A decoded value ending "/MP" sets the multiplayer flag.
+	MemoryStore mp;
+	mp.value =
+			mixed_up(opennova::encode_key_chain(bytes("OPENNOVA-0001/MP"), dfx2_chains().registry),
+					kFingerprint);
+	mp.present = true;
+	cdkey::KeyInfo flagged;
+	TEST_EXPECT(cdkey::read_registry(flagged, dfx2_chains(), kFingerprint, mp.store()) == 1);
+	TEST_EXPECT(flagged.multiplayer && flagged.keys.cdkiid == "OPENNOVA-0001/MP");
+	return 0;
+}
+
+// The activation from an NWACT: stored, then read back under this machine's fingerprint; a refused
+// write tried once more and, refused again, -1 with nothing changed; a value that does not decode
+// here -3 with the key kept.
+// [orig: CDKey_WriteActivationFromNWACT @0x411e30 (dfx2.exe) - the writes @0x411e88 / @0x411e9f,
+//  the -1 @0x411eab, the -3 @0x411f13, the 1 @0x411f31 and the copy @0x411f37]
+int registry_activation() {
+	MemoryStore memory;
+	cdkey::KeyInfo info;
+	TEST_EXPECT(cdkey::write_activation(
+						info, dfx2_chains(), kNestedNwact, kFingerprint, memory.store()) == 1);
+	TEST_EXPECT(info.status == 1 && info.keys.cdkiid == kWire && memory.value == kNestedNwact);
+	TEST_EXPECT(memory.writes == 1);
+	// The value stored is the one the next boot reads.
+	cdkey::KeyInfo booted;
+	TEST_EXPECT(cdkey::read_registry(booted, dfx2_chains(), kFingerprint, memory.store()) == 1 &&
+			booted.keys.cdkiid == kWire);
+	// A first write refused, the second stored.
+	MemoryStore once;
+	once.refuse_writes = 1;
+	cdkey::KeyInfo retried;
+	TEST_EXPECT(cdkey::write_activation(
+						retried, dfx2_chains(), kNestedNwact, kFingerprint, once.store()) == 1);
+	TEST_EXPECT(once.writes == 2 && retried.keys.cdkiid == kWire);
+	// Both refused (a registry that takes the value nowhere: the machine key and, for a token that
+	// is not elevated, its VirtualStore copy too, registry_activation_virtualized): -1, the
+	// record's key and flag as they were.
+	MemoryStore refused;
+	refused.refuse_writes = 2;
+	cdkey::KeyInfo kept;
+	kept.keys.cdkiid = "BEFORE";
+	kept.multiplayer = true;
+	TEST_EXPECT(cdkey::write_activation(
+						kept, dfx2_chains(), kNestedNwact, kFingerprint, refused.store()) == -1);
+	TEST_EXPECT(kept.status == -1 && kept.keys.cdkiid == "BEFORE" && kept.multiplayer &&
+			!refused.present);
+	// Stored but another machine's: -3, the key as it was.
+	MemoryStore foreign;
+	cdkey::KeyInfo before;
+	before.keys.cdkiid = "BEFORE";
+	TEST_EXPECT(cdkey::write_activation(before, dfx2_chains(), kNestedNwact,
+						"ABCDEFGHIJKLMNOPQRSTUVX", foreign.store()) == -3);
+	TEST_EXPECT(before.status == -3 && before.keys.cdkiid == "BEFORE" && foreign.present);
+	return 0;
+}
+
+#if defined(_WIN32)
+// The activation of a user whose token is not elevated, over the registry (base/os_registry): the
+// machine key refuses the NWACT's write, its VirtualStore copy takes it, so the activation stands
+// (1) and the next boot read reads it back through the copy, as UAC's virtualization of stock
+// dfx2.exe's write and read does. Two keys under a scratch key stand for the machine key (readable,
+// not writable) and its copy; no NovaLogic key is touched.
+// [orig: CDKey_WriteActivationFromNWACT @0x411e30 (dfx2.exe) - the write @0x411e88;
+//  CDKey_ReadRegistry @0x411b90 (dfx2.exe) - the read @0x411bfe]
+int registry_activation_virtualized() {
+	test_registry::ScratchKey scratch("cdkey");
+	TEST_EXPECT(scratch.deny_writes("machine"));
+	const std::string machine = scratch.path("machine");
+	const std::string copy = scratch.path("copy");
+	cdkey::KeyStore store;
+	store.read = [&machine, &copy](std::string &out) {
+		return opennova::os_registry_read_string_virtualized(
+				machine, copy, "CDKIID", 0x2000, "", out);
+	};
+	store.write = [&machine, &copy](const std::string &text) {
+		return opennova::os_registry_write_string_virtualized(machine, copy, "CDKIID", text, "");
+	};
+	cdkey::KeyInfo info;
+	TEST_EXPECT(
+			cdkey::write_activation(info, dfx2_chains(), kNestedNwact, kFingerprint, store) == 1);
+	TEST_EXPECT(info.keys.cdkiid == kWire);
+	std::string stored;
+	TEST_EXPECT(
+			opennova::os_registry_read_string_virtualized(copy, "", "CDKIID", 0x2000, "", stored) &&
+			stored == kNestedNwact);
+	cdkey::KeyInfo booted;
+	TEST_EXPECT(cdkey::read_registry(booted, dfx2_chains(), kFingerprint, store) == 1 &&
+			booted.keys.cdkiid == kWire);
+	return 0;
+}
+#endif
 
 int fingerprint_shape() {
 	TEST_EXPECT(cdkey::is_fingerprint(kFingerprint));
@@ -246,6 +440,12 @@ int main() {
 	rc |= mix_direction();
 	rc |= mix_round_trip();
 	rc |= activation_negatives();
+	rc |= activation_c_string();
+	rc |= registry_read();
+	rc |= registry_activation();
+#if defined(_WIN32)
+	rc |= registry_activation_virtualized();
+#endif
 	rc |= fingerprint_shape();
 	rc |= lan_join_codes();
 	if (rc == 0)

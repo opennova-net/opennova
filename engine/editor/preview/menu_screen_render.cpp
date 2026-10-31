@@ -1,5 +1,6 @@
 #include <editor/preview/menu_screen_render.h>
 
+#include <base/title/title.h>
 #include <editor/documents/mnu_document.h>
 
 namespace opennova::editor {
@@ -35,8 +36,14 @@ MenuScreenRender::~MenuScreenRender() {
 	assets_.clear(compiler_, decoder_);
 }
 
+float menu_font_scale_of(const std::string &game) {
+	const Title *title = title_by_code(game);
+	return (title != nullptr ? *title : default_title()).menu_font_scale;
+}
+
 MenuScreenStatus MenuScreenRender::configure(const MnuDocument &document, NodeId screen_row, const FileSource &files,
-                                             const std::map<std::string, std::string> &vars) {
+                                             const std::map<std::string, std::string> &vars, float font_scale) {
+	compiler_.set_font_scale(font_scale);
 	state_ = menu::MenuFrameState();
 	detail_.clear();
 	revision_ = document.revision();

@@ -148,7 +148,9 @@ int main(int argc, char **argv) {
 	// The subject that diverges: every other S2C datagram carrying a 0x0A frame in
 	// the steady window dropped, so the host's frame cadence halves.
 	wire::ParityTrace decoded;
-	check(wire::read_parity_trace(SELF_CAPTURE_FIXTURE, nullptr, decoded), "decode the fixture");
+	std::string read_error;
+	check(wire::read_parity_trace(SELF_CAPTURE_FIXTURE, nullptr, decoded, read_error),
+			"decode the fixture");
 	std::set<int> frame_datagrams;
 	for (const wire::ParityPacket &packet : decoded.packets)
 		if (packet.dir == 'S' && packet.ts_ns >= 900000000ull)

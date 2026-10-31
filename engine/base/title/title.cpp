@@ -1,7 +1,6 @@
 #include <base/title/title.h>
 
 #include <base/io/strutil.h>
-#include <base/vfs/vfs_decode.h>
 #include <formats/pff/pff.h>
 
 #include <cstdio>
@@ -69,11 +68,6 @@ const Title *title_by_command_file(std::string_view command_file) {
 		if (title->command_file != nullptr && strutil::iequals(title->command_file, command_file))
 			return title;
 	return nullptr;
-}
-
-int title_scr_policy_for_code(const char *code) {
-	const Title *title = code != nullptr ? title_by_code(code) : nullptr;
-	return title != nullptr ? title->scr_policy : VFS_SCR_VERSION_DETECT;
 }
 
 } // namespace opennova

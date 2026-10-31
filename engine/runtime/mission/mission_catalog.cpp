@@ -4,10 +4,12 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <unordered_set>
 
 #include <base/gameprofile/game_type.h>
+#include <base/io/ascii_config.h>
 #include <base/io/cp1252.h>
 #include <base/io/file_io.h>
 #include <base/io/log.h>
@@ -32,6 +34,14 @@ namespace fs = std::filesystem;
 // the scan made of it) (D-MNU-39).
 bool file_less(const Row &a, const Row &b) {
 	return cp1252_stricmp(utf8_to_retail_text(a.file), utf8_to_retail_text(b.file)) < 0;
+}
+
+// dfx2.exe's comparator: the same stricmp over the two rows' display titles (entry+1044), the
+// table's [Info] TITLE or the header's mission name, folded the same way (D-MNU-39).
+// [orig: CompareFunction @0x561840 - _stricmp(String1 + 1044, String2 + 1044) @0x561863
+//  (dfx2.exe)]
+bool title_less(const Row &a, const Row &b) {
+	return cp1252_stricmp(utf8_to_retail_text(a.title), utf8_to_retail_text(b.title)) < 0;
 }
 
 // [orig: Path_ReplaceOrAppendExtension @ 0x53c780, called with "bin" @ 0x56345b and
@@ -123,6 +133,7 @@ void fill_row(Row &row, const bms::Header &header, bool header_ok, const rtxt::F
 	// The single-select mode bit the code-word derivation consumes (the switch itself is
 	// game_type::for_mission_mode, game_type_of).
 	row.game_mode = header_ok ? bms::selected_game_mode(header.attrib_flags) : 0u;
+	row.mission_type = header_ok ? static_cast<uint8_t>(header.mission_type) : uint8_t{0};
 	if (text != nullptr) {
 		if (const rtxt::Entry *title = rtxt::find_with_override(text_override, *text,
 				kTextInfoSection, kTextTitleKey))
@@ -133,6 +144,20 @@ void fill_row(Row &row, const bms::Header &header, bool header_ok, const rtxt::F
 	} else {
 		row.title = header_cstr(header.mission_name, sizeof(header.mission_name));
 	}
+	// The debriefings dfx2.exe's end screens read through the same table, the override's first
+	// even with no table [orig: TextResource_FindEntryBySectionAndKey @0x7269b0 - the override
+	// @0x7269bd..0x7269db, a null table none @0x7269df (dfx2.exe)].
+	const auto debriefing = [&](const char *key) -> std::optional<std::string> {
+		const rtxt::Entry *entry = nullptr;
+		if (text != nullptr)
+			entry = rtxt::find_with_override(text_override, *text, kTextInfoSection, key);
+		else if (text_override != nullptr)
+			entry = text_override->find_in_section(kTextInfoSection, key);
+		if (entry == nullptr) return std::nullopt;
+		return entry->text;
+	};
+	row.win_debriefing = debriefing(kTextWinDebriefingKey);
+	row.lose_debriefing = debriefing(kTextLoseDebriefingKey);
 }
 
 // The text table by name through the front door, the session's lookup order
@@ -178,7 +203,8 @@ void walk_pair(const ResourceIndex &index, int mission_slot, int text_slot,
 
 } // namespace
 
-std::vector<Row> build(const ResourceIndex &index, const rtxt::File *text_override) {
+std::vector<Row> build(
+		const ResourceIndex &index, const rtxt::File *text_override, MissionListOrder order) {
 	std::vector<Row> rows;
 	// The loose leg: the install root's `.bms` files, whatever the mount (a packed
 	// install's stray one too; one under the mounted expansion's folder never), flagged
@@ -212,8 +238,9 @@ std::vector<Row> build(const ResourceIndex &index, const rtxt::File *text_overri
 	// [orig: qsort(list, count, 0x11E8, Mission_CompareMapNames) @ 0x5635f0, no dedupe]
 	// The CRT's qsort is a platform primitive the port does not reproduce, and it is not
 	// stable: two rows with the same name (a loose copy of an archived mission, or one
-	// name in both pairs) come out in its order in retail, in walk order here.
-	sort_rows(rows);
+	// name in both pairs) come out in its order in retail, in walk order here. The comparator
+	// is the title's (sort_rows).
+	sort_rows(rows, order);
 	return rows;
 }
 
@@ -275,8 +302,8 @@ std::vector<Row> loose_rows(const std::vector<std::string> &names, const ReadBms
 	return rows;
 }
 
-void sort_rows(std::vector<Row> &rows) {
-	std::stable_sort(rows.begin(), rows.end(), file_less);
+void sort_rows(std::vector<Row> &rows, MissionListOrder order) {
+	std::stable_sort(rows.begin(), rows.end(), order == MissionListOrder::Title ? title_less : file_less);
 }
 
 uint32_t game_type_of(const Row &row) {
@@ -297,6 +324,81 @@ std::string display_text(const Row &row) {
 	std::string text = row.loose ? "*" : "";
 	text += row.title.empty() ? row.file : row.title;
 	return text;
+}
+
+namespace {
+
+// CRT_strtoul(s, &end, 10) at 32 bits: leading white space, an optional sign, the digits; past
+// ULONG_MAX the value clamps to it, and a '-' negates the result [orig: CRT_strtoul, called
+// @ 0x5630c2].
+uint32_t crt_strtoul10(const char *s) {
+	while (*s == ' ' || (*s >= '\t' && *s <= '\r')) ++s;
+	bool negative = false;
+	if (*s == '+' || *s == '-') negative = *s++ == '-';
+	uint64_t value = 0;
+	bool overflow = false;
+	for (; *s >= '0' && *s <= '9'; ++s) {
+		value = value * 10u + static_cast<uint64_t>(*s - '0');
+		if (value > 0xFFFFFFFFull) overflow = true;
+		if (overflow) value = 0xFFFFFFFFull;
+	}
+	if (overflow) return 0xFFFFFFFFu;
+	const uint32_t out = static_cast<uint32_t>(value);
+	return negative ? 0u - out : out;
+}
+
+// Whether a row's file is `name`, a name in the page's bytes: _stricmp over entry+0, which folds
+// through the ".ACP" locale, so the names compare as their cp1252 bytes, as the catalog's own sort
+// does (D-MNU-39); a loose row's file is the UTF-8 the scan made of its name.
+// [orig: HighScore_ParseLineCallback @ 0x563070 - the stricmp @ 0x56309d]
+bool file_is(const std::string &file, std::string_view name) {
+	return cp1252_stricmp(utf8_to_retail_text(file), name) == 0;
+}
+
+} // namespace
+
+void HighScoreTable::reset(const std::vector<Row> &rows) {
+	rows_.clear();
+	rows_.reserve(rows.size());
+	for (const Row &row : rows) rows_.push_back(Entry{row.file, 0});
+}
+
+void HighScoreTable::apply_text(const std::string &text) {
+	io::for_each_config_file_line(text.data(), text.size(), [this](io::ConfigTokens &line) {
+		for (Entry &entry : rows_)
+			if (file_is(entry.file, line.tokens[0]))
+				entry.score = static_cast<int32_t>(crt_strtoul10(line.tokens[1]));
+		return false;
+	});
+}
+
+std::string HighScoreTable::text() const {
+	std::string out;
+	for (const Entry &entry : rows_) {
+		// The name in the page's bytes, as entry+0 holds it [orig: HighScore_SaveToFile @ 0x563100 -
+		//  the fprintf @ 0x563146].
+		out += utf8_to_retail_text(entry.file);
+		out += '\t';
+		out += std::to_string(entry.score);
+		out += "\r\r\n";
+	}
+	return out;
+}
+
+int32_t HighScoreTable::score(const std::string &file) const {
+	const std::string name = utf8_to_retail_text(file);
+	for (const Entry &entry : rows_)
+		if (file_is(entry.file, name)) return entry.score;
+	return 0;
+}
+
+void HighScoreTable::set_score(const std::string &file, int32_t score) {
+	const std::string name = utf8_to_retail_text(file);
+	for (Entry &entry : rows_)
+		if (file_is(entry.file, name)) {
+			entry.score = score;
+			return;
+		}
 }
 
 } // namespace opennova::mission_catalog

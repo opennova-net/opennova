@@ -446,6 +446,57 @@ void test_custom_draw_slot(const fnt_font_t *font) {
 			"no slot widget, no slot");
 }
 
+// A painter's HUD label (DFX2-41): the face registered under kMenuHudLabelFontName, centred
+// on the x, its top the 'W' extent above the foot, that extent at the face's own HUD
+// scale (800 / design_width) alone, the glyphs at the slot's scale pair in the halved
+// colour; the frame without the face draws none.
+// [orig: sub_550CF0 @0x550d95..0x550dc8; CGameFont_GetCharExtent @0x6b1980;
+//  HUD_DrawTextCentered_HalfBright @0x57eb00 (dfx2.exe)]
+void test_hud_label_face(const fnt_font_t *font) {
+	opennova::mnu::Document doc = parse_or_die(kTableXml);
+	fnt_font_t half = *font; // the same glyphs at design width 400: a HUD scale of 2
+	half.design_width = 400;
+	for (const fnt_font_t *face : {font, static_cast<const fnt_font_t *>(&half), static_cast<const fnt_font_t *>(nullptr)}) {
+		MenuFrameCompiler c;
+		c.register_font("f.fnt", font);
+		if (face != nullptr) c.register_font(kMenuHudLabelFontName, face);
+		c.set_hud_label_scale(2.0f);
+		c.configure(doc.first_screen());
+		const int table = c.widget_index("LIST");
+		c.set_table_cell_painter(table, [&](const MenuTableCellEvent &e, MenuTableCellCanvas &canvas) {
+			if (e.row == 0) canvas.hud_label("AB", 100.0f, 60.0f, 0xFFDDDDDDu);
+		});
+		MenuWidgetState ws;
+		ws.index = table;
+		ws.table_rows.push_back(row_of({"x", "", ""}));
+		MenuFrameState state;
+		state.widgets.push_back(ws);
+		const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+		std::vector<const opennova::hud::GameFontQuad *> label;
+		for (const auto &g : dl.glyphs)
+			if (g.color == 0xFF6E6E6Eu) label.push_back(&g);
+		if (face == nullptr) {
+			CHECK(label.empty(), "a frame without the HUD label face draws no label");
+			continue;
+		}
+		CHECK(label.size() == 2, "the label's two glyphs, in the halved colour");
+		if (label.size() != 2) continue;
+		// 'W' measures 16 at HUD scale 1, 32 at 2, never times the slot's 2.0.
+		const float top = face == font ? 60.0f - 16.0f : 60.0f - 32.0f;
+		CHECK(label[0]->y_top == top - 0.5f && label[1]->y_top == top - 0.5f,
+				"the label's top is the 'W' extent above the foot");
+		if (face == font)
+			// "AB" measures 17 at scale 1 (8 + 1 + 8): the pen starts 17 * 2 / 2 left of 100.
+			CHECK(label[0]->x_top_left == 100.0f - 17.0f - 0.5f, "the label is centred on the x");
+		bool run = false;
+		for (const MenuDrawList::FontRun &fr : dl.font_runs)
+			if (fr.count == 2 && fr.font > 0 && fr.font < static_cast<int32_t>(c.font_names().size()) &&
+					c.font_names()[static_cast<size_t>(fr.font)] == kMenuHudLabelFontName)
+				run = true;
+		CHECK(run, "the label's run draws with the HUD label face's slot");
+	}
+}
+
 // The row sort runs the list widgets' quicksort, so rows that compare equal
 // stand where its swaps leave them: three rows equal on the key come out
 // third, first, second (lo 0, hi 2: the pivot sorts before nothing, so 2 and 0
@@ -705,6 +756,7 @@ int main() {
 	test_hit_test(&font);
 	test_clip_viewport(&font);
 	test_custom_draw_slot(&font);
+	test_hud_label_face(&font);
 	test_sort_order_is_the_quicksorts();
 	test_text_arm_folds_through_cp1252();
 	test_unset_cells_are_missing();

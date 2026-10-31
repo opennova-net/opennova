@@ -97,21 +97,153 @@ std::optional<CommandRow> read_row(std::string_view line) {
 	return row;
 }
 
-bool header_value_carries(const std::string &value) {
-	return value.size() < kCommandHeaderValueBytes &&
-			value.find_first_of("\r\n;") == std::string::npos;
+// The row's line as the writer writes it, without its CR LF.
+std::string row_line(const CommandRow &row) {
+	std::string line = row.key + "=" + row.name;
+	if (row.type == CommandType::Loose || row.type == CommandType::Copy) {
+		line += "," + std::to_string(row.time) + "," + std::to_string(row.size);
+		if (row.crc)
+			line += "," + std::to_string(*row.crc);
+	}
+	return line;
 }
 
-bool name_carries(const std::string &name) {
-	if (name.empty() || name.size() >= kCommandNameBytes)
-		return false;
-	for (char c : name)
-		if (is_token_separator(c) || c == '=')
-			return false;
-	return true;
+// What the reader's strtok over " ,\r\n" takes for the name: the text's first token.
+std::string_view first_token(std::string_view text) {
+	const std::vector<std::string_view> all = tokens(text);
+	return all.empty() ? std::string_view() : all.front();
+}
+
+std::string quoted(std::string_view text) {
+	return "\"" + std::string(text) + "\"";
 }
 
 } // namespace
+
+CommandRefusal command_name_refusal(std::string_view name) {
+	if (name.empty())
+		return CommandRefusal::NameEmpty;
+	for (char c : name) {
+		if (c == ' ' || c == ',')
+			return CommandRefusal::NameSeparator;
+		if (c == '\r' || c == '\n')
+			return CommandRefusal::NameLineBreak;
+	}
+	return CommandRefusal::None;
+}
+
+CommandRefusal command_header_refusal(std::string_view key, std::string_view value) {
+	if (value.empty())
+		return CommandRefusal::None;
+	for (char c : value) {
+		if (c == '\r' || c == '\n')
+			return CommandRefusal::HeaderLineBreak;
+		if (c == ';')
+			return CommandRefusal::HeaderSemicolon;
+	}
+	if (key.size() + 1 + value.size() >= kIniKeyLineBytes)
+		return CommandRefusal::HeaderTooLong;
+	return CommandRefusal::None;
+}
+
+CommandRefusal command_row_refusal(const CommandRow &row) {
+	const std::optional<CommandType> type = command_type_for_key(row.key);
+	if (!type || *type != row.type)
+		return CommandRefusal::RowKey;
+	if (const CommandRefusal name = command_name_refusal(row.name); name != CommandRefusal::None)
+		return name;
+	if (row_line(row).size() >= kIniCommandLineBytes)
+		return CommandRefusal::RowTooLong;
+	return CommandRefusal::None;
+}
+
+std::string command_refusal_words(CommandRefusal refusal, std::string_view text) {
+	switch (refusal) {
+	case CommandRefusal::None:
+		return {};
+	case CommandRefusal::NameEmpty:
+		return "has no name: UPDATE.EXE's command-row reader finds none and skips the row "
+			   "[orig: CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE)]";
+	case CommandRefusal::NameSeparator: {
+		const size_t at = text.find_first_of(" ,");
+		const std::string_view read = first_token(text);
+		return std::string(at != std::string_view::npos && text[at] == ',' ? "has a comma"
+																			: "has a space") +
+				": UPDATE.EXE splits a command row's fields at spaces and commas, so it reads the "
+				"name as " +
+				(read.empty() ? std::string("nothing") : quoted(read)) +
+				" and the rest as the row's other fields [orig: CmdFile_ReadCommandRow @ 0x404f60 "
+				"(UPDATE.EXE), strtok \" ,\\r\\n\" @0x404ffd]";
+	}
+	case CommandRefusal::NameLineBreak:
+		return "has a line break (a CR or an LF), where UPDATE.EXE's command-row reader ends the "
+			   "name [orig: CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE), strtok \" ,\\r\\n\" "
+			   "@0x404ffd]";
+	case CommandRefusal::RowTooLong:
+		return "makes a row past the 255 characters UPDATE.EXE's command-row reader keeps of a "
+			   "line, so it reads the row cut short [orig: CmdFile_ReadCommandRow @ 0x404f60 "
+			   "(UPDATE.EXE), IniFile_ReadLine into 0x100 bytes @0x404f95]";
+	case CommandRefusal::RowKey:
+		return "has a key UPDATE.EXE's key table does not give its kind (UPD, RESEXE, REVEXE and "
+			   "WIZ a loose file, COPY, REMOVE, TARGET), so the reader skips the row or reads it as "
+			   "another [orig: CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE); g_CmdKeyTable @ "
+			   "0x4404c0 (UPDATE.EXE)]";
+	case CommandRefusal::HeaderLineBreak:
+		return "has a line break (a CR or an LF), where UPDATE.EXE's header reader ends the value "
+			   "[orig: IniFile_GetValue @ 0x403b90 (UPDATE.EXE)]";
+	case CommandRefusal::HeaderSemicolon:
+		return "has a ';', where UPDATE.EXE's header reader ends the value, so it reads " +
+				quoted(text.substr(0, text.find(';'))) +
+				" [orig: IniFile_GetValue @ 0x403b90 (UPDATE.EXE), %[^\\n\\r=]=%[^\\n\\r;]]";
+	case CommandRefusal::HeaderTooLong:
+		return "makes a line past the 127 characters UPDATE.EXE's header reader keeps of it, so it "
+			   "reads the value cut short [orig: IniFile_GetValue @ 0x403b90 (UPDATE.EXE); "
+			   "Cupdate2Dlg_ReadCommandFile @ 0x4076e0 (UPDATE.EXE)]";
+	}
+	return {};
+}
+
+CommandFileProblem command_file_problem(const CommandFile &file) {
+	CommandFileProblem problem;
+	const struct {
+		const char *key;
+		const std::string &value;
+	} header[] = { { "EXE", file.exe }, { "PRODUCT", file.product }, { "VERSION", file.version } };
+	for (const auto &row : header) {
+		problem.refusal = command_header_refusal(row.key, row.value);
+		if (!problem.ok()) {
+			problem.header = true;
+			problem.key = row.key;
+			problem.text = row.value;
+			return problem;
+		}
+	}
+	std::string target = ".";
+	for (const CommandRow &row : file.rows) {
+		problem.refusal = command_row_refusal(row);
+		if (!problem.ok()) {
+			problem.key = row.key;
+			problem.text = row.name;
+			problem.target = target;
+			return problem;
+		}
+		if (row.type == CommandType::Target)
+			target = row.name;
+	}
+	return problem;
+}
+
+std::string command_file_problem_words(const CommandFileProblem &problem) {
+	if (problem.ok())
+		return {};
+	if (problem.header)
+		return "the " + problem.key + " value " + quoted(problem.text) + " " +
+				command_refusal_words(problem.refusal, problem.text);
+	return "the " + problem.key + " row " + quoted(problem.text) +
+			(problem.target.empty() || problem.target == "." ? std::string()
+															 : " (in " + problem.target + ")") +
+			" " + command_refusal_words(problem.refusal, problem.text);
+}
 
 std::optional<CommandType> command_type_for_key(std::string_view key) {
 	for (const auto &entry : kKeyTable)
@@ -139,34 +271,19 @@ std::optional<CommandFile> read_command_file(std::string_view text) {
 }
 
 std::string write_command_file(const CommandFile &file) {
+	if (!command_file_problem(file).ok())
+		return {};
 	std::string out = "[HEADER]\r\n";
 	const struct {
 		std::string_view key;
 		const std::string &value;
 	} header[] = { { "EXE", file.exe }, { "PRODUCT", file.product }, { "VERSION", file.version } };
-	for (const auto &row : header) {
-		if (row.value.empty())
-			continue;
-		if (!header_value_carries(row.value) ||
-				row.key.size() + 1 + row.value.size() >= kIniKeyLineBytes)
-			return {};
-		out.append(row.key).append("=").append(row.value).append("\r\n");
-	}
+	for (const auto &row : header)
+		if (!row.value.empty())
+			out.append(row.key).append("=").append(row.value).append("\r\n");
 	out.append("\r\n[COMMAND]\r\n");
-	for (const CommandRow &row : file.rows) {
-		const std::optional<CommandType> type = command_type_for_key(row.key);
-		if (!type || *type != row.type || !name_carries(row.name))
-			return {};
-		std::string line = row.key + "=" + row.name;
-		if (row.type == CommandType::Loose || row.type == CommandType::Copy) {
-			line += "," + std::to_string(row.time) + "," + std::to_string(row.size);
-			if (row.crc)
-				line += "," + std::to_string(*row.crc);
-		}
-		if (line.size() >= kIniCommandLineBytes)
-			return {};
-		out.append(line).append("\r\n");
-	}
+	for (const CommandRow &row : file.rows)
+		out.append(row_line(row)).append("\r\n");
 	return out;
 }
 

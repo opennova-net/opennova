@@ -235,7 +235,8 @@ std::string encode_nwpssk(const std::array<uint8_t, 16> &bytes) {
 
 } // namespace
 
-LobbyMachineTokens make_retail_machine_tokens(const RetailMachineInputs &in) {
+LobbyMachineTokens make_retail_machine_tokens(
+		const RetailMachineInputs &in, const FingerprintSerialMix &mix) {
 	std::array<uint8_t, 16> pssk_bytes{};
 	char serial_hex[9]{};
 	std::snprintf(serial_hex, sizeof(serial_hex), "%08X", static_cast<unsigned>(in.volume_serial));
@@ -261,7 +262,8 @@ LobbyMachineTokens make_retail_machine_tokens(const RetailMachineInputs &in) {
 	xor_u32_le(pssk_bytes, 0, in.volume_serial);
 	xor_u32_le(pssk_bytes, 4, in.maximum_component_length ^ (in.volume_serial >> 1u));
 	xor_u32_le(pssk_bytes, 8, in.filesystem_flags ^ (in.volume_serial >> 2u));
-	xor_u32_le(pssk_bytes, 12, (in.volume_serial ^ 0x0B24B390u) >> 3u);
+	// The executable's own serial term (Protocol::nwpssk_mix carries each one's witness).
+	xor_u32_le(pssk_bytes, 12, mix.apply(in.volume_serial));
 
 	for (std::size_t i = 0; i < std::min<std::size_t>(16, in.volume_name.size()); ++i) {
 		pssk_bytes[i] ^= static_cast<uint8_t>(in.volume_name[i]);
@@ -301,8 +303,8 @@ std::vector<std::pair<std::string, std::string>> make_lobby_identity_vars(const 
 		{"TimeZoneBias", p.tz_bias},
 		{"MyInstalledExpBits", p.my_installed_exp_bits},
 		{"NWUID", ""},        // echoed from the ServerSessionInit at use
-		{"NWCDKIID", ""},     // empty in retail; verify is not CD-key-gated
-		{"NWCDKIIDEXP1", ""},
+		{"NWCDKIID", p.nwcdkiid}, // the client's CDKIID (dfx2.exe's record; JO's empty)
+		{"NWCDKIIDEXP1", p.nwcdkiidexp1},
 		{"NWPSSK", p.nwpssk},
 		{"NWUSID", p.nwusid},
 		{"NWHWI", p.nwhwi},

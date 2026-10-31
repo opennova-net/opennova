@@ -108,8 +108,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_join_server_name"), &Simulation::get_join_server_name);
 	ClassDB::bind_method(D_METHOD("get_join_mission_name"), &Simulation::get_join_mission_name);
 	ClassDB::bind_method(D_METHOD("get_join_server_info"), &Simulation::get_join_server_info);
-	ClassDB::bind_method(
-			D_METHOD("take_join_server_info_parsed"), &Simulation::take_join_server_info_parsed);
 	ClassDB::bind_method(D_METHOD("get_join_mission_file"), &Simulation::get_join_mission_file);
 	ClassDB::bind_method(D_METHOD("take_score_feedback"), &Simulation::take_score_feedback);
 	ClassDB::bind_method(D_METHOD("take_tip_events"), &Simulation::take_tip_events);
@@ -151,6 +149,7 @@ void Simulation::_bind_methods() {
 	                     &Simulation::is_deploy_overlay_active);
 	ClassDB::bind_method(D_METHOD("take_death_menu_open", "menu_open"),
 	                     &Simulation::take_death_menu_open);
+	ClassDB::bind_method(D_METHOD("take_death_menu_close"), &Simulation::take_death_menu_close);
 	ClassDB::bind_method(D_METHOD("is_death_menu_held"),
 	                     &Simulation::is_death_menu_held);
 	ClassDB::bind_method(D_METHOD("get_deploy_spawn_zones"),
@@ -173,6 +172,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_end_round_state"), &Simulation::get_end_round_state);
 	ClassDB::bind_method(D_METHOD("is_mp_session"), &Simulation::is_mp_session);
 	ClassDB::bind_method(D_METHOD("is_round_over"), &Simulation::is_round_over);
+	ClassDB::bind_method(D_METHOD("get_end_round_winner_team"), &Simulation::get_end_round_winner_team);
 	ClassDB::bind_method(D_METHOD("get_charattr_disabled_word"), &Simulation::get_charattr_disabled_word);
 	ClassDB::bind_method(D_METHOD("get_end_round_overlay", "gametext"),
 	                     &Simulation::get_end_round_overlay);
@@ -266,6 +266,7 @@ void Simulation::_bind_methods() {
 	BIND_CONSTANT(VIEW_ACTION_FIRST_PERSON);
 	BIND_CONSTANT(VIEW_ACTION_WITH_GUN);
 	BIND_CONSTANT(VIEW_ACTION_CHASE);
+	BIND_CONSTANT(VIEW_ACTION_TOGGLE);
 	ClassDB::bind_method(D_METHOD("set_local_player_debug_third_person", "enabled"), &Simulation::set_local_player_debug_third_person);
 	ClassDB::bind_method(D_METHOD("get_local_player_view"), &Simulation::get_local_player_view);
 	ClassDB::bind_method(D_METHOD("present_local_player_view"), &Simulation::present_local_player_view);

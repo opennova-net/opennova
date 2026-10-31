@@ -57,6 +57,12 @@ bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 			if (item.is_string() && !item.string.empty()) settings.recent_projects.push_back(item.string);
 		}
 	}
+	if (const io::JsonValue *copies = json.get("working_copies"); copies && copies->is_array()) {
+		for (const io::JsonValue &item : copies->array) {
+			if (settings.working_copies.size() >= kWorkingCopiesMax) break;
+			if (item.is_string() && !item.string.empty()) settings.working_copies.push_back(item.string);
+		}
+	}
 	// The recently placed items (S15), per game (the polish): `recent_items_by_game`, an object of each
 	// game's list of whole numbers, the first kRecentItemsMax of each; a number that is not whole, or
 	// past what a double holds exactly, is skipped before it is cast. S15's one list (`recent_items`,
@@ -87,6 +93,9 @@ bool FilePreferencesStore::save(const Preferences &settings, Diagnostic &error) 
 	io::JsonValue recent = io::JsonValue::make_array();
 	for (const std::string &root : settings.recent_projects) recent.push(io::JsonValue::make_string(root));
 	json.set("recent_projects", std::move(recent));
+	io::JsonValue copies = io::JsonValue::make_array();
+	for (const std::string &root : settings.working_copies) copies.push(io::JsonValue::make_string(root));
+	json.set("working_copies", std::move(copies));
 	io::JsonValue by_game = io::JsonValue::make_object();
 	for (const auto &game : settings.recent_items) {
 		if (game.second.empty()) continue;

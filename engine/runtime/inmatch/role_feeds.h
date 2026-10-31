@@ -15,6 +15,7 @@
 #include <runtime/hud/hud_frame.h> // HudSessionState
 #include <runtime/hud/hud_minimap.h> // HudMapGridOrigin
 #include <runtime/hud/hud_map_view.h> // DeathMapFacts
+#include <runtime/hud/session_rules_text.h> // EndGameScreenPage
 #include <net/npwire/session_vars.h> // SessionVars
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/world/deploy_screen_feed.h>
@@ -32,6 +33,9 @@
 #include <unordered_set>
 #include <vector>
 
+namespace opennova {
+struct Title; // base/title/title.h
+} // namespace opennova
 namespace opennova::mission {
 class MissionKernel;
 }
@@ -44,6 +48,9 @@ struct CommandMapLocations;
 }
 namespace opennova::replication {
 class ClientWorldMaterializer;
+}
+namespace opennova::world {
+class VehicleOccupancySource; // world/vehicle_attach.h
 }
 
 namespace opennova::inmatch {
@@ -75,6 +82,11 @@ struct RoleView {
 	// The session's frame-rate window (Session::frame_rate_stats), the frame-rate overlay's
 	// four words.
 	world::TickAccumulator::FrameRateStats frame_rate;
+	// The title the session runs as: its HUD's own elements (Title::hud_exp_points). Null draws
+	// none of them.
+	const Title *title = nullptr;
+	// The joiner's seat occupancy (its decoded riders, JoinerRole); null on every other role.
+	const world::VehicleOccupancySource *occupancy = nullptr;
 };
 
 // The session rules word the role's HUD gates test (g_RulesFlags, the
@@ -189,6 +201,16 @@ SessionVars scoreboard_session_vars(const RoleView &view);
 bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gametext,
 		std::string &out);
 
+// THE END-GAME (I) SCREEN'S PAGE for this client, over the same record and
+// inputs as the CMAP RULES text, plus the active expansion's name the mission
+// line carries (g_ExpansionName: the authority's configured expansion, a
+// joiner's the one its join switched to, the S2C 0x7B's). False (the screen
+// draws its box alone) while the record is not valid, or on the bare local
+// role, which is never in a session.
+// [orig: HUD_DrawEndGameScreen @0x5bd070 (g_ExpansionName @0xB4C584 @0x5bd221)]
+bool end_game_screen_text(const RoleView &view, const hud::GameTextLookup &gametext, int page,
+		hud::EndGameScreenPage &out);
+
 // THE TALK KEYS' FACTS for this client (hud::ChatEntryFacts): the death
 // screen and round-over latches off the replica, the session (a joiner's
 // connection, the authority's is_in_session), the replica's reset hold, the
@@ -252,6 +274,9 @@ struct HudRoleFacts {
 	// [orig: Render_WeaponInsetScene -- g_HUDTargetCursorEntity @0x5CA0A4, the call
 	//  @0x5CA0AB, the null test @0x5CA0B3..0x5CA0B5; HUD_BuildEntityInfo @0x4B87ED..0x4B8825]
 	std::string inset_target_name;
+	// DFX2-45: the session's title draws the Inset's reticle quad in place of the four arms
+	// (Title::inset_reticle_quad).
+	bool inset_reticle_quad = false;
 	// The frame-rate overlay: shown while the local cheat word's 0x400 bit stands
 	// (World::rules.frame_rate_overlay), over the view's frame-rate window.
 	// [orig: HUD_DrawGameplayOverlays @0x5BDE60 - `test g_DebugCheatFlags, 400h` @0x5BDEB5;
@@ -265,11 +290,31 @@ struct HudRoleFacts {
 	// own client's; Role::action_head_admits reads the same) (D-NET-1322).
 	hud::HudConnectStatus connect_status;
 	int32_t start_timer_seconds = 0;
+	// DFX2-36's EXPPOINTS element (hud/hud_exp_points.h), its strings the embedder's
+	// (hud::hud_exp_points_text): the title's flag, the role's replica 0x81 score and fanfare arms
+	// and its 0x80 / 0x82 tracker (the listen host's own client's too); zero with no replica.
+	hud::HudExpPointsState exp_points;
+	// The title the session runs as (RoleView::title), its HUD's own variants
+	// (hud::HudFrameState::title), and the lone-gunner panel's fact: the local player is a lone
+	// gunner (world::local_rides_solo_turret; DFX2-91); false with no kernel.
+	const Title *title = nullptr;
+	bool lone_gunner = false;
+	// DFX2-82's rider lines (fill_vehicle_panel_riders), under Title::hud_vehicle_panel_riders
+	// alone; their weapon texts the embedder's (hud::hud_vehicle_rider_text).
+	std::vector<hud::HudVehicleRider> vehicle_riders;
 };
 // `voice_menus`: bit 0 asks for the emotes menu, bit 1 for the radio menu.
 inline constexpr uint32_t kHudVoiceMenuEmotes = 1u;
 inline constexpr uint32_t kHudVoiceMenuRadio = 2u;
 HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus = 0);
+
+// DFX2-82's rider lines for the vehicle the local player rides (world::vehicle_panel_root): the
+// riders world::vehicle_panel_riders walks over the role's occupancy, each named by
+// HUD_GetEntityDisplayName (a rider whose definition this client lacks drops out, as retail's
+// def tests skip it) with its gun weapon's attachtextid. Empty on foot, without a kernel or a
+// replica. [orig: HUD_DrawVehicleHealthBars @0x5A3DF0 - HUD_GetEntityDisplayName @0x5A4714 /
+// @0x5A4765 / @0x5A47F7 (dfx2.exe)]
+void fill_vehicle_panel_riders(const RoleView &view, std::vector<hud::HudVehicleRider> &out);
 
 // Every stat.mnu RESULTLIST row (the tabs hide filled rows: stat_screen_filter_rows):
 // the roster joined to the frozen board; the fill selects the local row by
@@ -375,6 +420,45 @@ uint8_t deploy_list_team(const RoleView &view);
 bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		std::vector<world::DeployZoneRow> &out);
 
+// DFX2-41: the DEATH screen's SPAWNPOINTS_TABLE zones for THIS client (world/deploy_screen_feed.h
+// DeployTableZone, which build_deploy_table_rows turns into the rows), on every role that opens
+// the screen, over the zone walk deploy_zone_rows takes (the minimap banks): a banked zone of
+// the deploy_list_team with no zone-timer entry or a secured one and a SpawnZoneList index. Each
+// carries its definition's vehicle category (+406) and class id (+80), its health colour
+// (world::deploy_table_health_color over the HUD layout's stance colours `stance_middle` /
+// `stance_bad`), the greyed state (no driver and a type-1 definition) and its text lines: its
+// seats 8, 9, 0..7 (a held seat whose occupant has a definition, named as the HUD names an
+// entity, the driver seat and the zone's driver marked), then each live, unheld attachable
+// pool-1 entity standing on the zone with a driver and a UseGun occupant, once per gun slot of
+// the zone's definition whose userpoint is the entity's mount bone (its occupant named, the
+// slot weapon's attach text), then the zone's 0x6E wave members ("** name **" for the local
+// player). The weapon text resolves through `gametext`. False without a kernel or a replica
+// runtime.
+// [orig: sub_551450 @0x551450 - the zone walk @0x55156d..0x551624, sub_5A19D0 @0x55164c,
+//  the greyed test @0x551645..0x551673, the category and class @0x55170a / @0x551771, the seat
+//  walk @0x5518b3..0x5519c0, the gunner walk @0x5519db..0x551b7f, the wave members
+//  @0x551b96..0x551c86 (dfx2.exe)]
+// DFX2-41: the DEATH screen's team-list players for THIS client, a title with
+// Title::death_screen_team_lists alone (false for any other, or without a kernel and a replica
+// runtime): per Tab-board row the entity world::deploy_team_lists names (the roster slot the
+// row names, in a session, while it drives a body; else the one the walk held, the local
+// player at first), its team byte as this client holds it, whether it is the local player and
+// its name as the HUD names an entity.
+// [orig: DeathScreen_UpdateTeamLists @0x55040d..0x5505c3 (dfx2.exe)]
+bool deploy_team_list_players(const RoleView &view, std::vector<world::DeployTeamListPlayer> &out);
+
+// The DEATH screen's show / activation writes for THIS client (world::apply_deploy_activation):
+// the permanent-death state of the local player, the session title's table and game-type line,
+// the game type's Overlays label, and BRIEFING's rules and briefing text, built as the CMAP's
+// rules text reads its inputs (none on the bare local role).
+// [orig: HUD_BuildRulesAndBriefingText @0x5b92d0, called from DeathScreen_UpdateUI @0x5534d6]
+// [orig: sub_550690 @0x550b17 (dfx2.exe)]
+world::DeployActivation deploy_activation(const RoleView &view, const hud::GameTextLookup &gametext);
+
+bool deploy_table_zones(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		uint32_t stance_middle, uint32_t stance_bad, const hud::GameTextLookup &gametext,
+		std::vector<world::DeployTableZone> &out);
+
 // The AAS zone status panel's zone rows: the world's zone walk
 // (world/lfp_feed.h) with the role's zone-timer image — the client runtime's
 // 13-DWORD image of the retail shared timer list, present once a 0x6F value
@@ -404,8 +488,9 @@ bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones
 
 // Whether the DEATH screen's shroud shows this main frame (world/
 // deploy_screen_feed.h death_shroud_revealed): the role's deploy-overlay
-// latch, or more than 240 logic ticks since the local player view's death
-// stamp. False without a kernel.
+// latch, or more than the session title's reveal ticks (Jointops.exe's 240
+// without one) since the local player view's death stamp. False without a
+// kernel.
 // [orig: DeathScreen_UpdateShroudReveal @0x554737..0x554752 —
 //  g_DeployScreenActive, g_CurrentTick - g_CameraLerpStartTick]
 bool death_shroud_revealed(const RoleView &view);

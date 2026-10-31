@@ -51,6 +51,9 @@ public:
 	void set_fleet(const hosted::PlacementPolicy &policy) { fleet_ = policy; }
 	// The play zone the static addresses are named in (a user page's addresses).
 	void set_address_zone(std::string zone) { address_zone_ = std::move(zone); }
+	// The serve image the release pins (a user page's servers' server build updates,
+	// hosted_routes.h server_json).
+	void set_serve_image(std::string image) { serve_image_ = std::move(image); }
 	// The deployment's object store, null while hosting is off (an account's delete then queues
 	// no purge for its projects: with no store there are no objects). Before register_routes().
 	void set_store(ObjectStore *store) { store_ = store; }
@@ -63,6 +66,7 @@ private:
 	hosted::PlacementPolicy fleet_;
 	hosted::Capacity sellable(db::Database &db) const { return hosted::sellable_of(hosted::live_placement(db, fleet_)); }
 	std::string address_zone_;
+	std::string serve_image_;
 	ObjectStore *store_ = nullptr;
 };
 

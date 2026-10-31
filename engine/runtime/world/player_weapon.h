@@ -707,6 +707,28 @@ void local_weapon_walk_clears_windup(const World &world, LocalPlayerWeapon &w);
 //  (the start test @0x4E07EF, held @0x4E07F7..0x4E07FC, the clear @0x4E0801, the charge
 //  @0x4E07FE..0x4E085A, WeaponSlot_RequestFire(EquippedSlot, 0x96, charge) @0x4E086F)]
 bool local_weapon_release_fire(World &world, LocalPlayerWeapon &w);
+// A title whose lone gunner holds fire (TitleRules::emplaced_solo_holds_fire, DFX2-37): the local
+// player is a lone gunner (local_rides_solo_turret), so the fire row's release leg requests no
+// throw and its press leg, from a seat other than the Driver's and the Controller's, latches no
+// press.
+// [orig: the twin of Input_HandleActionBinding_0 @0x4DD4C0 (dfx2.exe) - the release leg's
+//  +0x16C @0x4DD904, its def +0x20 @0x4DD90E, `test dword ptr [ecx+58h], 1000h` @0x4DD915,
+//  Entity_CountOccupiedSeats(+0x28) @0x4DD922, `cmp eax, ebx; jle` @0x4DD92A..0x4DD92C (ebx 1
+//  @0x4DD4E6) ahead of WeaponSlot_RequestFire @0x4DD944; the press leg's seat tests 5 / 2
+//  @0x4DDAA9..0x4DDABE, the same test @0x4DDAC0..0x4DDADB ahead of Player_RequestPrimaryFire
+//  @0x4DDB01; Entity_CountOccupiedSeats @0x434E70 (dfx2.exe)]
+bool local_solo_turret_holds_fire(const World &world);
+// The lone gunner: the local player rides (+0x16C) an IsTurret gun (its def's ItemDefAttrib2
+// 0x1000) whose +0x28 carrier counts one occupied seat at most (emplaced_carrier_occupied_seats).
+// A gun with no +0x28 (whose count retail reads through a null pointer) is none, as
+// emplaced_turret_planar_rate's. The fire row's gate (local_solo_turret_holds_fire) and dfx2.exe's
+// lone-gunner panel (Title::hud_lone_gunner_panel) test it alike.
+// [orig: the twin of Input_HandleActionBinding_0 @0x4DD4C0 (dfx2.exe) - the release leg's test
+//  @0x4DD8FE..0x4DD92C] [orig: sub_5BEEA0 @0x5BEEA0 (dfx2.exe) - g_LocalPlayerEntity +0x16C
+//  @0x5BEFBA..0x5BEFC8, its def +0x20 @0x5BEFCA..0x5BEFCF, `test dword ptr [ecx+58h], 1000h`
+//  @0x5BEFD1, Entity_CountOccupiedSeats(+0x28) @0x5BEFDA..0x5BEFDE, `cmp eax, 1; jg`
+//  @0x5BEFE6..0x5BEFE9]
+bool local_rides_solo_turret(const World &world);
 // The reload row's arm at its record's dispatch (inmatch::Role::dispatch_record), on the
 // slot equipped then: with the binocular view down and an equipped weapon (under the pump's
 // own input block but its seat leg: the case has no seat test, and a Driver's or an unarmed

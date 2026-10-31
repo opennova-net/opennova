@@ -6,6 +6,11 @@ class World;
 void emit_stance_change_sound(World &world, uint16_t source, const int32_t pos[3],
     uint8_t &previous, uint8_t stance_bits, uint32_t flags, bool parent_has_definition);
 
+// The character whose head sex Entity_GetProfileSlotSound reads off a player person's avatar
+// blip, `net_id` its spawn's pick and `team` its Team: CharacterTraitsTable::drawn_character, the
+// local player the viewer (DFX2-53, the witness at the table).
+uint16_t player_blip_character(const World &world, uint16_t net_id, uint8_t team);
+
 // Whether a body's sound block reads the anim event word on logic tick `tick`: the NPC updater
 // (org1) on odd ticks, the player body (org2) on even [orig: org1 `and eax,1; jz skip`
 // @0x4bf144-0x4bf156; org2 `test current_tick,1; jnz skip` @0x4b76e6 (var = current_tick

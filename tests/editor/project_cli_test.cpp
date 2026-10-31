@@ -863,11 +863,33 @@ static int test_service_gate_tag_file() {
 	return 0;
 }
 
+// A file whose name a release's command file cannot carry (build.update_name: the stock updater splits a row's
+// fields at spaces and commas [orig: CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE)]): JO:TAC's
+// sounds/Audio Track.wav, an archive entry. A build and an export pack it (the game reads it by its name); the
+// export a release packs (--release, what the service's release build runs) is refused, naming it.
+static int test_release_refuses_unshippable_names() {
+	test_temp::TempDir dir("opennova_project_cli_release_names");
+	const std::string root = dir.file("Game");
+	TEST_EXPECT(run({ "new", root, "--title", "My game", "--game", "jo" }) == 0);
+	TEST_EXPECT(run({ "create-missing", root }) == 0);
+	TEST_EXPECT(test_io::write_text(root + "/sounds/Audio Track.wav", "RIFF"));
+	TEST_EXPECT(run({ "build", root }) == 0);
+	TEST_EXPECT(run({ "export", root }) == 0);
+	TEST_EXPECT(archive_has(root + "/build/export/localres.pff", "Audio Track.wav"));
+	std::string text;
+	TEST_EXPECT(run_capture(dir.file("release.txt"), { "export", root, "--out", dir.file("release"), "--release" }, text) != 0);
+	TEST_EXPECT(text.find("build.update_name") != std::string::npos &&
+	            text.find("sounds/Audio Track.wav") != std::string::npos);
+	TEST_EXPECT(!fs::exists(dir.file("release")));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_usage_errors();
 	failures += test_expansion_project();
 	failures += test_service_gate_tag_file();
+	failures += test_release_refuses_unshippable_names();
 	failures += test_new_status_validate();
 	failures += test_new_expansion();
 	failures += test_validate_pins_the_rows();

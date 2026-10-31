@@ -269,7 +269,7 @@ crow::response FleetRoutes::fleet(const crow::request &req) {
 		std::vector<crow::json::wvalue> servers;
 		if (!no_such_owner) {
 			for (const HostedServer &s : list_fleet_servers(*db_conn, owner, filter, kServersShown))
-				servers.push_back(server_json(*db_conn, s, true));
+				servers.push_back(server_json(*db_conn, s, true, release_.serve_image));
 		}
 		out["servers"] = std::move(servers);
 	} catch (const db::Error &e) {
@@ -294,7 +294,7 @@ crow::response FleetRoutes::server(const crow::request &req, uint64_t id) {
 		db::ReadSnapshot snapshot(*db_conn);
 		const auto s = find_server(*db_conn, path_id(id));
 		if (!s) return json_error(404, "not_found", "no hosted server has this id");
-		crow::json::wvalue e = server_json(*db_conn, *s, true);
+		crow::json::wvalue e = server_json(*db_conn, *s, true, release_.serve_image);
 		put_phase(e, *db_conn, *s, wall_now_s() * 1000, true);
 		std::vector<crow::json::wvalue> events;
 		for (const HostedEvent &ev : list_events(*db_conn, s->id, kEventsShown)) {
@@ -440,11 +440,12 @@ crow::response FleetRoutes::end(const crow::request &req, uint64_t id) {
 }
 
 // POST /api/admin/hosted/update-all — the force of every live server whose
-// pins are behind its products' current trees onto them (product_repository.h
-// request_update_all): body {"product_id"} (optional: the servers of that product
-// , as base or expansion, alone), each marked update_requested for the
-// supervisor's next pass (placed again on the current trees, no restart
-// counted). 400 invalid_json / invalid_field; 202 {"updating": how many}.
+// pins are behind its products' current trees, or whose server build is older
+// than the release's, onto them (hosted_repository.h request_update_all): body
+// {"product_id"} (optional: the servers of that product, as base or expansion,
+// alone), each marked update_requested for the supervisor's next pass (placed
+// again on the current trees and image, no restart counted). 400 invalid_json /
+// invalid_field; 202 {"updating": how many}.
 crow::response FleetRoutes::update_all(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal) return std::move(*caller.refusal);
@@ -456,8 +457,8 @@ crow::response FleetRoutes::update_all(const crow::request &req) {
 		if (body->wrong_type()) return json_error(400, "invalid_field");
 	}
 	try {
-		const size_t updating = request_update_all(*pool_.acquire(), product_id);
-		std::printf("[hosted] update all: %zu server(s) to their games' current data\n", updating);
+		const size_t updating = request_update_all(*pool_.acquire(), product_id, release_.serve_image);
+		std::printf("[hosted] update all: %zu server(s) to their games' current data and server build\n", updating);
 		crow::json::wvalue out;
 		out["updating"] = updating;
 		return json_reply(202, out);

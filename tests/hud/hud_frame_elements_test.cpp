@@ -8,6 +8,7 @@
 //  HUD_DrawWeaponSlotBar @0x599cd0; HUD_DrawWinConditions @0x5ba940;
 //  HUD_RenderAllOverlays @0x5A81CE / HUD_DrawGameplayOverlays @0x5BDE9B;
 //  HUD_DrawEntityLabel @0x5A3CBB..0x5A3DBC; HUD_DrawAmmoIndicator @0x599A90]
+#include <base/title/title.h>
 #include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_math.h>
@@ -58,8 +59,9 @@ void test_game_info(const fnt_font_t *font) {
 	HudFrameState state;
 	state.session.game_type = 0x10001u;
 	state.session.time_limit_minutes = 20;
-	state.session.team_score1 = {100, 250};
-	state.session.team_koth = {3, 0};
+	state.session.teams[1].score1 = 100;
+	state.session.teams[2].score1 = 250;
+	state.session.teams[1].koth_hold = 3;
 	state.session.text.team_names[1] = "J";
 	state.session.text.team_names[2] = "R";
 	state.session.text.in_the_zone = "IZ";
@@ -99,13 +101,13 @@ void test_game_info(const fnt_font_t *font) {
 		const std::vector<GameFontQuad> large = glyphs_on(list, kHudFontSlotLabelLarge);
 		CHECK(large.size() == 2 && large[0].color == half_bright_argb(0x00FF2020u));
 	}
-	state.session.team_score1 = {300, 250};
+	state.session.teams[1].score1 = 300;
 	{
 		const std::vector<GameFontQuad> large =
 				glyphs_on(compiler.compile(state, 1024.0f, 768.0f), kHudFontSlotLabelLarge);
 		CHECK(large.size() == 2 && large[0].color == 0xFF20307Fu);
 	}
-	state.session.team_score1 = {250, 250};
+	state.session.teams[1].score1 = 250;
 	{
 		const std::vector<GameFontQuad> large =
 				glyphs_on(compiler.compile(state, 1024.0f, 768.0f), kHudFontSlotLabelLarge);
@@ -175,6 +177,206 @@ void test_clock(const fnt_font_t *font) {
 	CHECK(glyphs_on(compiler.compile(state, 1024.0f, 768.0f), kHudFontSlotLabelBold).size() == 9);
 	state.declutter_visible[kDeclutterClock] = false;
 	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty());
+}
+
+// DFX2-114, dfx2.exe's GAMEINFO board: under MSNTITLE the game type's label (in a session) and
+// "<mission> (<expansion>)", then one line lower under TRGTCNT the team lines or the leader
+// lines, every line bold at GAMEINFO one '0' height apart in the restamped twin.
+// [orig: HUD_DrawGameTimerOverlay @0x59ABF0 - @0x59ADF7..0x59AEAB, @0x59AEB3..0x59AEEC, TDM
+//  @0x59B2BC, TKOTH @0x59AF0A..0x59B222, the leader lines @0x59B4B3..0x59B70F (dfx2.exe)]
+void test_game_info_board(const fnt_font_t *font) {
+	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+	const opennova::Title *jo = opennova::title_by_code("jo");
+	const opennova::Title *ag = opennova::title_by_code("acidgambit");
+	CHECK(dfx2 != nullptr && dfx2->hud_game_info_board && jo != nullptr &&
+			!jo->hud_game_info_board && ag != nullptr && !ag->hud_game_info_board);
+	if (dfx2 == nullptr) return;
+	HudLayout layout;
+	layout.game_info = {1013, 410, 0, 1, true};
+	layout.zone_info = {1013, 386, 0, 1, true};
+	HudFrameCompiler compiler;
+	configure(compiler, layout, font);
+	HudFrameState state;
+	state.title = dfx2;
+	// The session's CLOCK and TEAMID lines would draw in the bold slot too.
+	state.declutter_visible[kDeclutterClock] = false;
+	state.declutter_visible[kDeclutterTeamId] = false;
+	HudSessionState &s = state.session;
+	s.in_session = true;
+	s.game_type = 0x10000u;
+	s.mission_name = "Isle";
+	s.expansion = "rx";
+	s.text.game_type_label = "TDM";
+	s.text.team_names = {"G", "J", "R", "Y", "V", "?"};
+	s.teams[1].score1 = 12;
+	s.teams[2].score1 = 7;
+	s.team_count = 2;
+	const auto bold = [&]() {
+		return glyphs_on(compiler.compile(state, 1024.0f, 768.0f), kHudFontSlotLabelBold);
+	};
+	{
+		// "TDM", "Isle (rx)", " 12 J", "  7 R", 16 design apart from GAMEINFO's y, all in the
+		// first frame's restamp (the hudpos text colour), not Jointops.exe's prior twin.
+		const std::vector<GameFontQuad> g = bold();
+		CHECK(g.size() == 3 + 9 + 5 + 5);
+		CHECK(g.size() == 22 && g[3].y_top - g[0].y_top == 16.0f &&
+				g[12].y_top - g[3].y_top == 16.0f && g[17].y_top - g[12].y_top == 16.0f);
+		bool colors = !g.empty();
+		for (const GameFontQuad &q : g)
+			colors = colors && q.color == half_bright_argb(layout.hud_text);
+		CHECK(colors);
+	}
+	const float label_y = bold()[0].y_top;
+	// Out of a session no label: the mission line takes GAMEINFO's y; no expansion, no brackets.
+	s.in_session = false;
+	s.expansion.clear();
+	{
+		const std::vector<GameFontQuad> g = bold();
+		CHECK(g.size() == 4 + 5 + 5 && g[0].y_top == label_y && g[4].y_top - label_y == 16.0f);
+	}
+	// MSNTITLE off: the team lines still start one line below GAMEINFO.
+	state.declutter_visible[kDeclutterMsnTitle] = false;
+	{
+		const std::vector<GameFontQuad> g = bold();
+		CHECK(g.size() == 10 && g[0].y_top - label_y == 16.0f);
+	}
+	state.declutter_visible[kDeclutterMsnTitle] = true;
+	// TRGTCNT off: the mission line alone.
+	state.declutter_visible[kDeclutterTrgtCnt] = false;
+	CHECK(bold().size() == 4);
+	state.declutter_visible[kDeclutterTrgtCnt] = true;
+	// TKOTH with four teams: four timers, "18:20 J (3)", "19:50 R", "20:00 Y", "19:59 V".
+	s.game_type = 0x10001u;
+	s.time_limit_minutes = 20;
+	s.teams[1].score1 = 100;
+	s.teams[1].koth_hold = 3;
+	s.teams[2].score1 = 10;
+	s.teams[3].score1 = 0;
+	s.teams[4].score1 = 1;
+	s.team_count = 4;
+	CHECK(bold().size() == 4 + 11 + 7 + 7 + 7);
+	s.team_count = 2;
+	CHECK(bold().size() == 4 + 11 + 7);
+	// The waypoint family draws nothing past the mission line.
+	s.game_type = 0x30020u;
+	CHECK(bold().size() == 4);
+	// Deathmatch: the leader lines one line below the mission line.
+	s.game_type = 0u;
+	s.rows.resize(2);
+	s.rows[0].name = "Ann";
+	s.rows[0].score1 = 5;
+	s.rows[0].slot_id = 1;
+	s.rows[1].name = "Bo";
+	s.rows[1].score1 = 9;
+	s.rows[1].slot_id = 2;
+	s.local_slot = 2;
+	{
+		// B displaced A from the first place; the local row (B) is placed: "  9 Bo" alone.
+		const std::vector<GameFontQuad> g = bold();
+		CHECK(g.size() == 4 + 6 && g[4].y_top - g[0].y_top == 16.0f);
+	}
+	// A null title keeps Jointops.exe's overlay: no TDM lines, no mission line.
+	state.title = nullptr;
+	s.game_type = 0x10000u;
+	CHECK(bold().empty());
+}
+
+// The leader lines' places replace, never shift; the local row follows when unplaced.
+// [orig: HUD_DrawGameTimerOverlay @0x59B4F0..0x59B514, @0x59B61D..0x59B70F (dfx2.exe)]
+void test_game_info_leader_lines() {
+	HudSessionState s;
+	const auto row = [&](const char *name, int16_t score, uint8_t slot, bool spectator) {
+		ScoreboardEntry e;
+		e.name = name;
+		e.score1 = score;
+		e.slot_id = slot;
+		e.spectator = spectator;
+		s.rows.push_back(e);
+	};
+	row("A", 5, 1, false);
+	row("B", 10, 2, false);  // beats place 0's 5: A drops out
+	row("C", 3, 3, false);   // place 1
+	row("D", 50, 4, true);   // a spectator takes no place
+	row("E", -1, 5, false);  // beats no -1 place
+	s.local_slot = 1;
+	std::vector<std::string> lines = game_info_leader_lines(s);
+	CHECK(lines.size() == 3 && lines[0] == " 10 B" && lines[1] == "  3 C" && lines[2] == "  5 A");
+	// A placed local row adds none.
+	s.local_slot = 3;
+	CHECK(game_info_leader_lines(s).size() == 2);
+	// A spectating local row is no follower.
+	s.local_slot = 4;
+	CHECK(game_info_leader_lines(s).size() == 2);
+	// Timed: 60 * T less the score.
+	s.timed = true;
+	s.time_limit_minutes = 20;
+	lines = game_info_leader_lines(s);
+	CHECK(lines.size() == 2 && lines[0] == "19:50 B" && lines[1] == "19:57 C");
+}
+
+// DFX2-82, dfx2.exe's rider lines under the vehicle panel: left-aligned in the bold slot from
+// the silhouette's bottom-left corner, one bold 'W' height a line, half-bright tagcolor_good,
+// the driver's then at most two gunners'; none for Jointops.exe.
+// [orig: HUD_DrawVehicleHealthBars @0x5A3F1B..0x5A3F23, @0x5A4700, @0x5A4711..0x5A4871 (dfx2.exe)]
+void test_vehicle_panel_riders(const fnt_font_t *font) {
+	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+	const opennova::Title *jo = opennova::title_by_code("jo");
+	const opennova::Title *ag = opennova::title_by_code("acidgambit");
+	CHECK(dfx2 != nullptr && dfx2->hud_vehicle_panel_riders && jo != nullptr &&
+			!jo->hud_vehicle_panel_riders && ag != nullptr && !ag->hud_vehicle_panel_riders);
+	if (dfx2 == nullptr) return;
+	HudLayout layout;
+	layout.veh_stance_pos = {100, 500, 0, 0, true};
+	layout.tag_good = 0xFF20C040u;
+	HudFrameCompiler compiler;
+	configure(compiler, layout, font);
+	HudFrameState state;
+	state.mount_slot = 1; // a passenger: the panel's stance arm
+	state.vehicle_panel.shown = true;
+	state.vehicle_panel.silhouette_valid = true;
+	state.vehicle_panel.silhouette_w = 64;
+	state.vehicle_panel.silhouette_h = 40;
+	state.vehicle_panel.anchor_x = 100;
+	state.vehicle_panel.anchor_y = 500;
+	HudVehicleRider driver;
+	driver.name = "Ace";
+	HudVehicleRider gunner;
+	gunner.name = "Bo";
+	gunner.gunner = true;
+	gunner.has_weapon = true;
+	gunner.weapon_text = "MG";
+	HudVehicleRider plain = gunner;
+	plain.name = "Cy";
+	plain.has_weapon = false;
+	HudVehicleRider third = plain;
+	third.name = "Di";
+	state.vehicle_riders = {driver, gunner, plain, third};
+	const auto bold = [&]() {
+		return glyphs_on(compiler.compile(state, 1024.0f, 768.0f), kHudFontSlotLabelBold);
+	};
+	// Jointops.exe's panel draws no line.
+	state.title = jo;
+	CHECK(bold().empty());
+	state.title = dfx2;
+	{
+		// "Ace  (Driver)", "Bo  (MG)", "Cy  (Gunner)": the tags draw no glyph; the fourth rider,
+		// a third gunner, none.
+		const std::vector<GameFontQuad> g = bold();
+		CHECK(g.size() == 13 + 8 + 12);
+		// The corner (100, 500 + 40) on a 1024 x 768 surface, less the half-pixel the glyph
+		// quads take.
+		CHECK(g.size() == 33 && g[0].y_top == 539.5f && g[13].y_top - g[0].y_top == 16.0f &&
+				g[21].y_top - g[13].y_top == 16.0f);
+		CHECK(g.size() == 33 && g[0].x_top_left == 99.5f && g[13].x_top_left == 99.5f &&
+				g[21].x_top_left == 99.5f);
+		bool colors = !g.empty();
+		for (const GameFontQuad &q : g)
+			colors = colors && q.color == half_bright_argb(layout.tag_good);
+		CHECK(colors);
+	}
+	// No silhouette, no panel: no line.
+	state.vehicle_panel.silhouette_valid = false;
+	CHECK(bold().empty());
 }
 
 // THE TEAMID LINE: team-mode session gate, the per-team colours, the A&D
@@ -250,9 +452,9 @@ void test_team_id_line(const fnt_font_t *font) {
 void test_health_bar_death_arm(const fnt_font_t *font) {
 	HudLayout layout;
 	layout.health_rect = {2.0f, 739.0f, 140.0f, 18.0f, true};
-	layout.tag_good = 0xFF00FF00u;
-	layout.tag_middle = 0xFFFFFF00u;
-	layout.tag_bad = 0xFFFF0000u;
+	layout.stance_good = 0xFF00FF00u;
+	layout.stance_middle = 0xFFFFFF00u;
+	layout.stance_bad = 0xFFFF0000u;
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
@@ -260,8 +462,8 @@ void test_health_bar_death_arm(const fnt_font_t *font) {
 	const auto fill_width = [&]() -> float {
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 		for (const HudQuad &q : list.quads)
-			if (q.color == layout.tag_good || q.color == layout.tag_middle ||
-					q.color == layout.tag_bad)
+			if (q.color == layout.stance_good || q.color == layout.stance_middle ||
+					q.color == layout.stance_bad)
 				return q.x1 - q.x0;
 		return -1.0f;
 	};
@@ -282,9 +484,9 @@ void test_health_bar_death_arm(const fnt_font_t *font) {
 void test_health_bar_fill_rounds(const fnt_font_t *font) {
 	HudLayout layout;
 	layout.health_rect = {2.0f, 739.0f, 100.0f, 18.0f, true};
-	layout.tag_good = 0xFF00FF00u;
-	layout.tag_middle = 0xFFFFFF00u;
-	layout.tag_bad = 0xFFFF0000u;
+	layout.stance_good = 0xFF00FF00u;
+	layout.stance_middle = 0xFFFFFF00u;
+	layout.stance_bad = 0xFFFF0000u;
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
@@ -292,7 +494,7 @@ void test_health_bar_fill_rounds(const fnt_font_t *font) {
 	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 	bool seen = false;
 	for (const HudQuad &q : list.quads) {
-		if (q.color != layout.tag_good && q.color != layout.tag_middle && q.color != layout.tag_bad)
+		if (q.color != layout.stance_good && q.color != layout.stance_middle && q.color != layout.stance_bad)
 			continue;
 		seen = true;
 		CHECK(q.x0 == 3.0f && q.x1 == 52.0f);
@@ -303,8 +505,35 @@ void test_health_bar_fill_rounds(const fnt_font_t *font) {
 	state.health_fraction = -0.25f;
 	bool full_good = false;
 	for (const HudQuad &q : compiler.compile(state, 1024.0f, 768.0f).quads)
-		if (q.color == layout.tag_good && q.x0 == 3.0f && q.x1 == 102.0f) full_good = true;
+		if (q.color == layout.stance_good && q.x0 == 3.0f && q.x1 == 102.0f) full_good = true;
 	CHECK(full_good);
+}
+
+// THE DMGBAR FILL'S COLOUR (D-HUD-75): the hudpos stancecolor_good / _middle / _bad words by
+// the 0.75 / 0x6FFF bands, never the tagcolor_* words the friendly tags take; both titles
+// [orig: HUD_DrawHealthBar @0x5a2e50 - g_StanceColorGood @0x5a2f88, g_StanceColorMiddle
+// @0x5a2f90, g_StanceColorBad @0x5a2f34] [orig: HUD_DrawHealthBar @0x5a1880 (@0x5a19b8) (dfx2.exe)].
+void test_health_bar_stance_colours(const fnt_font_t *font) {
+	HudLayout layout;
+	layout.health_rect = {2.0f, 739.0f, 100.0f, 18.0f, true};
+	layout.stance_good = 0xFF102030u;
+	layout.stance_middle = 0xFF405060u;
+	layout.stance_bad = 0xFF708090u;
+	layout.tag_good = 0xFF00FF00u;
+	layout.tag_middle = 0xFFFFFF00u;
+	layout.tag_bad = 0xFFFF0000u;
+	HudFrameCompiler compiler;
+	configure(compiler, layout, font);
+	HudFrameState state;
+	const auto fill_colour = [&](float fraction) -> uint32_t {
+		state.health_fraction = fraction;
+		for (const HudQuad &q : compiler.compile(state, 1024.0f, 768.0f).quads)
+			if (q.filled) return q.color;
+		return 0u;
+	};
+	CHECK(fill_colour(0.9f) == layout.stance_good);
+	CHECK(fill_colour(0.5f) == layout.stance_middle);
+	CHECK(fill_colour(0.2f) == layout.stance_bad);
 }
 
 // THE HUDLS SLOT BAR: the HUDLS_SYSTEM gate, the 6,7,8,9,0 visit packing
@@ -732,10 +961,14 @@ int main() {
 	fnt_font_t font = test_font::uniform_test_font();
 	test_feed_and_power_label_slots(&font);
 	test_game_info(&font);
+	test_game_info_board(&font);
+	test_game_info_leader_lines();
+	test_vehicle_panel_riders(&font);
 	test_clock(&font);
 	test_team_id_line(&font);
 	test_health_bar_death_arm(&font);
 	test_health_bar_fill_rounds(&font);
+	test_health_bar_stance_colours(&font);
 	test_slot_bar(&font);
 	test_objectives_panel(&font);
 	test_no_hud(&font);

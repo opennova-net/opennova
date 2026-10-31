@@ -3,9 +3,10 @@
 - Godot-agnostic, strictly: no Godot/godot-cpp types or includes anywhere under `engine/`.
   Godot binding code lives only in `godot/src/`.
 - No game's own code: engine/ holds the types, the registries and the lookups (`base/title`,
-  `net/protocol`), and every game's rows live in the top-level `games/` (games/CLAUDE.md), which
-  each program installs at its start (`games::install()`). Nothing under engine/ includes
-  `games/` or links `opennova_games`.
+  `net/protocol`, `runtime/world/title_rules.h`), and every game's rows live in the top-level
+  `games/` (games/CLAUDE.md), which each program installs at its start (`games::install()`, the
+  titles and protocols, `opennova_games`; `games::install_rules()` too in a program that runs a
+  match, `opennova_games_rules`). Nothing under engine/ includes `games/` or links either target.
 - Five groups (ADR 0028, ADR 0046 d3): the directories, the CMake build targets (ADR 0029)
   and the first include-path segment (ADR 0040), never C++ namespaces:
   - `base/` — shared substrate and repo plumbing.
@@ -97,8 +98,8 @@
 - Group targets (ADR 0029, ADR 0046): six STATIC group targets, no per-lib ones:
   `opennova_formats` (every formats/ lib, the mission FORMAT lib included, which keeps the
   partition acyclic), `opennova_base` (project, vfs, resource_index, gameprofile, title,
-  pcapio, os_random, proc, version; `project` is a project revision's manifest, shared by the
-  service and the editor, ADR 0069; `title` the Title type and its registry; `version` is
+  pcapio, os_random, os_registry, proc, version; `project` is a project revision's manifest,
+  shared by the service and the editor, ADR 0069; `title` the Title type and its registry; `version` is
   `Version`'s one parse rule and ONE's build, `one_build()`, whose `one_build.cpp` is the one TU
   the CMake stamp compiles into: nothing else carries a version literal of ONE's), `opennova_net`
   (novacrypto, napi, npwire, admin, protocol, update and the novaworld session/gate: the wire),
@@ -194,8 +195,8 @@
   by RESPONSIBILITY (one type per TU pair: the ladder climb, the combat pass, the remote
   anim are responsibilities; "the tail of tick_infantry" is not), never by leg; a TU
   under ~100 lines with one owner folds back into it (ADR 0043). Never bump the baseline.
-  Exception: under the top-level `games/`, a game's title, protocol and rules TUs and an unwitnessed
-  title's one TU stay their own whatever their size (games/CLAUDE.md).
+  Exception: under the top-level `games/`, a game's title, protocol and rules TUs stay their own
+  whatever their size (games/CLAUDE.md).
   Exception: in `engine/editor`, a document type's, a view's, a viewport view's or a session
   operation's own TU pair stays its own whatever its size, its one includer the registry or
   owner that lists it (`documents/document_types.cpp`, `ui/document_views.cpp`, `ui/viewport_views.cpp`;

@@ -14,6 +14,7 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h>
 
 using namespace opennova;
 using namespace opennova::replication;
@@ -43,6 +44,7 @@ FrameUpdate phase0_frame(uint8_t penalty, uint8_t revive, uint8_t hold) {
 void test_sub_block_0_timers_fold_and_retain() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *owned;
+	view.set_protocol(title_protocol("jo"));
 	FrameUpdate first = phase0_frame(7, 120, 3);
 	// The breath samples ride the same sub-block
 	// [orig: NapiNPClientMsg_0x00A @0x430104 -> word_A85B7C].
@@ -137,6 +139,7 @@ std::vector<uint8_t> world_state_load_body(uint8_t game_flags) {
 void test_deploy_overlay_follows_the_host() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *owned;
+	view.set_protocol(title_protocol("jo"));
 	CHECK(!view.state().deploy_overlay_active);
 	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x02));
 	CHECK(view.state().deploy_check_secured_spawn && !view.state().deploy_overlay_active);
@@ -172,6 +175,7 @@ void test_deploy_overlay_follows_the_host() {
 void test_death_menu_open_latch() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *owned;
+	view.set_protocol(title_protocol("jo"));
 	auto take = [&](bool menu_open = false) {
 		return view.state().take_death_menu_open(view.state().deploy_overlay_active, menu_open);
 	};
@@ -202,10 +206,19 @@ void test_death_menu_open_latch() {
 	CHECK(!take());
 	CHECK(!view.state().death_menu_open_latch);
 	// A trigger other than the overlay (the local death) latches the same way.
+	(void)view.state().take_death_menu_close();
 	CHECK(view.state().take_death_menu_open(true, false));
 	CHECK(!view.state().take_death_menu_open(true, false));
+	CHECK(!view.state().take_death_menu_close());
 	CHECK(!view.state().take_death_menu_open(false, false));
 	CHECK(!view.state().death_menu_open_latch);
+	// That clear found the latch up: the close leg ran, once [orig: @0x5cac8e..0x5cac9c]
+	// [orig: Render_ProcessMainSceneFrame @0x5c9c00..0x5c9c0e (dfx2.exe)].
+	CHECK(view.state().take_death_menu_close());
+	CHECK(!view.state().take_death_menu_close());
+	// A clear with no latch up runs none.
+	CHECK(!view.state().take_death_menu_open(false, false));
+	CHECK(!view.state().take_death_menu_close());
 }
 
 // The count of spectator-tip commands the pass queued (replication::
@@ -236,6 +249,7 @@ int hud_blanks(ClientReplicaPipeline &view) {
 void test_world_state_load_blanks_the_hud_only_with_the_death_screen_up() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *owned;
+	view.set_protocol(title_protocol("jo"));
 	FrameUpdate fu;
 	fu.carried_handle = 0xFFFF;
 	fu.health = 150;
@@ -265,6 +279,7 @@ void test_world_state_load_blanks_the_hud_only_with_the_death_screen_up() {
 void test_death_edge_raises_the_spectator_tip() {
 	auto owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *owned;
+	view.set_protocol(title_protocol("jo"));
 	FrameUpdate fu;
 	fu.carried_handle = 0xFFFF;
 	fu.health = 0;

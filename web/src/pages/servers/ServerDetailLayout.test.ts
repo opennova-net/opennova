@@ -11,7 +11,9 @@ import type { HostedListing } from '../../types/hostedServer';
 
 vi.mock('../../api/admin', () => ({ fetchFleetServer: vi.fn(), stopFleetServer: vi.fn() }));
 vi.mock('../../api/hostedServer', () => ({ fetchMyServer: vi.fn(), stopHostedServer: vi.fn() }));
-vi.mock('../../composables/useSession', () => ({ useSession: () => ({ refresh: vi.fn() }) }));
+// Whether the session is an admin's (the owner's page adds Logs for one).
+const session = vi.hoisted(() => ({ admin: false }));
+vi.mock('../../composables/useSession', () => ({ useSession: () => ({ refresh: vi.fn(), isAdmin: { value: session.admin } }) }));
 
 const admin = vi.mocked(fetchFleetServer);
 const adminStop = vi.mocked(stopFleetServer);
@@ -42,6 +44,7 @@ describe('ServerDetailLayout', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    session.admin = false;
     confirm = vi.spyOn(actionReview, 'confirmAction').mockResolvedValue(true);
     admin.mockResolvedValue({ ok: true, value: fleetServer(1, { listing: LISTING }) });
     own.mockResolvedValue({ ok: true, value: hostedServer(1, { listing: LISTING }) });
@@ -84,6 +87,19 @@ describe('ServerDetailLayout', () => {
     expect(page.findAll('.tab-nav a').map((a) => a.text())).toEqual(['Overview', 'Stats', 'Console']);
     const again = page.findAll('a').find((a) => a.text() === 'Start again with these')!;
     expect(again.attributes('href')).toBe('/me/servers/new?from=1');
+  });
+
+  it("adds Logs to the owner's page of an admin's session, the server read as its owner's", async () => {
+    session.admin = true;
+    const page = await mountLayout('owner');
+    expect(own).toHaveBeenCalledWith(1, expect.anything());
+    expect(admin).not.toHaveBeenCalled();
+    expect(page.findAll('.tab-nav a').map((a) => [a.text(), a.attributes('href')])).toEqual([
+      ['Overview', '/me/servers/1'],
+      ['Stats', '/me/servers/1/stats'],
+      ['Console', '/me/servers/1/console'],
+      ['Logs', '/me/servers/1/logs'],
+    ]);
   });
 
   it('stops the server from its header after a confirmation', async () => {

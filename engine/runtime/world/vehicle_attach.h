@@ -32,6 +32,10 @@ struct VehicleSeatOccupancy {
     // its pool/slot before drawing the rider's marker.
     bool rider_resolved = false;
     bool player = false; // retail Flags & 0x100; numbered-seat request eligibility
+    // The rider as this client holds it: the occupant's world handle, or a joiner's decoded
+    // row's (its source's); invalid while unresolved. The vehicle panel's rider lines name it
+    // (vehicle_panel_feed.h vehicle_panel_riders).
+    EntityHandle rider;
 };
 
 // A joiner's remote organics live in its decoded state, outside World pool 0.
@@ -98,13 +102,13 @@ int32_t seat_priority_weight(SeatType type, bool root_seat);
 // children, then the root itself; equal weights retain the first seat. Controller
 // and Driver are root-only; lower weights win: root control/driver 0x2000,
 // Gunner 0x20000, root Passenger 0x200000, child Passenger 0x2000000. A seat
-// occupied by the requester remains eligible.
+// occupied by the requester remains eligible. The occupant's own AI command
+// (its slot's f[37]) filters the seats, whoever calls: 123 passenger seats
+// only, 124 no controller seat (seat_selection_mode_for_command).
 // [orig: Entity_FindBestSeatSlot @0x4351F0]
 bool find_best_vehicle_seat(
         const World &world, EntityHandle root_vehicle, EntityHandle occupant,
-        VehicleSeatSelection &out,
-        SeatSelectionMode mode = SeatSelectionMode::Any,
-        const VehicleOccupancySource *source = nullptr);
+        VehicleSeatSelection &out, const VehicleOccupancySource *source = nullptr);
 
 // Admit a rider at the carrier's spawn anchor, on its deck, or while its
 // saved planar pose differs by at most 16 fixed-point counts and it is grounded.

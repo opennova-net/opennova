@@ -437,6 +437,7 @@ public:
 	void set_widget_popup_open(int, bool) override {}
 	void set_widget_focused(int, bool) override {}
 	void set_widget_rect(int, int, int, int, int) override {}
+	void set_widget_image(int, uint32_t, const std::string &) override {}
 	void set_widget_caret(int, int) override {}
 	int get_widget_caret(int) const override { return 0; }
 	std::string get_widget_text(int) const override { return std::string(); }

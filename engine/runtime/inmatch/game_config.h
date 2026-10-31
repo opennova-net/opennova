@@ -108,6 +108,15 @@ inline uint16_t class_allow_mask_from_words(
 	return mask;
 }
 
+// The BANDWIDTH command's clamp of the per-frame 0x0A byte cap (GameConfig::entity_send_budget),
+// which opennova-serve's --entity-send-budget and a hosted server's settings take as their range.
+// [orig: g_EntitySendBudget @0xC8FC50 - atol / 5 clamped @0x50b884 / @0x50b890]
+inline constexpr int32_t kEntitySendBudgetMin = 100;
+inline constexpr int32_t kEntitySendBudgetMax = 1600;
+// The send-holdoff override's ceiling (GameConfig::send_holdoff_ticks; ours, D-NET-1473): a
+// connection holds a period of at most 255 ticks (clamp_send_holdoff_ticks), 0 per tick.
+inline constexpr uint32_t kSendHoldoffTicksMax = 255;
+
 struct GameConfig {
 	// The title the session runs as (CONTEXT.md "Title"): its player caps (title_player_caps) and
 	// the rules it runs (world::title_rules: its built-in score table, its timers and the knobs the
@@ -171,6 +180,10 @@ struct GameConfig {
 	int32_t connection_speed = 5;
 	int32_t max_friendly_kills = 3;
 	bool allow_ai = true;
+	// Set on the authority: each mission start after a map change runs on the clock the
+	// teardown kept (host_boot.h kept_mission_clock) instead of the BMS header's.
+	// [orig: dword_24D5A00, Game_ApplySessionSettingsToGlobals @0x551E1F; read by
+	//  Game_StartMission @0x5253A1]
 	int32_t time_of_day_continuity = 0;
 	// The session's four charattr restriction words, game.cfg's mp_No* (no host
 	// screen control sets them): each set one makes the authority zero and
@@ -495,7 +508,7 @@ struct GameConfig {
 	// @0x530A60 copies row+300..+452]
 	// Absent selects GameType_CreateDefaultSettings for game_type. A parsed or
 	// explicitly supplied row is present even when every value is zero.
-	std::optional<std::array<int32_t, 39>> session_status_stat_values;
+	std::optional<world::ScoreValues> session_status_stat_values;
 	// score.ini FIELD rows for the selected game type, in file order. Empty
 	// means the match should use GameType_CreateDefaultSettings' retail schema.
 	// The second byte is preserved rather than normalized because it is emitted
@@ -518,7 +531,7 @@ struct GameConfig {
 	// The server / mission / player fields the reactive NapiNPServerMsg_0x0NN reply handlers read
 	// (server_message_dispatch.h). The replicated-entity / spawn-point inputs are NOT here — the
 	// faithful world-stream burst sources those from World + bms::File.
-	// The mission header's name [orig: dword_A761D4, the header's mission_name]; the
+	// The mission header's name [orig: g_MissionHeaderName, the header's mission_name]; the
 	// MISSIONNAME a session advertises is session_mission_name's (the mission text's
 	// title first, server_message_dispatch.h).
 	std::string mission_name = "AS - Dormant Volcano Isle";
@@ -558,7 +571,8 @@ struct GameConfig {
 	// g_LanMode 1..4 -> 12/6/4/3; the loopback's per-tick cadence is the
 	// NapiNPServer_UpdateHoldoffTicks @0x4c5f40 else-branch @0x4c5f63/@0x4c5f69,
 	// not a GetSendHoldoffTicks case].
-	// `send_holdoff_ticks` is an explicit override; absent means select the
+	// `send_holdoff_ticks` is an explicit override (D-NET-1473: a hosted server's owner sets it,
+	// 0..kSendHoldoffTicksMax); absent means select the
 	// witnessed value from session_channel and lan_mode. Retail's invalid
 	// lanmode fallback is mode 2 (period 6). Loopback connections themselves
 	// remain per-tick and do not consume this remote-peer setting.
@@ -566,14 +580,55 @@ struct GameConfig {
 	uint32_t lan_mode = 1;
 	std::optional<uint32_t> send_holdoff_ticks;
 
-	// The live player-slot limit: max_players plus the dedicated host's own
-	// slot (host_player_slot_limit). The slot table is allocated with it, the
-	// BMS placements are gated by it and the lobby publishes it, less that
-	// slot for a dedicated host; nothing advertises or admits against it.
-	// [orig: dword_24D211C, Game_ApplySessionSettingsToGlobals
-	//  @0x551B20..0x551B48; Server_InitNewRoundState @0x51C976;
-	//  Server_InitPlayerSlotSystem @0x4243B2; Entity_SpawnFromBMSRecord @0x40EA86]
+	// The cfg block's network connect type (game.cfg `networkconnecttype`: 1 as the
+	// NovaWorld screen writes it and by default, 2 as the LAN screen writes it), which
+	// the session apply's player ceiling reads (host_player_slot_limit).
+	// [orig: networkConnectType_480 - Config_SetDefaults @0x54D1D4,
+	//  UI_InitLANMultiplayerScreen @0x5569E1 (2), UI_InitNovaWorldHostScreen @0x556AA0 (1);
+	//  Game_ApplySessionSettingsToGlobals @0x551B3B]
+	int32_t network_connect_type = 1;
+
+	// The session create's player-slot limit: max_players plus the dedicated
+	// host's own slot (host_player_slot_limit), the create's cap, server type
+	// and network connect type.
+	// The slot table is allocated with it (total_player_slot_capacity); the live
+	// limit starts as it (live_slot_limit).
+	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState
+	//  @0x5695B3 (the store @0x51C976), then Game_ApplySessionSettingsToGlobals @0x5695B8
+	//  (@0x551B20..0x551B48)]
 	uint32_t player_slot_limit() const;
+
+	// The limit a map change's mission start recomputed from the cfg block as it then stood
+	// (stage_next_mission), unset until a map change: a cap or server type the host screen's
+	// read or the host file wrote into the block since the create moves it (no remote admin
+	// SET writes either), while the session's cap and its slot table stay the create's.
+	// [orig: the block's writers HostDialog_ReadSettings @0x555940 (from
+	//  UI_HandleHostSessionStart @0x556E36, HostDialog_StartSession @0x558764 and the host
+	//  screen's BACK callback HostDialog_OnBackReadSettings @0x5571FA) and
+	//  ServerConfig_ApplyHostSetting @0x4A6000 (the host file; its one caller,
+	//  Game_HostMultiplayerSession @0x4A65A0, has none: retail's dead /HOST path, ours
+	//  opennova-serve's host file); CAdminServer_HandleSetCommand @0x405A60 has no cap or
+	//  server-type key] [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals
+	//  @0x524662 under the first-load flag @0x52465E (the store @0x551B2B / @0x551B35, the
+	//  ceiling @0x551B3B..0x551B48); Server_InitNewRoundState has no map-change caller (its
+	//  callers: Game_InitSubsystems @0x4A6D76, CNapiGameSession_FullDestroy @0x4C9780,
+	//  SinglePlayer_StartMission @0x561C23, CNapiGameSession_BuildAndCreateSession @0x5695B3)]
+	std::optional<uint32_t> mission_slot_limit;
+
+	// The live player-slot limit (dword_24D211C): the map change's when one ran, else the
+	// create's. The BMS placements are gated by it, the lobby publishes it and the mission
+	// request block names it, less that slot for a dedicated host, and the status page draws
+	// its rows to it; nothing advertises or admits against it.
+	// [orig: dword_24D211C - Entity_SpawnFromBMSRecord @0x40EA86, Lobby_UpdateServerInfo
+	//  @0x4FEB03, Client_BuildMissionDataRequestBlock @0x51E897, Server_DrawStatusScreen
+	//  @0x50A49A] One reader more sizes the listen host's own client roster from it at every
+	// mission start, at most 251 rows [orig: Server_InitPlayerSlotSystem @0x4243A0 (from
+	// Game_StartMission @0x5248C1) - the read @0x4243B2, PlayerSlotTable_Reallocate @0x434B90];
+	// ours sizes no client roster (replication::ClientState::roster's fixed rows) and rebuilds
+	// the host's client runtime at each bring-up, as the reallocation clears it (D-NET-1474,
+	// PERMANENT).
+	// (Server_BuildStatusString @0x4FDEC0 reads it too, and has no caller.)
+	uint32_t live_slot_limit() const { return mission_slot_limit.value_or(player_slot_limit()); }
 
 	// The fixed player-slot table: the slot limit alone, a spectator taking an
 	// ordinary row (D-NET-401). A limit past 65, which retail's allocator refuses

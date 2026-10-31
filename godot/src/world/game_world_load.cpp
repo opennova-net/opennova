@@ -100,9 +100,8 @@ Ref<ResourceRoot> GameWorld::resolve_root(const String &p_dir) {
 // Mount `dir` as the runtime resource root: PFF archives are the packed game
 // data, the `/exp <name>` flag (or persisted setting) layers an expansion over
 // the base, loose files override the archives only under the `/d` dev flag,
-// and the `/game <code>` flag (or persisted setting, default the default title's) selects the
-// SCR decode key so demo data decodes correctly. Emits load_failed and
-// returns null on a bad root.
+// and the `/game <code>` flag (or persisted setting, default the default title's) names the
+// title the root's session runs as. Emits load_failed and returns null on a bad root.
 // The expansion here is the LOCAL choice, which is only authoritative for
 // single-player and for hosting. A joiner's is the HOST's, learned after this
 // mount and reconciled by SessionDrive::reconcile_join_expansion before any
@@ -1552,6 +1551,7 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	if (runtime->get_sim().is_null()) {
 		const int setup_error = runtime->get_setup_error();
 		const bool process_exit = runtime->is_process_exit();
+		const int32_t process_exit_code = runtime->process_exit_code();
 		const bool lan_bind_failure = opts->get_net_transport() == "lan";
 		const int bind_port = opts->get_bind_port();
 		// Free before emitting: a load_failed handler may synchronously tear
@@ -1563,9 +1563,10 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 		runtime_id_ = ObjectID();
 		memdelete(runtime);
 		if (process_exit) {
-			// The session create ended the process (exit code 0): no load
-			// failure to show, the shell exits.
-			emit_signal(kSignalProcessExitRequested, 0);
+			// The load ended the process (the session create's mpreset, exit
+			// code 0, or a load warning box's Cancel, -1): no load failure to
+			// show, the shell exits.
+			emit_signal(kSignalProcessExitRequested, process_exit_code);
 		} else if (lan_bind_failure) {
 			emit_signal(kSignalLoadFailed, vformat("host start: could not bind LAN UDP port %d", bind_port));
 		} else {

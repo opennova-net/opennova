@@ -103,7 +103,8 @@ struct ProjectDocument {
 bool is_novaworld_key(const std::string &key);
 
 // Where a project keeps things, derived from its root. `cache_dir` and everything
-// under it is disposable and self-ignored (`.opennova/.gitignore`).
+// under it is the machine's own and self-ignored (`.opennova/.gitignore`), and disposable but
+// for `novaworld/<host>/`, each service's base: lose that and a pull has nothing to merge over.
 struct ProjectPaths {
 	std::string root;
 	std::string project_file;

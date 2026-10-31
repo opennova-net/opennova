@@ -8,6 +8,7 @@
 #include <base/io/strutil.h>
 #include <base/title/title.h>
 #include <base/version/version_line.h>
+#include <base/project/project_manifest.h> // is_expansion_code
 #include <editor/project/expansion_name.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
@@ -61,6 +62,7 @@ void recent_row(Workspace &workspace, const std::string &root, const ProjectView
 		if (!details->expansion.empty())
 			what += ", as the expansion " + details->expansion +
 			        (details->builds_on.empty() ? std::string() : " on " + details->builds_on);
+		if (!details->novaworld.empty()) what += ", on NovaWorld";
 	}
 	what += (what.empty() ? "" : "   ") + root;
 	ImGui::TextDisabled("%s", ui_kit::fit_middle(what, ImGui::GetContentRegionAvail().x).c_str());
@@ -69,7 +71,10 @@ void recent_row(Workspace &workspace, const std::string &root, const ProjectView
 	ImGui::BeginDisabled(!forgets);
 	if (ImGui::SmallButton("Forget") && forgets) workspace.request(request::forget_recent(root));
 	ImGui::EndDisabled();
-	ui_kit::tooltip("Take it off this list; the project stays where it is.");
+	ui_kit::tooltip(!found ? "Take it off this list."
+	                : details && !details->novaworld.empty()
+	                        ? "Take it off this list. The folder stays, and the NovaWorld list still opens it."
+	                        : "Take it off this list; the project stays where it is.");
 	ImGui::PopID();
 }
 
@@ -80,7 +85,7 @@ void draw_from_store(Workspace &workspace) {
 	const SessionView &v = workspace.view();
 	if (!v.novaworld.available) return;
 	ImGui::Spacing();
-	ImGui::SeparatorText("Get a project from NovaWorld");
+	ImGui::SeparatorText("Sync a project from NovaWorld");
 	draw_novaworld_activity(workspace); // a get, a base game's project made, what NovaWorld is asked
 	draw_novaworld_projects(workspace);
 	if (v.novaworld.signed_in) return;
@@ -234,17 +239,12 @@ bool base_from_install(const NovaWorldView &novaworld, const std::string &key) {
 	return !project || novalogic_project(*project);
 }
 
-// A mod's short name as NovaWorld takes one (the service's expansion code): 1 to 8 of a-z and 0-9.
-bool short_name_ok(const std::string &name) {
-	return !name.empty() && name.size() <= 8 &&
-	       std::all_of(name.begin(), name.end(), [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); });
-}
-
-// The short name a mod named `title` is offered, as the website offers it: its letters and digits, small, at most 8.
+// The short name a mod named `title` is offered, as the website offers it: its letters and digits, small, at most
+// project::kMaxExpansionCodeChars.
 std::string short_name_for(const std::string &title) {
 	std::string name;
 	for (const char c : title) {
-		if (name.size() == 8) break;
+		if (name.size() == project::kMaxExpansionCodeChars) break;
 		if (c >= 'A' && c <= 'Z') name += char(c - 'A' + 'a');
 		else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) name += c;
 	}
@@ -368,9 +368,12 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	// says (its kind, its game, its name and short name) is not asked again.
 	const bool set_up = !form.novaworld.empty();
 	if (set_up) {
-		ui_kit::clipped_text("For NovaWorld project " + form.novaworld,
-		                     "Make the project writes " + form.novaworld + " in the project's file: the folder is then its "
-		                     "working copy, ready to push.");
+		std::string named = form.novaworld;
+		for (const RemoteProject &project : novaworld.projects)
+			if (project.key == form.novaworld && !project.title.empty()) named = project.title;
+		ui_kit::clipped_text("For NovaWorld project " + named,
+		                     "Make the project ties the project's file to it: the folder is then its working copy, ready "
+		                     "to push.");
 		ImGui::SameLine();
 		if (ImGui::SmallButton("x##novaworld")) set("novaworld", io::JsonValue::make_string(""));
 		ui_kit::tooltip("Makes the project for no NovaWorld project: every field the form's again.");
@@ -432,7 +435,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 			}
 			ui_kit::tooltip("The NovaWorld game the mod changes. Make the project makes the mod on its project: the one on this "
 			                "computer, or one made beside the mod first (a retail game's imported from your game install, "
-			                "any other got from NovaWorld).");
+			                "any other synced from NovaWorld).");
 			// Its short name offered from its name, as the website offers it, until one is typed.
 			if (name_field() && !short_typed_)
 				set("expansion", io::JsonValue::make_string(short_name_for(title_.sent())));
@@ -463,7 +466,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 	}
 	// A mod's short name, as the game's rule takes it (its own form's, or one a set up project names).
 	if (why.empty() && form.making == Making::Mod) {
-		const std::string problem = !short_name_ok(form.expansion)
+		const std::string problem = !project::is_expansion_code(form.expansion)
 		                                    ? std::string("A short name is up to 8 lowercase letters and digits.")
 		                                    : expansion_name_problem(form.expansion, ExpansionNameUse::Own);
 		if (!problem.empty()) {
@@ -582,11 +585,14 @@ bool NewProjectForm::draw(Workspace &workspace) {
 			const std::string made_key = novaworld_key_for(form.title, player);
 			put_key_.follow(form.put_key);
 			ImGui::Indent();
-			if (ImGui::InputTextWithHint("Key", made_key.c_str(), put_key_.text, sizeof(put_key_.text),
-			                             ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank))
-				set("put_key", io::JsonValue::make_string(put_key_.sent()));
 			const char *key_rule = player ? "Up to 11 of A-Z, 0-9 and _, without \"QQ\"." : "Up to 16 of A-Z, 0-9 and _.";
-			ui_kit::tooltip("How NovaWorld and every copy of the project name it (left empty, " + made_key + "). " + key_rule);
+			if (ImGui::TreeNodeEx("Details", ImGuiTreeNodeFlags_NoAutoOpenOnLog)) {
+				if (ImGui::InputTextWithHint("Key", made_key.c_str(), put_key_.text, sizeof(put_key_.text),
+				                             ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank))
+					set("put_key", io::JsonValue::make_string(put_key_.sent()));
+				ui_kit::tooltip("How NovaWorld and every copy of the project name it (left empty, " + made_key + "). " + key_rule);
+				ImGui::TreePop();
+			}
 			ui_kit::quiet_text("Who gets it");
 			ImGui::SameLine();
 			if (ImGui::RadioButton("Public", form.put_public) && !form.put_public) set("put_public", io::JsonValue::make_bool(true));

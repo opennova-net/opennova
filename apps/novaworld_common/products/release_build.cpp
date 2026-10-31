@@ -10,6 +10,7 @@
 #include "program/catalog_repository.h"
 #include "tree_files.h"
 
+#include <base/gameprofile/player_files.h>
 #include <base/io/cp1252.h>
 #include <base/io/file_io.h>
 #include <base/io/json.h>
@@ -18,6 +19,7 @@
 #include <base/proc/child_process.h>
 #include <base/project/project_manifest.h>
 #include <base/version/one_build.h>
+#include <formats/update/command_file.h>
 #include <formats/update/update_wizard.h>
 #include <net/protocol/protocol.h>
 
@@ -136,6 +138,20 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 	}
 	if (plan.product.product_name.empty()) {
 		why = product->display_name + " names no updater product (a product name)";
+		return false;
+	}
+	// The command file's [HEADER] as pack_command names it, refused before any export by the rule
+	// opennova-update-tool's writer refuses it by: what UPDATE.EXE's header reader would not read
+	// back (update::command_header_refusal).
+	update::CommandFile header;
+	header.product = plan.product.product_name;
+	header.version = release.version;
+	if (plan.product.expansion_code.empty())
+		header.exe = plan.product.product_exe;
+	if (const update::CommandFileProblem problem = update::command_file_problem(header);
+			!problem.ok()) {
+		why = product->display_name + "'s command file cannot name it: " +
+				update::command_file_problem_words(problem);
 		return false;
 	}
 	if (!source_of(db, *product, release.revision, plan.project, why))
@@ -380,8 +396,10 @@ bool Build::export_to(
 						  gate_tag_file },
 					"the export of " + what + "'s base", why))
 		return false;
+	// The export the package is built from (--release): a file it ships under a name the stock updater's
+	// command file cannot carry refuses it here (build.update_name), named, before the package is built.
 	std::vector<std::string> argv = { tools_.project_tool, "export", laid.dir, "--out", out,
-		"--gate-tag-file", gate_tag_file };
+		"--gate-tag-file", gate_tag_file, "--release" };
 	if (!version_file.empty())
 		argv.insert(argv.end(), { "--version-file", version_file });
 	return tool(argv, "the export of " + what, why);
@@ -456,7 +474,8 @@ Step Build::run_app(std::string &why) {
 // Every release is whole (ADR 0067 d6, amended 2026-10-25: the jointops and dfx2 zips install
 // their game into an empty folder from it), with the removals since `previous` ("" for none),
 // `from` being an empty folder. A game's export
-// record and the runtime's own files in a game's folder are left out (kRuntimeFiles); an app's
+// record, the runtime's own files in a game's folder (kRuntimeFiles) and the player's files
+// (gameprofile::player_files) are left out; an app's
 // package carries every file of its build, its update.exe and revupdat.exe among them.
 std::vector<std::string> Build::pack_command(
 		const std::string &from, const std::string &to, const std::string &previous) const {
@@ -468,9 +487,15 @@ std::vector<std::string> Build::pack_command(
 	if (game)
 		argv.insert(argv.end(), { "--exclude", "export.json" });
 	argv.push_back("--full");
-	if (game)
+	if (game) {
 		for (const char *name : kRuntimeFiles)
 			argv.insert(argv.end(), { "--exclude", name });
+		// The player's files (gameprofile::player_files: game.cfg, the saves, the NovaWorld cookie
+		// jar the game rewrites, the logs): no game release ships one, and none takes the REMOVE an
+		// earlier release's row of one would carry.
+		for (const gameprofile::PlayerFile &file : gameprofile::player_files())
+			argv.insert(argv.end(), { "--exclude", file.name });
+	}
 	if (!ds.expansion_code.empty()) {
 		argv.insert(argv.end(), { "--expansion", ds.expansion_code + "=" + ds.command_file });
 	} else {

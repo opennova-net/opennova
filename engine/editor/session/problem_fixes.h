@@ -34,7 +34,8 @@ namespace opennova::editor {
 // kind (requirement.wrong_kind): Import the game's own (the import dialog replaces), or
 // Rename... that file (Create and Use would be refused while the name is taken). A file
 // name the archives cannot take or another file has (asset.name.too_long,
-// asset.name.duplicate, build.name_unstorable): Rename... it (Files asks the new name). A
+// asset.name.duplicate, build.name_unstorable), or a release cannot carry (build.update_name):
+// Rename... it (Files asks the new name). A
 // missing symbol (a string id, a style variable, a menu screen or window, a weapon, ammo
 // or item, a particle effect, a user point): Open the file where it belongs, the one its
 // scope names, the one that defines its kind's other names, or the table of its kind the

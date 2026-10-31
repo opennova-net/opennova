@@ -795,7 +795,7 @@ bool decode_tag60_mission_strings(const ProtocolMessage &message,
 // MISSIONNAME: the stock Co-op selector's map file; every other mode the
 // mission text's [info]/title, else (an empty title) the header's name
 // (GameConfig::mission_name). [orig: Game_SerializeMissionInfoToDataStream
-// @0x523620 -- the coop arm @0x523758, [info]/title @0x5237df, dword_A761D4
+// @0x523620 -- the coop arm @0x523758, [info]/title @0x5237df, g_MissionHeaderName
 // @0x52380d]
 bool run_tag60_mission_name_selects_by_game_type() {
 	struct Case {
@@ -1937,11 +1937,13 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		}
 		inmatch::NapiNPConnection &connection =
 				ctx.np_protocol.connection_list.front();
+		inmatch::ServerDispatchInputs inputs;
+		inputs.server_ctx = &ctx;
 		const std::vector<ProtocolMessage> join_tail =
 				inmatch::dispatch_session_replies(
 						ctx.config, connection,
 						{make_protocol_message(0x37, {})}, 105,
-						ctx.np_protocol.connection_list, &w);
+						ctx.np_protocol.connection_list, &w, inputs);
 		if (!expect(
 					join_tail.size() == 1 && join_tail[0].tag == 0x64,
 					"0x37 publishes the mission metadata alone (the first roster is the scoreboard clock's)")) {
@@ -1955,6 +1957,12 @@ bool run_expansion_join_reasons_and_tlv_order() {
 	inmatch::GameConfig config;
 	config.expansion = "jox01";
 	config.expansion_version_checksum = 55;
+	// The build gate reads the host's protocol, its context's; a fresh context runs no
+	// session leg.
+	inmatch::NapiNPServerCtx ctx;
+	ctx.np_protocol.identity = &kJo;
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &ctx;
 	auto drive = [&](std::vector<uint8_t> payload, uint32_t reason) {
 		std::vector<inmatch::NapiNPConnection> roster(1);
 		auto &conn = roster.front();
@@ -1964,7 +1972,7 @@ bool run_expansion_join_reasons_and_tlv_order() {
 		replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);
 		conn.link.transport = &transport;
 		auto replies = inmatch::dispatch_session_replies(config, conn,
-				{make_protocol_message(0x00, std::move(payload))}, 1, roster, nullptr);
+				{make_protocol_message(0x00, std::move(payload))}, 1, roster, nullptr, inputs);
 		conn.link.transport = nullptr;
 		if (reason == 0) return expect(replies.size() == 1 && replies[0].tag == 0,
 				"ordered JOIN fields acknowledge the final compatible expansion and CRC");
@@ -2487,10 +2495,12 @@ bool run_admission_spawn_and_roster_keep_retail_packet_boundaries() {
 		return false;
 	}
 
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &ctx;
 	const std::vector<ProtocolMessage> join_tail = inmatch::dispatch_session_replies(
 			ctx.config, *remote,
 			{make_protocol_message(0x47, {}), make_protocol_message(0x37, {})},
-			7, ctx.np_protocol.connection_list, &world);
+			7, ctx.np_protocol.connection_list, &world, inputs);
 	const ProtocolMessage *team_state = find_reply(join_tail, 0x75);
 	if (!expect(
 			team_state != nullptr &&
@@ -3205,6 +3215,12 @@ bool run_spectator_admission_codes_match_retail() {
 		bool spectator_latched = false;
 		DisconnectEvent event;
 	};
+	// The build gate reads the host's protocol, its context's; a fresh context runs no
+	// session leg.
+	inmatch::NapiNPServerCtx gate_ctx;
+	gate_ctx.np_protocol.identity = &kJo;
+	inmatch::ServerDispatchInputs gate_inputs;
+	gate_inputs.server_ctx = &gate_ctx;
 	auto drive_join_gate = [&](const inmatch::GameConfig &config,
 			std::vector<inmatch::NapiNPConnection> &roster, size_t index) {
 		JoinGate out;
@@ -3215,7 +3231,7 @@ bool run_spectator_admission_codes_match_retail() {
 		const std::vector<ProtocolMessage> replies =
 				inmatch::dispatch_session_replies(config, conn,
 						{make_protocol_message(0x00, join_payload)},
-						5, roster, nullptr);
+						5, roster, nullptr, gate_inputs);
 		out.valid = true;
 		for (const ProtocolMessage &reply : replies)
 			if (reply.tag == s2c::INIT) out.got_init = true;

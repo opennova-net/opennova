@@ -80,6 +80,7 @@ struct Rig {
 		world.rules.mp_session = true;
 		world.rules.projectile_authority = true;
 		world.ai.is_authority = true;
+		ctx->np_protocol.identity = opennova::title_protocol("jo");
 		w::WeaponTable &table = world.tables.weapons;
 		table.ammo_class_names = {"CLASS_556MM"};
 		table.ammo_class_caps = {1000};

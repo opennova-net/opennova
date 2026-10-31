@@ -704,6 +704,19 @@ static int test_refusals() {
 			io::write_file_atomic(notes + "/README.txt", std::string("no project here\n"), error));
 	TEST_EXPECT(rig.push("LOOSE", notes, 0, "notes") == 1);
 	const int64_t no_set = rig.release("LOOSE", 1, "1.0");
+	// A product whose name, its command file's PRODUCT (an admin's game carries no product name of its
+	// own), UPDATE.EXE's header reader would end at its ';' [orig: IniFile_GetValue @ 0x403b90
+	// (UPDATE.EXE)]: refused before any export, by the rule the update tool's writer refuses it by.
+	hosted::NewProduct semicolon = loose;
+	semicolon.display_name = "Semi; colon";
+	semicolon.key = "SEMI";
+	semicolon.updater_login = "SEMI";
+	semicolon.command_file = "SEMI.CMD";
+	int64_t semicolon_id = 0;
+	TEST_EXPECT(hosted::create_product(rig.db, semicolon, semicolon_id, { std::nullopt, true }) ==
+			hosted::ProductOutcome::Ok);
+	TEST_EXPECT(rig.push("SEMI", notes, 0, "notes") == 1);
+	const int64_t header = rig.release("SEMI", 1, "1.0");
 	const Rig::OwnGame own = rig.own_game();
 	TEST_EXPECT(rig.push(own.key, notes, 0, "notes") == 1);
 	const int64_t no_project = rig.release(own.key, 1, "1.0");
@@ -711,6 +724,10 @@ static int test_refusals() {
 	const auto first = hosted::find_release(rig.db, no_set);
 	TEST_EXPECT(first && first->status == hosted::ReleaseStatus::Invalid &&
 			first->error.find("names no updater product") != std::string::npos);
+	const auto unnamed = hosted::find_release(rig.db, header);
+	TEST_EXPECT(unnamed && unnamed->status == hosted::ReleaseStatus::Invalid &&
+			unnamed->error.find("the PRODUCT value \"Semi; colon\" has a ';'") != std::string::npos &&
+			unnamed->build_log.find("$ ") == std::string::npos);
 	const auto second = hosted::find_release(rig.db, no_project);
 	TEST_EXPECT(second && second->status == hosted::ReleaseStatus::Invalid &&
 			second->error.find("the export of " + own.key + " r1") != std::string::npos &&

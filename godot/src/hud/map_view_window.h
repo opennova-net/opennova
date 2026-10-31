@@ -89,6 +89,11 @@ public:
 	void push_map_event(int p_event, const Vector2i &p_position, int p_buttons, int p_wheel);
 	// One logic tick of the pan ease (the per-main-frame menu handler).
 	void advance_frame();
+	// The DEATH SPAWNPOINTS_TABLE's press on a zone's row (MenuDriver.deploy_table_click's x):
+	// the pan target that zone less the local player, the zoom ease set (engine
+	// world::deploy_table_pan_target, hud::DeathMapView::table_pan). False when the index names
+	// no zone the world holds.
+	bool pan_to_spawn_zone(int p_index);
 
 	// THE CMAP USER-WAYPOINT LEGS (the COMMAND kind; hud_map_view.h and
 	// inmatch/client_squad.cpp). A CREATE_WAYPOINTS left press with fewer than

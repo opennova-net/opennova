@@ -317,7 +317,7 @@ bool MenuRenderCheck::step(const ProjectCheckInput &input, uint64_t budget, bool
 		kept.identity = menu->identity();
 		kept.load_generation = menu->load_generation();
 		kept.revision = menu->revision();
-		render_menu_(kept, *menu, files, vars);
+		render_menu_(kept, *menu, files, vars, menu_font_scale_of(validation.project.target_game));
 		++rendered_;
 		moved_ = true;
 		return false; // a menu a step
@@ -343,7 +343,7 @@ bool MenuRenderCheck::step(const ProjectCheckInput &input, uint64_t budget, bool
 }
 
 void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, const FileSource &files,
-                                   const std::map<std::string, std::string> &vars) {
+                                   const std::map<std::string, std::string> &vars, float font_scale) {
 	menu.screens.clear();
 	menu.dependencies.clear();
 	menu.findings.clear();
@@ -353,7 +353,7 @@ void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, cons
 		Screen screen;
 		screen.row = row->id;
 		screen.render = std::make_unique<MenuScreenRender>();
-		if (screen.render->configure(document, row->id, files, vars) == MenuScreenStatus::Ready) {
+		if (screen.render->configure(document, row->id, files, vars, font_scale) == MenuScreenStatus::Ready) {
 			const menu::MenuFrameCompiler &compiler = screen.render->compiler();
 			const std::vector<menu::MenuDependency> &read = screen.render->assets().dependencies();
 			menu.dependencies.insert(menu.dependencies.end(), read.begin(), read.end());

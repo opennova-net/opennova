@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <runtime/hud/feed_format.h>
+#include <runtime/hud/score_fanfare.h> // ScoreTone (the 0x81 fanfare arms)
 #include <net/npwire/entity_class.h> // EntityClass
 #include <net/npwire/ingame_decode.h> // EndRoundStats (the 0x56 board)
 #include <net/npwire/wire_handle.h>
@@ -464,6 +465,15 @@ struct ClientEntityState {
 	int16_t spawn_location_index = 0;
 	uint8_t spawn_ref_num = 0;
 	uint8_t spawn_sub_type = 0;
+	// entity+0xB0 of a pool-1 row: the 0x0D record's field-0x1000 byte (the host brain's
+	// +0x318 sound-latch byte), sign-extended, 0 when the record omits it (the slot's memset) and
+	// on a 0x18 row (its store of 0). The dword a person row holds its lean in (lean_angle); the
+	// joiner's CHel / cpln class init reads it (world::Entity::VehicleMotorState::spawn_sound_latch).
+	// [orig: NapiNPClientMsg_0x00D @0x432C40 - `movsx ecx, cl; mov [ebx+0B0h], ecx`
+	//  @0x4331B7..0x4331BA; NapiNPClientMsg_FullEntitySpawn @0x433780 - +0xB0 = 0 @0x433E5C]
+	// [orig: NapiNPClientMsg_0x00D @0x430250 - @0x4307C7..0x4307CA;
+	//  NapiNPClientMsg_FullEntitySpawn @0x4311C0 - @0x43189C (dfx2.exe)]
+	int32_t spawn_sound_latch = 0;
 	// The full 0x18 repair carries these fields in addition to pool-load data.
 	uint32_t spawn_owner_connection_id = 0;
 	uint8_t spawn_player_class = 0;
@@ -1185,6 +1195,50 @@ struct ClientScoreFeedback {
 	int32_t score = 0;
 	int32_t delta = 0;
 	uint32_t updates = 0;
+	// The samples whose delta sounds the EXP_FANFARE ladder (hud::score_delta_tone over the
+	// state's exp_fanfare), and the last one's tone: dfx2.exe's 0x81 starts its EXPPOINTS fade
+	// there, by the tone's tier (hud/hud_exp_points.h, DFX2-36); the tone's sound is the
+	// embedder's (Simulation::take_score_feedback).
+	// [orig: NapiNPClientMsg_ScoreDeltaSound @0x42BEF0 -> @0x422350..0x4223C5 (dfx2.exe) - the
+	//  delta @0x422363..0x422367, the EXP_FANFARE gate @0x422369..0x42237B, the tiers
+	//  @0x422380..0x4223BE, HUD_StartExpPointsFade called @0x4223C5]
+	uint32_t fanfare_arms = 0;
+	hud::ScoreTone fanfare_tone = hud::ScoreTone::None;
+};
+
+// The S2C 0x80 / 0x82 score tracker, the words after the 0x81 score in the same block (a misnamed
+// CineTracker in both IDBs): an 0x80 names its node and clears the record; an 0x82 under a named
+// node finds the node's entry (or appends one, its start the value) and stores the value as the
+// entry's time and the gain since its start as its elapsed, then copies the entry's start, time and
+// elapsed out and marks the record valid. dfx2.exe's EXPPOINTS element draws `elapsed` and `time`
+// as its session and total lines while it is valid (DFX2-36). No stock host sends either message
+// (ingame_message_catalog.h). A nonzero S2C 0x05 game start clears the node, valid, start and
+// elapsed too (ClientReplicaPipeline::apply_game_start_signal). The words are the session's: the
+// session's teardown clears them, no mission start does, so they outlive a reload (ClientRuntime::
+// begin_mission_reload carries them). The entries (the node's start, time and elapsed) are the
+// process's: nothing but the 0x82 writes them, so they outlive every session (the pipeline's
+// score-tracker store, inmatch::ClientProcessState).
+// [orig: NapiNPClientMsg_0x080 @0x42A070 - the node @0x42A08B, the clears @0x42A090..0x42A09C;
+//  NapiNPClientMsg_0x082 @0x42A0E0 -> CineTracker_RecordTimeEntry @0x422410 - the node test
+//  @0x422413..0x422418, the walk @0x422420..0x422443, a found entry's elapsed @0x4224E3..0x4224F4,
+//  the append @0x422445..0x4224BD, the time @0x4224C3, valid @0x4224C6, the copies
+//  @0x4224CF..0x4224DA; Client_ResetGameSessionState @0x42C9F0 - +0..+0x18 cleared
+//  @0x42CA12..0x42CA36, the array not, called from Game_InitSubsystems @0x4A6D7B and
+//  CNapiGameSession_FullDestroy @0x4C9785; the array +0x1C / +0x20 (dword_A8231C / dword_A82320)
+//  written past its initializer by the record alone] [orig: the twins @0x42BEC0, @0x42BF20,
+//  @0x422260 (dfx2.exe)]
+struct ClientScoreTrackerEntry {
+	int32_t node = 0;
+	int32_t start = 0;
+	int32_t time = 0;
+	int32_t elapsed = 0;
+};
+struct ClientScoreTracker {
+	int32_t node = 0;     // +0x08
+	bool valid = false;   // +0x0C
+	int32_t start = 0;    // +0x10
+	int32_t time = 0;     // +0x14: the total line's
+	int32_t elapsed = 0;  // +0x18: the session line's
 };
 
 // Latest requester-specific deploy-wave panel plus a valid-packet edge. The
@@ -1438,7 +1492,7 @@ struct ClientState {
 	uint32_t session_rules_flags = 0;
 	// The session's KOTH time limit in minutes, the 0x08 record's second rule
 	// dword — a joiner's GAMEINFO team timers read this copy where the
-	// authority reads its own g_KothLimitMinutes [orig: dword_A821C0, stored
+	// authority reads its own g_KothLimitMinutes [orig: g_JoinerTimeLimitMinutes, stored
 	// @0x428218; read by HUD_DrawGameTimerOverlay @0x59CCEB, and by the Tab
 	// board's KOTH countdowns @0x423281 / @0x423a58].
 	int32_t session_time_limit_minutes = 0;
@@ -1450,7 +1504,7 @@ struct ClientState {
 	// @0x4244ac].
 	uint16_t flag_carrier_handle = 0xFFFF;
 	// The talk keys' reset hold: raised by S2C 0x25 on a client, lowered by
-	// the next S2C 0x0F [orig: dword_24C195C — NapiNPClientMsg_GameReset
+	// the next S2C 0x0F [orig: g_RoundResetHold — NapiNPClientMsg_GameReset
 	// @0x42284e, NapiNPClientMsg_0x00F @0x42e396; read by the talk arms
 	// @0x49b9ad].
 	bool round_reset_hold = false;
@@ -1569,12 +1623,26 @@ struct ClientState {
 	//  peer, `xor g_ServerStatusViewActive, 1`); the close's branch @0x5CAC81..0x5CAC9C].
 	bool take_death_menu_open(bool triggered, bool menu_open) {
 		if (!triggered) {
+			death_menu_closed_on_clear = death_menu_closed_on_clear || death_menu_open_latch;
 			death_menu_open_latch = false;
 			return false;
 		}
 		if (menu_open || death_menu_open_latch) return false;
 		death_menu_open_latch = true;
 		return true;
+	}
+	// The close leg's run: a clear that found the latch up, whose branch runs ahead of the
+	// screens' close the title's own call there (dfx2.exe's loadout apply, Jointops.exe's empty
+	// stub), until the embedder takes it. A clear with no latch up runs no close leg.
+	// [orig: Render_ProcessMainSceneFrame @0x5cac8e (the latch test), nullsub_137 @0x5cac97,
+	//  Game_CloseInGameScreens @0x5cac9c]
+	// [orig: Render_ProcessMainSceneFrame @0x5c9000 - the latch test @0x5c9c00, sub_550BA0
+	//  @0x5c9c09, Game_CloseInGameScreens @0x5c9c0e (dfx2.exe)]
+	bool death_menu_closed_on_clear = false;
+	bool take_death_menu_close() {
+		const bool ran = death_menu_closed_on_clear;
+		death_menu_closed_on_clear = false;
+		return ran;
 	}
 	std::uint8_t respawn_penalty_seconds = 0;
 	std::uint8_t local_revive_seconds = 0;
@@ -1624,6 +1692,7 @@ struct ClientState {
 	ClientEndRoundStats end_round;
 	ClientScoreboard scoreboard;
 	ClientScoreFeedback score_feedback;
+	ClientScoreTracker score_tracker;
 	// The host VarList's EXP_FANFARE u16 (lo/hi thresholds of the 0x81 tone
 	// ladder, hud/score_fanfare.h) [orig: g_SessionVarExpFanfare @0x24d5a10].
 	uint16_t exp_fanfare = 0;

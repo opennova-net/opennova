@@ -174,12 +174,19 @@ inline bool gt_is_waypoint() { return game_type::is_waypoint_family(g_game_type)
 inline bool gt_is_objective() { return game_type::is_objective(g_game_type); }
 
 // The session's protocol: `--game <code>`'s, else the one the PN the capture's first
-// session hello names (wire::handshake_protocol), else JO's. A DFX2 host's 0x0A objective
-// body carries the co-op checkpoint after the four values (DFX2-1).
+// session hello names (wire::handshake_protocol). A DFX2 host's 0x0A objective body
+// carries the co-op checkpoint after the four values (DFX2-1), so an objective game's
+// frame decodes only under a known protocol: with none, the decode is refused and the
+// tool exits (no other title's layout stands in).
 const Protocol *g_protocol = nullptr;
 bool g_protocol_fixed = false; // --game given: the handshake does not override it
 inline FrameObjectiveBody gt_objective_body() {
-	return frame_objective_body(gt_is_objective(), protocol_in_match(g_protocol).objective_checkpoint);
+	if (!gt_is_objective()) return FrameObjectiveBody::None;
+	if (g_protocol == nullptr) {
+		std::fprintf(stderr, "opennova-wire: the capture's protocol is unknown: pass --game <code>\n");
+		std::exit(1);
+	}
+	return frame_objective_body(true, protocol_in_match(g_protocol).s2c_0a.objective_checkpoint);
 }
 void learn_protocol(const std::vector<uint8_t> &raw) {
 	if (g_protocol_fixed || g_protocol != nullptr) return;
@@ -1287,12 +1294,9 @@ void print_tag_6c(const std::vector<uint8_t> &body) {
 
 void print_tag_81(const std::vector<uint8_t> &body) {
 	ScoreDeltaSound score;
-	if (!decode_score_delta_sound(body.data(), body.size(), score)) {
-		std::printf("        [0x81] score-delta-sound decode failed (need 4 B got %zu)\n",
-		            body.size());
-		return;
-	}
-	std::printf("        [0x81] score-delta-sound score=%d\n", int(score.score));
+	(void)decode_score_delta_sound(body.data(), body.size(), score); // a short body reads 0
+	std::printf("        [0x81] score-delta-sound score=%d%s\n", int(score.score),
+	            body.size() < 4 ? " (short body, read as 0)" : "");
 }
 
 void print_tag_2b_c2s(const std::vector<uint8_t> &body) {
@@ -1601,6 +1605,19 @@ void coverage_emit() {
 	            covered, partial, backlog.size());
 }
 
+// --dialect: the in-match dialect by message (net/protocol/protocol.h kProtocolDialect): each
+// message a protocol's sheet shapes, its catalog label, the knob and the catalog row
+// (docs/titles/dfx2-vs-jo-re.md §8) it answers to, one 'DIALECT' line per pair. A protocol's
+// values are its games/<code>/<code>_protocol.cpp's.
+int dialect_emit() {
+	for (const ProtocolDialectRow &row : kProtocolDialect) {
+		const char *label = tag_label(row.dir, row.tag);
+		std::printf("DIALECT %c 0x%02x %-24s %s (%s)\n", row.dir, unsigned(row.tag),
+				label ? label : "?", row.knob, row.row);
+	}
+	return 0;
+}
+
 bool g_hexdump_mode = false; // --hexdump: raw payload hex for EVERY message (byte-diff two captures)
 
 void print_payload(char dir, int frame, int tag,
@@ -1817,7 +1834,7 @@ int run_handshake(const char *path) {
 } // namespace
 
 int main(int argc, char *argv[]) {
-	opennova::games::install(); // every game's titles, protocols and rules (games/games.h)
+	opennova::games::install(); // every game's titles and protocols (games/games.h)
 	const char *path = nullptr;
 	const char *items_path = nullptr;
 	std::set<int> tag_filter;
@@ -1825,6 +1842,7 @@ int main(int argc, char *argv[]) {
 	bool handshake_mode = false;
 	bool histogram_mode = false;
 	bool coverage_mode = false;
+	bool dialect_mode = false;
 	bool sequencing_mode = false;
 	bool parity_events_mode = false;
 	bool scenario_events_mode = false;
@@ -1850,6 +1868,8 @@ int main(int argc, char *argv[]) {
 		} else if (std::strcmp(a, "--coverage") == 0) {
 			coverage_mode = true;
 			histogram_mode = true; // coverage joins the histogram tally with the catalog
+		} else if (std::strcmp(a, "--dialect") == 0) {
+			dialect_mode = true;
 		} else if (std::strcmp(a, "--sequencing") == 0) {
 			sequencing_mode = true;
 			stream_mode = true;
@@ -1877,10 +1897,11 @@ int main(int argc, char *argv[]) {
 			path = a;
 		}
 	}
+	if (dialect_mode) return dialect_emit();
 	if (!path || !*path) {
 		std::fprintf(stderr,
 		             "usage: opennova-wire <capture-path> [--items <items.def>] [--stream] "
-		             "[--histogram] [--coverage] [--sequencing] [--parity-events] "
+		             "[--histogram] [--coverage] [--dialect] [--sequencing] [--parity-events] "
 		             "[--scenario-events] "
 		             "[--max-frames N] [--skip N] [--game <code>] "
 		             "[0xNN ...]\n"
@@ -1890,6 +1911,9 @@ int main(int argc, char *argv[]) {
 		             "TOTAL line\n"
 		             "       --coverage ranks the DECODE BACKLOG: tags present in "
 		             "the capture with no structured decoder yet, by volume\n"
+		             "       --dialect (no capture) lists the in-match dialect: one "
+		             "'DIALECT <dir> 0x<tag> <name> <knob> (<row>)' line per message a "
+		             "protocol's sheet shapes\n"
 		             "       --sequencing emits one machine-readable 'PACKET "
 		             "frame=.. dir=.. session=.. sid=.. seq=.. ack=.. flags=.. "
 		             "records=.. tags=..' line per decrypted 0x43/0x83 datagram\n"
@@ -1908,7 +1932,8 @@ int main(int argc, char *argv[]) {
 		             "       --hexcap-max N widens the per-dump byte cap (default 48)\n"
 		             "       --game names the session's title (jo, dfx2), whose edits\n"
 		             "       to the in-match bodies the decode follows; default: the\n"
-		             "       PN of the capture's first session hello, else jo\n"
+		             "       PN of the capture's first session hello; an objective\n"
+		             "       game's 0x0A with neither is refused\n"
 		             "       --items gives a JO items.def "
 		             "(plaintext or SCR-encrypted with the JO/DFX2 key)\n"
 		             "       so type_ids in 0x0D/0x20 records show as names\n");
@@ -1939,7 +1964,7 @@ int main(int argc, char *argv[]) {
 		// --parity-events: the canonical trace (parity_trace.h) drives its own
 		// decoder over the same datagrams.
 		wire::ParityTracePrinter parity_printer(stdout);
-		wire::ParityTraceBuilder parity_trace(parity_printer, &g_item_class);
+		wire::ParityTraceBuilder parity_trace(parity_printer, &g_item_class, g_protocol);
 		auto decode_and_print = [&](const net::PcapDatagram &pk) {
 			frame_timestamps[pk.frame_index] = pk.ts_nanos;
 			learn_protocol(pk.payload);
@@ -1972,10 +1997,12 @@ int main(int argc, char *argv[]) {
 		auto on_dg = [&](const net::PcapDatagram &pk) -> bool {
 			++seen;
 			if (skip_frames > 0 && seen <= skip_frames) return true;
-			if (parity_events_mode)
+			if (parity_events_mode) {
 				parity_trace.push(pk);
-			else
+				if (!parity_trace.error().empty()) return false; // the trace refused the capture
+			} else {
 				decode_and_print(pk);
+			}
 			printed_through = pk.frame_index;
 			if (max_frames > 0 && (seen - skip_frames) >= max_frames) {
 				stopped_early = true;
@@ -1984,6 +2011,11 @@ int main(int argc, char *argv[]) {
 			return true;
 		};
 		if (!net::stream_pcap_udp_file(path, on_dg)) {
+			if (!parity_trace.error().empty()) {
+				std::fprintf(stderr, "opennova-wire: %s: pass --game <code>\n",
+				             parity_trace.error().c_str());
+				return 1;
+			}
 			if (!stopped_early) {
 				std::fprintf(stderr, "FAILED to stream pcap %s\n", path);
 				return 1;
@@ -2051,8 +2083,13 @@ int main(int argc, char *argv[]) {
 	CaptureDecodeResult decoded = decode_capture(caps);
 	if (parity_events_mode) {
 		wire::ParityTracePrinter parity_printer(stdout);
-		wire::ParityTraceBuilder parity_trace(parity_printer, &g_item_class);
+		wire::ParityTraceBuilder parity_trace(parity_printer, &g_item_class, g_protocol);
 		parity_trace.push_decoded(decoded, frame_timestamps);
+		if (!parity_trace.error().empty()) {
+			std::fprintf(stderr, "opennova-wire: %s: pass --game <code>\n",
+			             parity_trace.error().c_str());
+			return 1;
+		}
 		decoded.messages.clear();
 	} else if (sequencing_mode) {
 		for (const CapturedSessionPacket &packet : decoded.session_packets)

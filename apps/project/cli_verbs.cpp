@@ -914,6 +914,7 @@ int run_export(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	auto request = editor::request::export_project(out, args.has("--rehash"));
 	request.gate_tag_file = from_here(args.value("--gate-tag-file"));
 	request.version_file = from_here(args.value("--version-file"));
+	request.release = args.has("--release");
 	const JsonValue outcome = send(cli, request);
 	JsonValue answer;
 	if (!answer_of(cli, row, answer)) return 2;
@@ -1242,6 +1243,9 @@ constexpr CliOption kNewTerrainOptions[] = { { "--heightmap", "an image" }, { "-
 	                                         { "--water", "world units" },  { "--layout", "island or tiled" } };
 constexpr CliOption kBuildOptions[] = { { "--out", "a directory" }, { "--rehash" },
 	{ "--gate-tag-file", "an encoded server lobby file" }, { "--version-file", "an expansion's version.txt" } };
+constexpr CliOption kExportOptions[] = { { "--out", "a directory" }, { "--rehash" },
+	{ "--gate-tag-file", "an encoded server lobby file" }, { "--version-file", "an expansion's version.txt" },
+	{ "--release" } };
 
 using V = CliVerb;
 
@@ -1348,7 +1352,7 @@ constexpr VerbRow kRows[] = {
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"import\", \"operation\"]}")
 	        .row,
-	Verb(V::Export, "export", "<dir> [--out <dir>] [--rehash] [--gate-tag-file <file>] [--version-file <file>]",
+	Verb(V::Export, "export", "<dir> [--out <dir>] [--rehash] [--gate-tag-file <file>] [--version-file <file>] [--release]",
 	     kExportRequests, kDir, run_export,
 			"build the project, then copy the build into its export folder as what ships "
 			"(default:\n"
@@ -1362,8 +1366,10 @@ constexpr VerbRow kRows[] = {
 			"export is missing or older than it; --gate-tag-file supplies NovaWorld's encoded "
 			"lobby\n"
 			"file for both exports, --version-file an expansion's version.txt NovaWorld generated,\n"
-			"for its own export alone (--json: the state query's import and operation)")
-	        .takes(kBuildOptions)
+			"for its own export alone; --release exports what a release packs, refused for a file\n"
+			"whose name the stock updater's command file cannot carry (build.update_name)\n"
+			"(--json: the state query's import and operation)")
+	        .takes(kExportOptions)
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"import\", \"operation\"]}")
 	        .row,

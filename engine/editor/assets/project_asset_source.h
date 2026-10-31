@@ -18,15 +18,14 @@ namespace opennova::editor {
 // the subfolders and the import outputs under `.opennova/` included; an import source
 // (a `.png` with an `.import` record) and an archive are not, as the built game never
 // sees them. A name the scan lists twice resolves to its first entry (the scan reports
-// the duplicate). A payload
-// decodes the way a document's does (the target game's SCR policy). An open document
+// the duplicate). A payload decodes the way a document's does. An open document
 // stands in for its file, with the bytes its Save would write (serialized once per state: its
 // identity, load and revision); one that cannot serialize leaves the file in place. A document
 // that stands in for another file too (DocumentBase::stand_in_paths, S25: a heightmap image's for
 // the .cpt its import bakes) is read for it the same way, with serialize_stand_in's bytes.
 class ProjectAssetSource : public FileSource {
 public:
-	void set_scan(const std::string &root, const AssetScan &scan, const std::string &target_game);
+	void set_scan(const std::string &root, const AssetScan &scan);
 	void set_open(const std::vector<std::shared_ptr<const DocumentBase>> &open);
 	// An expansion project's base game (assets/install_view.h base_game_files: its files as the game mounts them
 	// below the expansion's pair), read for a name the project's files lack, as the game falls back to the archives
@@ -76,7 +75,6 @@ private:
 	const Serialized *serialized_(const Open &open, const std::string &relative) const;
 
 	std::string root_;
-	int scr_policy_ = 0;
 	std::map<std::string, Entry> files_; // normalized logical name
 	std::map<std::string, Open> open_;   // project-relative path
 	mutable std::map<std::string, Serialized> serialized_by_path_;

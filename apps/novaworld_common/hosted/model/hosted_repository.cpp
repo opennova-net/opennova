@@ -6,7 +6,6 @@
 #include <net/novaworld/host_repository.h>
 
 #include <array>
-#include <stdexcept>
 #include <utility>
 
 namespace opennova::novaworld_server::hosted {
@@ -42,12 +41,15 @@ HostedServer row_to_server(const db::Row &r) {
 	s.service_user_id = r.as_int(2);
 	s.state = state_from_name(r.as_text(3).value_or("")).value_or(State::Failed);
 	HostedSettings &st = s.settings;
-    io::JsonValue document;
-    std::string field, error;
-    if (!io::json_parse(r.as_text(4).value_or("{}"), document, error) ||
-            !read_settings_document(document, st, field, error))
-        throw std::runtime_error("invalid stored hosted server configuration");
-    s.settings_revision = r.as_int(5).value_or(1);
+	// A configuration that does not read leaves this row's settings the defaults and says why:
+	// one row never stops the rows read with it (the supervisor fails that server alone).
+	io::JsonValue document;
+	std::string field, error;
+	if (!io::json_parse(r.as_text(4).value_or("{}"), document, error))
+		s.settings_error = "the stored document is no JSON: " + error;
+	else if (!read_settings_document(document, st, field, error))
+		s.settings_error = field.empty() ? error : field + ": " + error;
+	s.settings_revision = r.as_int(5).value_or(1);
 	s.provider = r.as_text(6).value_or("");
 	s.container = r.as_text(7).value_or("");
 	s.machine_address = r.as_text(8).value_or("");
@@ -632,17 +634,19 @@ void set_tree_pins(db::Database &db, int64_t server_id, int64_t base_tree_id,
 			{ BindValue(server_id), BindValue(base_tree_id), db::int_or_null(expansion_tree_id) });
 }
 
-UpdateOutcome request_update(db::Database &db, int64_t server_id) {
+UpdateOutcome request_update(db::Database &db, int64_t server_id, const std::string &serve_image) {
 	db::Transaction tx(db);
 	const auto rows = db.query(
 			std::string("SELECT update_requested, (") + kLiveServerSql + ") AS live, (" + kOutdatedSql +
-					") AS outdated FROM hosted_servers s WHERE id = $1 FOR NO KEY UPDATE;",
+					") AS outdated, serve_image FROM hosted_servers s WHERE id = $1 FOR NO KEY UPDATE;",
 			{ BindValue(server_id) });
 	if (rows.empty())
 		return UpdateOutcome::NotFound;
 	const bool requested = rows.front().as_int(0).value_or(0) != 0;
 	const bool live = rows.front().as_int(1).value_or(0) != 0;
-	const bool outdated = rows.front().as_int(2).value_or(0) != 0;
+	const std::string pinned = rows.front().as_text(3).value_or("");
+	const bool outdated = rows.front().as_int(2).value_or(0) != 0 ||
+			(!pinned.empty() && !serve_image.empty() && pinned != serve_image);
 	if (!live)
 		return UpdateOutcome::NotLive;
 	if (requested) {
@@ -657,15 +661,23 @@ UpdateOutcome request_update(db::Database &db, int64_t server_id) {
 	return UpdateOutcome::Requested;
 }
 
-size_t request_update_all(db::Database &db, std::optional<int64_t> product_id) {
+size_t request_update_all(db::Database &db, std::optional<int64_t> product_id, const std::string &serve_image) {
+	// Behind on its data, or pinned to another server build than the fleet's (server_build_outdated).
 	std::string sql = std::string("UPDATE hosted_servers s SET update_requested = true, updated_at = now() WHERE ") +
-			kLiveServerSql + " AND NOT update_requested AND (" + kOutdatedSql + ")";
+			kLiveServerSql + " AND NOT update_requested AND ((" + kOutdatedSql +
+			") OR ($1::text <> '' AND s.serve_image <> '' AND s.serve_image <> $1::text))";
+	std::vector<BindValue> binds{ BindValue(serve_image) };
 	if (product_id) {
-		db.exec(sql + " AND (s.product_id = $1 OR s.expansion_id = $1);", { BindValue(*product_id) });
-	} else {
-		db.exec(sql + ";");
+		sql += " AND (s.product_id = $2 OR s.expansion_id = $2)";
+		binds.push_back(BindValue(*product_id));
 	}
+	db.exec(sql + ";", binds);
 	return static_cast<size_t>(db.changes());
+}
+
+bool server_build_outdated(const HostedServer &s, const std::string &serve_image) {
+	return is_live(s.state) && !s.serve_image.empty() && !serve_image.empty() &&
+			s.serve_image != serve_image;
 }
 
 bool server_outdated(db::Database &db, int64_t server_id) {

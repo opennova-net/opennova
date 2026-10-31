@@ -36,6 +36,7 @@ protected:
 	static void _bind_methods();
 
 public:
+	ControlsModel();
 	opennova::controls::BindingSet &native_bindings() { return bindings_; }
 	const opennova::controls::BindingSet &native_bindings() const { return bindings_; }
 
@@ -184,7 +185,7 @@ public:
 	String display_text_for_token(const String &p_token) const;
 	// The same display string for the binding record read BY ACTION CODE (the
 	// start-up re-lay puts the row dispatching `code` at record `code`; engine
-	// controls action_for_code): "" when no row carries the code (the zero
+	// controls Catalog::for_code): "" when no row carries the code (the zero
 	// record), " *" appended when the row's flags carry 0x200. The HUDLS key
 	// label reads record 200 + category.
 	String display_text_for_action_code(int p_code) const;

@@ -6,6 +6,7 @@
 // SP-only gate and sibling close, the respawn reset, the death-screen force,
 // the friendly-tags and verbose rows, the help / map legend / briefing
 // windows and the escape close chain.
+#include <base/title/title.h>
 #include <runtime/controls/controls.h>
 #include <runtime/hud/hud_toggles.h>
 
@@ -232,6 +233,54 @@ void test_death_screen_and_friendly_tags() {
 	CHECK(std::strcmp(hud_toggles_cycle_friendly_tags(s), "STRMISC_FRIENDLYTAGS_FARBRIEF") == 0);
 	CHECK(std::strcmp(hud_toggles_cycle_friendly_tags(s), "STRMISC_FRIENDLYTAGS_FULL") == 0);
 	CHECK(s.friendly_tag_mode == FriendlyTagMode::kFull);
+}
+
+// The friendly-tags cycle under the title (base/title/title.h section 5.3 carries the witness):
+// dfx2.exe's steps past mode 1 to mode 2 while the death screen is up and posts its own lines for
+// modes 1 and 2; Jointops.exe's steps 0 -> 1 and posts every mode's Misc key.
+void test_friendly_tags_title() {
+	const opennova::Title &jo = *opennova::title_by_code("jo");
+	const opennova::Title &dfx2 = *opennova::title_by_code("dfx2");
+	HudToggleState s;
+	s.friendly_tag_mode = FriendlyTagMode::kOff;
+	HudKeyPoll k = keys();
+	k.friendly_tags = true;
+	k.death_screen = true;
+	k.friendly_tags_skip_mode_1_on_death_screen = jo.friendly_tags_skip_mode_1_on_death_screen;
+	CHECK(hud_toggles_dispatch(s, k) == kFriendlyTagsCycled);
+	CHECK(s.friendly_tag_mode == FriendlyTagMode::kFarBrief);
+	s.friendly_tag_mode = FriendlyTagMode::kOff;
+	k.friendly_tags_skip_mode_1_on_death_screen = dfx2.friendly_tags_skip_mode_1_on_death_screen;
+	CHECK(hud_toggles_dispatch(s, k) == kFriendlyTagsCycled);
+	CHECK(s.friendly_tag_mode == FriendlyTagMode::kFull);
+	// Out of the death screen dfx2.exe's cycle reaches mode 1 too.
+	s.friendly_tag_mode = FriendlyTagMode::kOff;
+	k.death_screen = false;
+	CHECK(hud_toggles_dispatch(s, k) == kFriendlyTagsCycled);
+	CHECK(s.friendly_tag_mode == FriendlyTagMode::kFarBrief);
+
+	const GameTextLookup gametext = [](const char *section, const char *key,
+			const char *fallback) -> std::string {
+		if (std::strcmp(section, "Misc") != 0) return fallback;
+		return std::string("<") + key + ">";
+	};
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kOff, jo) == "<STRMISC_FRIENDLYTAGS_OFF>");
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kFarBrief, jo) ==
+			"<STRMISC_FRIENDLYTAGS_FARBRIEF>");
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kFull, jo) == "<STRMISC_FRIENDLYTAGS_FULL>");
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kBrief, jo) ==
+			"<STRMISC_FRIENDLYTAGS_BRIEF>");
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kOff, dfx2) == "<STRMISC_FRIENDLYTAGS_OFF>");
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kFarBrief, dfx2) == "Friendly Tags: On");
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kFull, dfx2) == "Friendly Tags: Smart");
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kBrief, dfx2) ==
+			"<STRMISC_FRIENDLYTAGS_BRIEF>");
+	// A missing key posts nothing; a literal needs no table.
+	const GameTextLookup none = [](const char *, const char *, const char *fallback) {
+		return std::string(fallback);
+	};
+	CHECK(friendly_tag_toast(none, FriendlyTagMode::kOff, dfx2).empty());
+	CHECK(friendly_tag_toast(none, FriendlyTagMode::kFull, dfx2) == "Friendly Tags: Smart");
 }
 
 // The row mask the embedder samples maps onto the poll's key bits, and each
@@ -467,15 +516,17 @@ void test_head_drops_at_the_event_edge() {
 	hud_toggles_poll(s, k);
 	k.dotsize = true;
 	CHECK(hud_toggles_poll(s, k) == kDotsizeCycled);
-	std::size_t count = 0;
-	const opennova::controls::ActionDef *defs = opennova::controls::catalog(&count);
+	// Every row's code is its title's catalog row of its token: Jointops.exe's, but dfx2.exe's
+	// Objectives and EmoteToggle rows.
+	const opennova::controls::Catalog &dfx2 =
+			opennova::controls::title_catalog(*opennova::title_by_code("dfx2"));
 	for (int row = 0; row < kHudToggleRowCount; ++row) {
-		const char *token = nullptr;
-		for (std::size_t i = 0; i < count; ++i)
-			if (defs[i].id == hud_toggle_row_catalog_row(row)) token = defs[i].token;
-		CHECK(token != nullptr && std::strcmp(token, hud_toggle_row_token(row)) == 0);
+		const bool dfx2_row = row == kRowObjectives || row == kRowEmoteToggle;
+		const opennova::controls::ActionDef *def =
+				(dfx2_row ? dfx2 : opennova::controls::default_catalog()).for_code(hud_toggle_row_code(row));
+		CHECK(def != nullptr && std::strcmp(def->token, hud_toggle_row_token(row)) == 0);
 	}
-	CHECK(hud_toggle_row_catalog_row(kHudToggleRowCount) == -1);
+	CHECK(hud_toggle_row_code(kHudToggleRowCount) == -1);
 }
 
 } // namespace
@@ -949,6 +1000,99 @@ static void test_row_tokens_are_the_catalog_rows() {
 		CHECK(hud_toggle_row_token(row)[0] != '\0');
 }
 
+// DFX2-96: dfx2.exe's Objectives row (dispatch 58) flips the briefing panel's window out of a
+// session, then the keeping init, and re-dispatches Briefing in one; the respawn init, the
+// escape chain (after the briefing window, before the objectives) and the mission reset close
+// it. Out of a session its I window draws the how-to where Jointops.exe's draws the briefing
+// panel, which dfx2.exe's draws for the Objectives window.
+// [orig: Input_HandleActionBinding @0x49AD50 case 58 @0x49B6DB..0x49B70F; Game_InitRespawnState
+//  @0x49939B; the escape leg @0x49B2EA; HUD_DrawGameplayOverlays @0x5BCF74..0x5BCFB5 (dfx2.exe)]
+void test_objectives_window() {
+	CHECK(std::strcmp(hud_toggle_row_token(kRowObjectives), "Objectives") == 0 &&
+			hud_toggle_row_code(kRowObjectives) == 58);
+	CHECK(std::strcmp(hud_toggle_row_token(kRowEmoteToggle), "EmoteToggle") == 0 &&
+			hud_toggle_row_code(kRowEmoteToggle) == 59);
+	HudKeyPoll rows;
+	hud_key_poll_set_rows(rows, (1u << kRowObjectives) | (1u << kRowEmoteToggle));
+	CHECK(rows.objectives && rows.emote_toggle && !rows.briefing);
+	HudToggleState s;
+	s.help_open = true;
+	HudKeyPoll k = keys();
+	k.objectives = true;
+	CHECK(hud_toggles_poll(s, k) == (kBriefingToggled | kOverlayWindowsCleared));
+	CHECK(s.briefing_panel_open && !s.help_open && s.briefing_mode == 0);
+	k.objectives = false;
+	hud_toggles_poll(s, k);
+	k.objectives = true;
+	hud_toggles_poll(s, k); // the second press closes it
+	CHECK(!s.briefing_panel_open);
+	k.objectives = false;
+	hud_toggles_poll(s, k);
+	// In a session it is the Briefing row's.
+	k.in_session = true;
+	k.objectives = true;
+	CHECK((hud_toggles_poll(s, k) & kBriefingToggled) != 0);
+	CHECK(!s.briefing_panel_open && s.briefing_mode == kBriefingModeOpen);
+	// The I window: Jointops.exe's draws the briefing panel out of a session, dfx2.exe's the
+	// how-to, either's the end-game screen in one. The briefing panel's own word is not the
+	// I window's: it changes none of this (it draws at its own slot, after the win conditions).
+	// [orig: HUD_DrawGameplayOverlays @0x5BE12C..0x5BE145, @0x5BE16B..0x5BE174]
+	// [orig: HUD_DrawGameplayOverlays @0x5BCF6D..0x5BCF86, @0x5BCFAC..0x5BCFB5 (dfx2.exe)]
+	HudToggleState w;
+	w.briefing_mode = kBriefingModeOpen;
+	for (const bool panel : {false, true}) {
+		w.briefing_panel_open = panel;
+		CHECK(hud_briefing_window(w, false, false) == HudBriefingWindow::Briefing);
+		CHECK(hud_briefing_window(w, false, true) == HudBriefingWindow::HowTo);
+		CHECK(hud_briefing_window(w, true, false) == HudBriefingWindow::EndGame);
+		CHECK(hud_briefing_window(w, true, true) == HudBriefingWindow::EndGame);
+	}
+	w.briefing_mode = 0;
+	CHECK(hud_briefing_window(w, false, true) == HudBriefingWindow::None);
+	CHECK(hud_briefing_window(w, true, true) == HudBriefingWindow::None);
+	w.briefing_panel_open = false;
+	CHECK(hud_briefing_window(w, false, true) == HudBriefingWindow::None);
+	// The escape chain closes it after the briefing window, ahead of the objectives.
+	HudToggleState e;
+	HudEscapeInput in;
+	e.briefing_mode = kBriefingModeOpen;
+	e.briefing_panel_open = true;
+	e.objectives_visible = true;
+	CHECK(hud_toggles_escape(e, in) == kEscapeClosedWindow && e.briefing_mode == 0 &&
+			e.briefing_panel_open);
+	CHECK(hud_toggles_escape(e, in) == kEscapeClosedWindow && !e.briefing_panel_open &&
+			e.objectives_visible);
+	// The mission reset closes it.
+	e.briefing_panel_open = true;
+	hud_toggles_reset_mission(e);
+	CHECK(!e.briefing_panel_open);
+}
+
+// dfx2.exe's EmoteToggle row (dispatch 59): closed -> emotes -> radio -> closed, each step
+// through the keeping init; a dead player's press is dropped (flags 0x0C000C01).
+// [orig: Input_HandleActionBinding @0x49AD50 case 59 @0x49B768..0x49B7CE (dfx2.exe)]
+void test_emote_toggle_cycle() {
+	HudToggleState s;
+	s.help_open = true;
+	HudKeyPoll k = keys();
+	const auto press = [&]() {
+		k.emote_toggle = true;
+		const uint32_t events = hud_toggles_poll(s, k);
+		k.emote_toggle = false;
+		hud_toggles_poll(s, k);
+		return events;
+	};
+	CHECK(press() == kOverlayWindowsCleared);
+	CHECK(s.emotes_menu_open && !s.radio_menu_open && !s.help_open);
+	press();
+	CHECK(!s.emotes_menu_open && s.radio_menu_open);
+	press();
+	CHECK(!s.emotes_menu_open && !s.radio_menu_open);
+	k.local_alive = false;
+	CHECK(press() == 0);
+	CHECK(!s.emotes_menu_open);
+}
+
 int main() {
 	test_row_tokens_are_the_catalog_rows();
 	test_edge_latch();
@@ -957,6 +1101,7 @@ int main() {
 	test_showhud_goals_dotsize_and_view_actions();
 	test_overlay_windows();
 	test_death_screen_and_friendly_tags();
+	test_friendly_tags_title();
 	test_row_mask_and_tokens();
 	test_friendly_tags_and_verbose_rows();
 	test_help_and_map_legend_windows();
@@ -974,6 +1119,8 @@ int main() {
 	test_quit_dialog_escape_legs();
 	test_special_keys();
 	test_deploy_keys();
+	test_objectives_window();
+	test_emote_toggle_cycle();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

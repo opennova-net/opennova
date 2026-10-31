@@ -22,7 +22,7 @@ IngameBodyCodecContext IngameBodyCodecContext::for_session(uint32_t game_type,
 	// (g_GameType & 0xFFFDFFFF) == 0x10020] (net-re §5.9, §5.29), and the
 	// protocol's co-op checkpoint after the objective values (DFX2-1).
 	ctx.objective_body = frame_objective_body((game_type & 0x20000u) != 0,
-			protocol_in_match(protocol).objective_checkpoint);
+			protocol_in_match(protocol).s2c_0a.objective_checkpoint);
 	ctx.waypoint_gametype = (game_type & ~0x20000u) == 0x10020u;
 	return ctx;
 }

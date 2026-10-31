@@ -177,6 +177,7 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 #include "mnu/controls_model.h" // SAVEKEYS' binding table (install_console_seams)
 #include "simulation/simulation_constants.h" // the bound constant surface Simulation inherits
 #include "simulation/simulation_player_state.h"  // the local-player profile state (player_)
+#include "simulation/simulation_profiling_state.h" // the runtime profiling state (profiling_)
 #include "simulation/simulation_present_state.h" // the present/occlusion caches (present_)
 #include "simulation/deploy_rows.h" // DeployZoneRow / DeployListRow (the DEATH screen feeds)
 #include "simulation/hud_view_records.h" // the per-frame HUD view records (typed-array returns)
@@ -223,6 +224,8 @@ private:
 	friend class CorpseRagdollPresenter; // the ragdolls' world reads (ADR 0060)
 	friend class MapViewWindow; // the CMAP waypoint legs (inmatch/client_squad.cpp)
 	friend class CommandMapScreen; // the CMAP tables' roster and sends (menu/command_map_screen.h)
+	friend class MenuDriver; // the DEATH table's zones (mnu/menu_driver.h fill_deploy_spawn_table)
+	friend class HudOverlay; // the end-game screen's role view (inmatch::end_game_screen_text)
 	std::unique_ptr<opennova::mission::MissionKernel> kernel_;
 	// The private state by owner, each plain data in its own header (ADR 0043
 	// d9; the class-body fragments are gone): the net-session shell inputs and
@@ -266,14 +269,7 @@ private:
 	// The C++ TickSink (simulation/tick_sink.h) the presentation owner
 	// installs around its own frame call (MissionRoot); null outside one.
 	TickSink *session_tick_sink_ = nullptr;
-	int64_t frame_sim_us_ = 0;
-	int64_t frame_sink_us_ = 0;
-	// The dev tools' frame-stats board (ADR 0039): fold_frame_stats() lands the
-	// kernel's tick profile (every touched SIM_* slot, ADR 0043 d5) plus the
-	// shell-side step/sink spans on it natively at the end of a session frame.
-	// Ordinary play leaves runtime_profiling_enabled_ false, so the profile is
-	// inactive and no producer reads a clock.
-	Ref<FrameStats> frame_stats_;
+	SimulationProfilingState profiling_; // the runtime profiling state
 	void fold_frame_stats(const opennova::inmatch::FrameOutcome &p_outcome);
 	// The session frame's phases (FramePerf) onto the SIM_FRAME_* slots, as SIM_ADVANCE.
 	void fold_frame_phases(const opennova::inmatch::FramePerf &p_perf, int64_t p_marshal_us);
@@ -331,13 +327,6 @@ private:
 	// HostClient runtime (the role's ListenHostState) and the present pass reads the client-decoded ClientState
 	// (ADR 0011 Decision 1) instead of the AI pool. Server_TickUpdate owns the per-frame tick.
 	bool listen_server_ = false;
-	uint64_t last_sim_tick_us_ = 0;
-	uint64_t last_net_tick_us_ = 0;
-	// One opt-in gate for every native runtime timer/counter. Retail play keeps
-	// this false; F3 Stats and the manual probe share the public ownership seam.
-	bool runtime_profiling_enabled_ = false;
-	// The last tick's projectile traces (take_projectile_trace_profile).
-	opennova::world::CollisionWorld::TraceProfile last_trace_profile_;
 	// The FollowOwner effect-pose index (inmatch/effect_pose_index.h, held in
 	// present_; simulation_present.cpp maps its poses to Godot space).
 	void invalidate_present_effect_pose_cache() const;
@@ -465,9 +454,12 @@ private:
 			bool p_submit_joiner_request);
 	// The typed-rows core of the apply (the record overload converts, the 0x5A
 	// grant path feeds inmatch::kit_from_authoritative_grant's rows directly).
+	// p_select names the weapon the closing select's slot word comes from: the
+	// armory ACCEPT's held weapon, the 0x5A's protocol's (inmatch::grant_apply_select).
 	bool apply_local_player_loadout_rows(
 			std::vector<opennova::world::WeaponKitEntry> p_kit,
-			int p_player_class, bool p_submit_joiner_request);
+			int p_player_class, bool p_submit_joiner_request,
+			opennova::world::LoadoutApplySelect p_select);
 	// Fold the latest authoritative S2C 0x5A grant into the local slot pool at
 	// the same recv-before-actions boundary as the retail handler.
 	void apply_joiner_authoritative_loadout();
@@ -706,7 +698,7 @@ public:
 	// none: the rotation seeded from the mount (a listening host's), then the engine's
 	// inmatch::create_host_session over the session record. OK when created or when there is
 	// nothing to create (no host role, a map change); ERR_CANT_CREATE when the `mpreset` word
-	// ended the process (session_create_ended_process).
+	// ended the process (load_ended_process).
 	int64_t create_host_session(const Ref<MissionData> &p_mission,
 			const Ref<ResourceRoot> &p_resource_root, const String &p_mission_file);
 	bool is_loaded() const;
@@ -823,6 +815,8 @@ public:
 	// The client-local death screen latch (retail g_DeathScreenActive): gates the
 	// friendly-tags walks + camera arbiter sub-mode; fed by simulation_player_view.cpp.
 	bool local_death_screen_active() const;
+	// C++ seam: the title the session runs as (set_game_title's, else its root's: session_title).
+	const opennova::Title &game_title() const;
 	// True while a live net session owns this sim: the world tick is the ONLY pump for the
 	// session socket, so the Play/Step/Stop transport locks out (retail MP has no pause; a
 	// stopped listen host reaps every joiner at cs_dir0.timeout_ms (engine: net/novaworld/client_session.h)). The single home for the rule — F3 transport, MCP, and ESC pause read it.
@@ -886,7 +880,7 @@ public:
 	// while the profiling clocks run and the board captures.
 	void set_frame_stats(const Ref<FrameStats> &p_stats);
 	Ref<FrameStats> get_frame_stats() const;
-	int64_t get_last_session_sim_us() const { return frame_sim_us_; }
+	int64_t get_last_session_sim_us() const { return profiling_.frame_sim_us; }
 	// Set the per-side character ids/classes/avatar bytes carried by ClientAuth.
 	// Must be called before enable_join; later runtime rebuilds retain the values.
 	// The joiner's / the listen host's own two-side character selection
@@ -999,7 +993,7 @@ public:
 	String get_join_server_name() const;
 	String get_join_mission_name() const;
 	// The S2C 0x60's session variables as the loading screen's session block, and each parse's
-	// edge, taken once (engine: inmatch/joiner_connection.h take_session_vars_parsed).
+	// edge, taken once, SessionDrive's alone (engine: joiner_connection.h take_session_vars_parsed).
 	Ref<LoadingScreenInfo> get_join_server_info() const;
 	bool take_join_server_info_parsed();
 	String get_join_mission_file() const;
@@ -1115,6 +1109,9 @@ public:
 	// triggers (inmatch::death_menu_triggered) unless another screen is up;
 	// the engine latch clears when they fall. The shell opens on true.
 	bool take_death_menu_open(bool p_menu_open);
+	// Whether a take since the last call cleared a raised latch: the close leg ran, whose
+	// title's call the shell then makes (engine ClientState::take_death_menu_close).
+	bool take_death_menu_close();
 	// The DEATH screen stays up while a trigger holds or a join pick is owed.
 	bool is_death_menu_held() const;
 	// The DEATH screen's spawn-zone rows (simulation/deploy_rows.h): one
@@ -1261,9 +1258,8 @@ public:
 	bool local_player_position_q16(int32_t (&r_pos)[3]) const;
 	// Raw engine heading (BAM32) for the heading-up spinmap.
 	int64_t get_local_player_heading_bam() const;
-	// Radar zoom: positive = radarout (x1.15 toward 0x100000), negative =
-	// radarin (x0.85 toward 4096), zero = the spawn reset (the witnessed step
-	// lives in hud::spinmap_zoom_step).
+	// Radar zoom: positive = radarout (x1.15 toward the title's map_zoom_max_q16), negative =
+	// radarin (x0.85 toward 4096), zero = the spawn reset (hud::spinmap_zoom_step's step).
 	int request_hud_radar_zoom(int p_direction);
 	int get_hud_radar_zoom_q16() const;
 	// map_toggle's 0->2->3->0 cycle (witness at HudMinimapInput::map_mode).
@@ -1416,7 +1412,7 @@ public:
 	// bit (engine: world/player_view.h player_view_apply_view_action); the
 	// camera mode itself is RESOLVED per tick by the arbiter from the
 	// preference and the seat (player_view_resolve_mode).
-	void apply_local_player_view_action(int p_action);
+	bool apply_local_player_view_action(int p_action);
 	// The debug menu's on-foot third person — stock JO never resolves it
 	// (net-re §5.39, the onhook debug affordance); never a gameplay key.
 	void set_local_player_debug_third_person(bool p_enabled);
@@ -1550,6 +1546,7 @@ public:
 	// (queue_chat_message), the menu picks (C2S 0x14 / 0x13) and the crew key's denied tone.
 	opennova::hud::ChatEntryFacts chat_entry_facts(uint32_t p_frame) const;
 	bool is_round_over() const; // the world's round-over latch (MatchOutcome::ended)
+	int get_end_round_winner_team() const; // the 0x1D header's winner team, 0 before one
 	// The charattr property latches the session's restriction step raised, one
 	// bit a property (inmatch charattr_pack_disabled, the S2C 0x42 body).
 	int get_charattr_disabled_word() const;
@@ -1637,9 +1634,9 @@ public:
 	void use_client_process(opennova::inmatch::ClientProcessState *p_state) { net_.client_process = p_state; }
 	// The next boot is the single player's restart (KernelBootOptions::restart).
 	void set_restart_boot(bool p_restart) { restart_boot_ = p_restart; }
-	// The last load's session create ended the process on a nonzero mpreset (inmatch
-	// CreateSessionResult::ProcessExit): the embedder exits with code 0, saving nothing.
-	bool session_create_ended_process() const;
+	// The last load ended the process, the embedder exiting with `r_code` and saving nothing:
+	// its session create on a nonzero mpreset (0), or a load warning box's Cancel (-1).
+	bool load_ended_process(int32_t &r_code) const;
 	// The in-game options Accept over the record it wrote
 	// (profile::ingame_accept_input: the look's two words at once).
 	Error apply_ingame_options(const Ref<PlayerProfiles> &p_profiles);
@@ -1706,7 +1703,7 @@ public:
 	// performs no native profiling clock reads or timing-counter writes.
 	void set_runtime_profiling_enabled(bool p_enabled);
 	bool is_runtime_profiling_enabled() const {
-		return runtime_profiling_enabled_;
+		return profiling_.runtime_profiling_enabled;
 	}
 	// Allocation-free trace sampling for the F3 hot path: the last tick's traces, as
 	// the tick's sink took them (take_projectile_trace_profile: the profile since the
@@ -1847,6 +1844,10 @@ public:
 	// events; the tests author a DestructionDrain through its data leg.
 	void drain_vehicle_effects(std::vector<opennova::world::VehicleEffectEvent> &r_events);
 	void drain_destruction_events(opennova::world::DestructionEvents &r_events);
+	// The view collects' draw-leg output (engine world::run_draw_husk_leg), taken at the frame's
+	// occlusion end so the models it changed draw with it this frame. NOT ClassDB-bound.
+	void take_draw_husk_output(std::vector<opennova::world::HuskSwapEvent> &r_swaps,
+			std::vector<opennova::world::DrawFadeStamp> &r_fades);
 	// Every queue the entity presenter's passes drain, dropped undrawn: a session that
 	// presents no entity (a dedicated host) empties them each ticked frame (engine
 	// world::discard_entity_presentation). NOT ClassDB-bound: MissionRoot's session step.
@@ -2460,10 +2461,9 @@ public:
 	// HudOverlay::set_attach_labels projects and resolves the rows natively.
 	// False without a kernel. (engine: runtime/hud/hud_frame.cpp)
 	bool fill_attach_labels(std::vector<opennova::world::AttachLabel> &r_labels) const;
-	// The friendly-tags gather (D-HUD-20; world::FriendlyTagSource): the raw
-	// positions + per-entity facts; HudOverlay::set_friendly_tags lifts,
-	// projects and feeds the compiler's element natively. NOT ClassDB-bound.
-	// False without a kernel or a local player.
+	// The friendly-tags gather (D-HUD-20; world::FriendlyTagSource): the raw positions + per-entity
+	// facts; HudOverlay::set_friendly_tags lifts, projects and feeds the compiler's element
+	// natively. NOT ClassDB-bound. False without a kernel or a local player.
 	bool fill_friendly_tags(std::vector<opennova::world::FriendlyTagSource> &r_tags) const;
 	opennova::inmatch::HudRoleFacts hud_role_facts(uint32_t p_voice_menus = 0) const; // NOT bound
 	// The radio-request icon's viewer gate over the local player (world::

@@ -255,13 +255,20 @@ public:
 	// runtime/hud/hud_overlay_windows.h): the F1 help page's resolved text,
 	// the F12 legend's title / labels (one per map_legend_keys() entry; its
 	// pulses read the HUD frame counter), the I briefing panel (its text read from the sim's
-	// mission text) and the briefing's page keys (direction 0 resets).
+	// mission text), the I window's session screen (the end-game page the briefing pages
+	// stand on, inmatch::end_game_screen_text, with keyhelp's footer) and the briefing's page
+	// keys (direction 0 resets).
 	void set_help_screen(bool p_shown, const String &p_title, const String &p_page_line,
 			const String &p_footer, const PackedStringArray &p_keys,
 			const PackedStringArray &p_texts);
 	void set_map_legend(bool p_shown, const String &p_title, const PackedStringArray &p_labels);
 	static PackedStringArray map_legend_keys();
-	void set_briefing(bool p_shown, const Ref<Simulation> &p_sim);
+	// The briefing words, each its own window: the I window's (engine hud_toggles.h
+	// hud_briefing_window under the session title: the end-game screen, the briefing panel's
+	// mission text or the how-to's gametext line) and the briefing panel's own word (the
+	// mission text).
+	void set_briefing(int p_briefing_mode, bool p_briefing_panel_open, const Ref<Simulation> &p_sim,
+			const Ref<RtxtStringFile> &p_gametext);
 	void cycle_briefing_page(int p_direction, bool p_in_session);
 	// The tip panel (engine hud/tip_system.h): the showing tip, its
 	// countdown, the local player's dead bit (a dead player's M-cycle map
@@ -537,6 +544,8 @@ public:
 
 	void _draw() override;
 
+	// The layout hudpos.def gave the HUD (C++ only: the DEATH table's stance colours).
+	const opennova::hud::HudLayout &layout() const { return layout_; }
 	// The menu map windows' seam (hud/map_view_window.h, C++ only): compile
 	// the DEATH or the CMAP window pass over this overlay's frame state
 	// (terrain, markers, footprints, fonts) at the host's surface, and hand
@@ -592,10 +601,14 @@ private:
 	opennova::hud::HudFrameCompiler compiler_;
 	opennova::hud::HudLayout layout_;
 	opennova::hud::HudFrameState state_;
+	// The I window's in-session end-game screen (set_briefing).
+	void set_end_game_screen_(bool p_shown, const Ref<Simulation> &p_sim,
+			const Ref<RtxtStringFile> &p_gametext);
 	uint32_t voice_menus_ = 0; // inmatch::kHudVoiceMenu* bits (set_overlay_panel_windows)
 	// The role's inset friendly name (set_role_facts), set into the combat state
 	// set_combat_state copies from the view.
 	std::string inset_target_name_;
+	bool inset_reticle_quad_ = false; // the title's Inset reticle (set_role_facts)
 	std::array<std::string, 12> slot_bar_key_labels_; // by def category (set_slot_bar_key_labels)
 	bool server_status_shown_ = false;                // set_server_status_page
 	bool scene_3d_was_disabled_ = false;              // the viewport's own setting under the page
@@ -626,7 +639,7 @@ private:
 	bool label_font_large_valid_ = false;
 	opennova::fnt::fnt_font_t label_font_impact38_ = {}; // Impac38b (the end-round overlay)
 	bool label_font_impact38_valid_ = false;
-	int label_tier_ = -1; // -1 = not loaded; 0 <=640 / 1 <=800 / 2 >800
+	int label_tier_ = -2; // -2 = not loaded; else the title's tier (hud_label_font_choice)
 	int label_width_ = 0;  // the width the pushed label scales were computed for
 	// The hudpos FONTHUD1_LO / _HI names (engine hudpos_font_for_width picks one
 	// per width); loaded into font_ by ensure_label_fonts_.

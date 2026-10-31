@@ -48,7 +48,8 @@
 //                                                 "not_listed",
 //                                        ["try": <int>, "tries": <int>,] ["next_try_at": <int>,]
 //                                        ["reason": "<why>", ["tag": "NWEC<digits>"],]
-//                                        ["slots": [<int>, ...]]}]}],
+//                                        ["slots": [<int>, ...]]}],
+//                    ["build": {"version": "<ONE's version>", "commit": "<short sha>" | ""}]}],
 //    ["listing_failed": true]}
 //   -> 200 {"protocol": 3, "drain": <bool>,
 //           "desired": [{"name", "slot", "image", "uid",
@@ -107,7 +108,13 @@
 // which only a start the service renders it for does (a server whose owner asked:
 // hosted/model/hosted_settings.h render_serve_args) with the serve image the same
 // release's service pins, so an agent sends it to a service that reads it; a
-// service of this protocol reads a report without it as no state.
+// service of this protocol reads a report without it as no state. A running
+// container carries its server's ONE build the same way (`build`, its
+// --build-file, which holds this member's own JSON: decode_serve_build): the
+// version and the commit the server says it runs, which the service shows
+// beside its listing. The file is written only by a start the service renders
+// --build-file for, so this member too reaches only a service that reads it,
+// and a report without it is a build not known.
 // Each desired container names its log stream (`log`), where its output goes
 // (docker's awslogs driver, or the agent's --log-dir). `files` carries the slot's working directory
 // (the bytes in standard base64: the host file is cp1252) and is sent until
@@ -185,7 +192,6 @@ inline constexpr size_t kMaxContainerReasonBytes = 200;
 inline constexpr size_t kMaxReplyTrees = 32;
 inline constexpr size_t kMaxTreeFiles = 64;
 inline constexpr size_t kMaxTreeUrlBytes = 512;
-inline constexpr size_t kMaxExpansionCodeChars = 8;
 // The trees a report may name (the store keeps an unnamed tree a while).
 inline constexpr size_t kMaxReportedTrees = 2 * kMaxReplyTrees;
 
@@ -210,7 +216,7 @@ std::string agent_secret_digest(std::string_view secret);
 // or digit first); an image reference (letters, digits and ./:@_-, at most 255,
 // a letter or digit first); a working-directory file name and a tree's file
 // name (1..64 of letters, digits, '.', '_', '-', never "." or ".."); an
-// expansion code (1..kMaxExpansionCodeChars of a-z, 0-9); a tree's fetch URL
+// expansion code (base/project's is_expansion_code); a tree's fetch URL
 // (s3://... or file:///..., printable ASCII, at most kMaxTreeUrlBytes); an
 // environment name (a letter or '_' first, then letters, digits and '_', at
 // most 128); a log stream, the agent's own or a container's (1..512 of
@@ -224,7 +230,6 @@ bool is_container_name(std::string_view name);
 bool is_image_reference(std::string_view image);
 bool is_slot_file_name(std::string_view name);
 bool is_tree_file_name(std::string_view name);
-bool is_expansion_code(std::string_view code);
 bool is_tree_url(std::string_view url);
 bool is_env_name(std::string_view name);
 bool is_log_stream_name(std::string_view name);
@@ -316,6 +321,19 @@ struct SecondListingStatus {
 	std::vector<int> slots;
 };
 
+// A server's ONE build, as the server says it of itself (opennova-serve's --build-file:
+// base/version/one_build.h one_build()): its version ("0.0.22"; a staging build's
+// "0.0.22.123", base/version/version.h Version::parse's form) and its commit's short sha
+// ("a1b2c3d": 7..40 lower-case hex digits; "" for a build that names none).
+struct ServeBuild {
+	std::string version;
+	std::string commit;
+	bool operator==(const ServeBuild &other) const {
+		return version == other.version && commit == other.commit;
+	}
+	bool operator!=(const ServeBuild &other) const { return !(*this == other); }
+};
+
 struct ContainerReport {
 	std::string name;
 	int slot = 0;
@@ -334,6 +352,8 @@ struct ContainerReport {
 	std::optional<TickHealth> tick; // running, with a fresh --stats-file
 	// Running, with a --second-listing-file that reads.
 	std::optional<SecondListingStatus> second_listing;
+	// Running, with a --build-file that reads.
+	std::optional<ServeBuild> build;
 };
 
 // The machine's own use, as its agent read it (core/proc_stats.h).
@@ -434,5 +454,8 @@ bool decode_sync_reply(std::string_view json, SyncReply &out, std::string &error
 // agent reads a server's --second-listing-file with it, so a file of any other shape says
 // nothing.
 bool decode_second_listing(std::string_view json, SecondListingStatus &out, std::string &error);
+// A container report's `build` as its own JSON text, by the same strict read: the agent reads a
+// server's --build-file with it.
+bool decode_serve_build(std::string_view json, ServeBuild &out, std::string &error);
 
 } // namespace opennova::novaworld_server::hosted

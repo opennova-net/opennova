@@ -91,11 +91,6 @@ public:
 	// Vfs::loose_first_hit: the loose-first answer under a per-call policy.
 	bool loose_first_hit(const std::string &name, VfsLookupPolicy policy) const;
 
-	// Choose how read_file keys SCR payloads (forwards to the underlying Vfs). Pass a
-	// VfsScrPolicy value (a title's scr_policy, base/title/title.h); defaults to version-detect and persists
-	// across scans. Set by the game-aware caller so demo-vs-retail keying is correct.
-	void set_scr_policy(int scr_policy);
-
 	std::vector<ResourceFileEntry> resource_files(const std::string &kind) const;
 	// The gore-set extension the effect catalog loads ALONGSIDE every `.ptl`: ".ptg"
 	// when this mount carries `fgn2.bin` (the German content marker), else ".ptu".

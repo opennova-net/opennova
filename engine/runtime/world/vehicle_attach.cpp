@@ -516,6 +516,7 @@ VehicleSeatOccupancy vehicle_seat_occupancy(
     result.occupied = seat.occupant.valid();
     if (const Entity *rider = world.registry.get(seat.occupant)) {
         result.rider_resolved = true;
+        result.rider = seat.occupant;
         result.player = (rider->flags & kEntityFlagPlayer) != 0;
         result.own_seat = seat.occupant == requester;
         result.health = rider->health;
@@ -575,10 +576,19 @@ bool find_numbered_vehicle_seat(const World &world, const Entity &player, int in
 
 bool find_best_vehicle_seat(
         const World &world, EntityHandle root_vehicle, EntityHandle occupant,
-        VehicleSeatSelection &out, SeatSelectionMode mode, const VehicleOccupancySource *source) {
+        VehicleSeatSelection &out, const VehicleOccupancySource *source) {
     out = {};
     const Entity *root = world.registry.get(root_vehicle);
     if (root == nullptr) return false;
+
+    // The occupant's own AI command filters the seats, in every caller: 123 takes
+    // `sitex` seats alone, 124 refuses `ctrlx`; an occupant with no AI slot, or any
+    // other command, takes every seat. [orig: Entity_FindBestSeatSlot @0x4351F0 - the
+    //  occupant's AI slot (+0x68) and its command (+0x94) @0x4353B9..0x4353C6; 0x7C refuses
+    //  seat type 2 @0x4353C8..0x4353D4, 0x7B takes type 1 alone @0x4353DA..0x4353E6]
+    SeatSelectionMode mode = SeatSelectionMode::Any;
+    if (const AiEntity *ai = world.ai.for_handle(occupant))
+        seat_selection_mode_for_command(ai->slot.f[37], mode);
 
     int32_t best_weight = 65536000; // [orig: bestWeight sentinel @0x43520A]
     const auto consider = [&](const Entity &candidate, bool is_root) {
@@ -1388,8 +1398,7 @@ bool VehicleSystem::find_mount_toggle_candidate(const Entity &player, VehicleSea
     if (!player.mounted && ((player.flags | player.engine_flags) & kEntityFlagQueuedMount) != 0) {
         const Entity *ground = world.registry.get(player.ground_target);
         return ground != nullptr &&
-                find_best_vehicle_seat(
-                        world, ground->handle, player.handle, r_hit, SeatSelectionMode::Any, source);
+                find_best_vehicle_seat(world, ground->handle, player.handle, r_hit, source);
     }
     const HostileMountIndex hostile_mounts(world, player, nullptr, source);
     return find_nearest_free_seat_impl(

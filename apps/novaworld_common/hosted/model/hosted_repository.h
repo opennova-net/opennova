@@ -60,6 +60,10 @@ struct HostedServer {
 	State state = State::Requested;
 	HostedSettings settings;
 	int64_t settings_revision = 1;
+	// Why its stored configuration does not read (read_settings_document's field and error),
+	// `settings` then the defaults; empty when it reads. The supervisor's next pass fails such
+	// a server, and no edit replaces the stored document from the defaults.
+	std::string settings_error;
 	// The machine driver that ran its last start, its container's name
 	// (srv-<id>-g<generation>) and the machine's private address (the admin
 	// link's target); empty until a start renders them, and cleared when it
@@ -404,13 +408,22 @@ int count_outdated_servers_of(db::Database &db, int64_t id);
 void set_tree_pins(db::Database &db, int64_t server_id, int64_t base_tree_id,
 		std::optional<int64_t> expansion_tree_id);
 enum class UpdateOutcome : uint8_t { Requested, NotFound, NotLive, UpToDate };
-// The owner's update: a live server whose pins differ from its products' current trees
-// gets update_requested (idempotent: one already asked answers Requested).
-UpdateOutcome request_update(db::Database &db, int64_t server_id);
-// Every live server whose pins are behind its products' current trees (of product
-// `product_id`, as base or expansion, when set); how many were marked.
-size_t request_update_all(db::Database &db, std::optional<int64_t> product_id);
+// The owner's update: a live server whose pins differ from its products' current trees, or
+// that runs an older server build than `serve_image` (server_build_outdated), gets
+// update_requested (idempotent: one already asked answers Requested). The supervisor honours
+// it by placing the server again, and every start pins both the current trees and the
+// fleet's serve image, so one update brings either or both.
+UpdateOutcome request_update(db::Database &db, int64_t server_id, const std::string &serve_image);
+// Every live server whose pins are behind its products' current trees, or that runs an older
+// server build than `serve_image` (server_build_outdated), as request_update takes either (of
+// product `product_id`, as base or expansion, when set); how many were marked.
+size_t request_update_all(db::Database &db, std::optional<int64_t> product_id, const std::string &serve_image);
 // Whether a live server's pins are behind its products' current trees.
 bool server_outdated(db::Database &db, int64_t server_id);
+// Whether a live server runs an older server build than the fleet starts servers on now: the
+// serve image its start pinned (HostedServer::serve_image) is not `serve_image`
+// (ONNET_HOSTED_SERVE_IMAGE, the release's, pinned by digest, which every start pins). False
+// where either is not known (a server not started yet, a service with no image set).
+bool server_build_outdated(const HostedServer &s, const std::string &serve_image);
 
 } // namespace opennova::novaworld_server::hosted

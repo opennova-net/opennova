@@ -3,11 +3,13 @@
 // JO's very object, the unwitnessed titles refused by name, and a PN that two titles' one
 // protocol carries resolving to that one object. And the rules each title runs
 // (runtime/world/title_rules.h): JO's the defaults, DFX2's its witnessed knobs, OP: Acid Gambit's
-// and the unwitnessed titles' JO's very object, and each game's bump-rule row (its ProtocolInMatch
-// and its joiner-side knobs), a change to which bumps the game's protocol version
-// (games/CLAUDE.md).
+// and the unwitnessed titles' JO's very object, and each protocol's bump-rule sheet (its
+// ProtocolInMatch by message and the joiner-side knobs its titles share), a change to which bumps
+// the protocol's version (games/CLAUDE.md).
 
 #include <base/title/title.h>
+#include <formats/gamecfg/game_cfg.h>
+#include <formats/playersav/weapon_sav.h>
 #include <games/acidgambit/acidgambit.h>
 #include <games/dfx2/dfx2.h>
 #include <games/jo/jo.h>
@@ -16,8 +18,13 @@
 #include <net/protocol/protocol.h>
 #include <runtime/world/title_rules.h>
 
+#include <algorithm>
 #include <cstdio>
+#include <iterator>
 #include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 using namespace opennova;
 
@@ -35,7 +42,7 @@ int g_failures = 0;
 
 // Every installed title resolves by its code and speaks an installed protocol.
 void every_title_resolves() {
-	CHECK(title_count() == 6);
+	CHECK(title_count() == 5);
 	for (size_t i = 0; i < title_count(); ++i) {
 		const Title *title = title_at(i);
 		CHECK(title != nullptr && title_by_code(title->code) == title);
@@ -57,6 +64,9 @@ void retail_protocols_complete() {
 	CHECK(jo == &games::jo_protocol() && dfx2 == &games::dfx2_protocol());
 	CHECK(&games::jo_title() == title_by_code("jo") &&
 			&games::dfx2_title() == title_by_code("dfx2"));
+	// DFX2-22: each title's mission catalog order.
+	CHECK(games::jo_title().mission_list_order == MissionListOrder::FileName &&
+			games::dfx2_title().mission_list_order == MissionListOrder::Title);
 	for (const Protocol *protocol : { jo, dfx2 }) {
 		CHECK(protocol != nullptr);
 		if (protocol == nullptr)
@@ -76,6 +86,78 @@ void retail_protocols_complete() {
 	CHECK(jo->cd_key == nullptr);
 }
 
+// A Title's every field past its identity (code, display_name, title_text, executable,
+// command_file, updater_login), in title.h's order. The Title is bound whole, as in_match_sheet
+// binds a protocol's groups, so a field added to Title stops this building until it is named here.
+auto title_fields_past_identity(const Title &t) {
+	const auto &[code, display_name, title_text, executable, command_file, updater_login,
+			config_table, max_players, max_players_host_screen, host_screen, absent_resource_roles,
+			expansions, read_defs, hud_exp_points, hud_lone_gunner_panel, hud_waypoint_active_tint,
+			hud_objective_done_fill, hud_drops_armory_prompt, hud_end_game_footer_corners,
+			death_screen_loadout, hud_fonts, mission_list_order, profile_magic, profile_first_name,
+			profile_word_1396, max_players_switch, profile_single_player_kit, profile_class_kits,
+			map_view_zoom_max, death_map_frame_color, death_shroud_reveal_ticks, death_shroud_main,
+			death_screen_team_lists, sp_campaign_tabs, mod_list_base, options_hides_advanced,
+			death_respawn_penalty_line, hud_map_cycle_skips_window, map_zoom_max_q16,
+			hud_kill_list_no_class, hud_scope_no_magnification, hud_crosshair_fixed,
+			hud_stance_health_tint, hud_message_tags, hud_map_legend, hud_tag_ranges,
+			friendly_tag_toast_literals, friendly_tags_skip_mode_1_on_death_screen,
+			hud_map_no_bank_names, death_screen_game_type_line, env_cube_terrain_clearance,
+			nvg_gain_rect, inset_reticle_quad, frame_fx_work_side, low_health_screen_effect,
+			map_capture_rings_under_layers, death_map_zone_markers, loading_screen, controls,
+			hud_sp_how_to, stat_screen_done, menu_font_scale, host_vehicle_missions,
+			host_switch_starts_off, armory_lists_none_row, death_map_no_names,
+			player_avatar_by_viewer_side, hud_game_info_board, hud_vehicle_panel_riders,
+			epilog_debriefing_screens, player_info_combo_names, player_info_combo_spins,
+			player_info_preview_hover] = t;
+	(void)code;
+	(void)display_name;
+	(void)title_text;
+	(void)executable;
+	(void)command_file;
+	(void)updater_login;
+	return std::tie(config_table, max_players, max_players_host_screen, host_screen,
+			absent_resource_roles, expansions, read_defs, hud_exp_points, hud_lone_gunner_panel,
+			hud_waypoint_active_tint, hud_objective_done_fill, hud_drops_armory_prompt,
+			hud_end_game_footer_corners, death_screen_loadout, hud_fonts, mission_list_order,
+			profile_magic, profile_first_name, profile_word_1396, max_players_switch,
+			profile_single_player_kit, profile_class_kits, map_view_zoom_max,
+			death_map_frame_color, death_shroud_reveal_ticks, death_shroud_main,
+			death_screen_team_lists, sp_campaign_tabs, mod_list_base, options_hides_advanced,
+			death_respawn_penalty_line, hud_map_cycle_skips_window, map_zoom_max_q16,
+			hud_kill_list_no_class, hud_scope_no_magnification, hud_crosshair_fixed,
+			hud_stance_health_tint, hud_message_tags, hud_map_legend, hud_tag_ranges,
+			friendly_tag_toast_literals, friendly_tags_skip_mode_1_on_death_screen,
+			hud_map_no_bank_names, death_screen_game_type_line, env_cube_terrain_clearance,
+			nvg_gain_rect.x0,
+			nvg_gain_rect.y0, nvg_gain_rect.x1, nvg_gain_rect.y1, inset_reticle_quad,
+			frame_fx_work_side, low_health_screen_effect, map_capture_rings_under_layers,
+			death_map_zone_markers, loading_screen, controls, hud_sp_how_to, stat_screen_done,
+			menu_font_scale, host_vehicle_missions, host_switch_starts_off, armory_lists_none_row,
+			death_map_no_names, player_avatar_by_viewer_side, hud_game_info_board,
+			hud_vehicle_panel_riders, epilog_debriefing_screens, player_info_combo_names,
+			player_info_combo_spins, player_info_preview_hover);
+}
+
+// Each of two titles' fields past the identity equal, a failure naming the field by its index in
+// title_fields_past_identity's list (nvg_gain_rect's corners four entries).
+template <typename Fields, size_t... I>
+void check_fields_past_identity(const Fields &a, const Fields &b, std::index_sequence<I...>) {
+	const auto check = [](bool same, size_t index) {
+		if (same)
+			return;
+		std::printf("FAIL %s:%d: Title field %zu past the identity differs\n", __FILE__, __LINE__,
+				index);
+		++g_failures;
+	};
+	(check(std::get<I>(a) == std::get<I>(b), I), ...);
+}
+void check_fields_past_identity(const Title &a, const Title &b) {
+	using Fields = decltype(title_fields_past_identity(a));
+	check_fields_past_identity(title_fields_past_identity(a), title_fields_past_identity(b),
+			std::make_index_sequence<std::tuple_size<Fields>::value>{});
+}
+
 // OP: Acid Gambit speaks JO's protocol: the same object, no copied literals, so a
 // JOINTOPERATIONS peer resolves to the one protocol whichever title registered it.
 void acidgambit_speaks_jo() {
@@ -90,8 +172,30 @@ void acidgambit_speaks_jo() {
 	CHECK(std::string(ag.display_name) == "OP: Acid Gambit" &&
 			std::string(ag.title_text) == "OP: Acid Gambit");
 	CHECK(std::string(ag.command_file) == "ACIDGAMBIT.CMD" && ag.executable == nullptr);
-	CHECK(ag.scr_policy == games::jo_title().scr_policy);
+	// Past its identity its Title is Joint Operations' row (acidgambit_title.cpp starts from
+	// jo_title()), every field of it, so a value JO's row sets is OP: Acid Gambit's too.
+	check_fields_past_identity(ag, games::jo_title());
+	CHECK(ag.mission_list_order == games::jo_title().mission_list_order);
+	// DFX2-29: each witnessed title names its fresh profile's kit pages; JO's are the format's
+	// eleven, Acid Gambit's JO's; the unwitnessed name none.
+	CHECK(games::jo_title().profile_single_player_kit == playersav::kJointOpsSinglePlayerKit &&
+			games::jo_title().profile_class_kits == playersav::kJointOpsClassKits);
+	CHECK(ag.profile_single_player_kit == games::jo_title().profile_single_player_kit &&
+			ag.profile_class_kits == games::jo_title().profile_class_kits);
+	CHECK(games::dfx2_title().profile_single_player_kit != nullptr &&
+			games::dfx2_title().profile_class_kits != nullptr);
+	for (const char *code : { "dfx", "bhd" })
+		CHECK(title_by_code(code) == nullptr || (title_by_code(code)->profile_single_player_kit == nullptr &&
+				title_by_code(code)->profile_class_kits == nullptr));
 	CHECK(protocol_by_pn("DELTAFORCEXTREME2") == title_protocol("dfx2"));
+	// The PLAYER_INFO screen's knobs: JO's, Acid Gambit's JO's, dfx2.exe's its own (DFX2-74,
+	// DFX2-75, DFX2-76).
+	CHECK(games::jo_title().player_info_combo_names && ag.player_info_combo_names &&
+			!games::dfx2_title().player_info_combo_names);
+	CHECK(!games::jo_title().player_info_combo_spins && !ag.player_info_combo_spins &&
+			games::dfx2_title().player_info_combo_spins);
+	CHECK(games::jo_title().player_info_preview_hover && ag.player_info_preview_hover &&
+			!games::dfx2_title().player_info_preview_hover);
 	// The updater login the service serves OpenNova's own content under is its title's; a retail
 	// title's folder names its own (Title::updater_login).
 	CHECK(title_by_code("acidgambit")->updater_login != nullptr &&
@@ -107,12 +211,6 @@ void unwitnessed_titles_refused() {
 	CHECK(error.find("the bhd title's session identity is not witnessed yet: NVS") == 0);
 	CHECK(resolve_title_protocol("dfx", error) == nullptr);
 	CHECK(error.find("the dfx title's session identity is not witnessed yet: NVS") == 0);
-	CHECK(resolve_title_protocol("jodemo", error) == nullptr);
-	CHECK(error.find("PG") != std::string::npos && error.find("gate tag") == std::string::npos);
-	const Protocol *demo = title_protocol("jodemo");
-	CHECK(demo != nullptr && std::string(demo->gate_tag) == "jopd:cus4");
-	CHECK(protocol_refusal(*demo, ProtocolPart::WebFlow) ==
-			"the jodemo title's web flow identity is not witnessed yet: sign-in submit");
 	CHECK(resolve_title_protocol("nosuchgame", error) == nullptr);
 	CHECK(error == "unknown game 'nosuchgame'");
 }
@@ -124,7 +222,7 @@ void every_title_runs_rules() {
 	CHECK(&jo == &games::jo_rules());
 	CHECK(&world::title_rules("JO") == &jo);
 	CHECK(&world::title_rules("dfx2") == &games::dfx2_rules() && &games::dfx2_rules() != &jo);
-	for (const char *code : { "acidgambit", "jodemo", "dfx", "bhd" })
+	for (const char *code : { "acidgambit", "dfx", "bhd" })
 		CHECK(&world::title_rules(code) == &jo);
 	CHECK(&games::acidgambit_rules() == &jo);
 	CHECK(&world::title_rules("") == &jo && &world::title_rules("nosuchgame") == &jo);
@@ -144,9 +242,15 @@ void retail_rules_values() {
 	CHECK(jo.round_end_linger_ticks == 2790u && jo.deploy_target_protection_ticks == 620);
 	CHECK(jo.medic_heal_and_revive && jo.downed_state_resend && jo.revive_window);
 	CHECK(jo.emplaced_turret_update == world::EmplacedTurretUpdate::Plain &&
-			jo.emplaced_solo_planar_slew == 0 && !jo.narrow_still_player_radius);
+			jo.emplaced_solo_planar_slew == 0 && !jo.narrow_still_player_radius &&
+			!jo.emplaced_solo_holds_fire);
 	CHECK(jo.ai_vehicle_near_reach == 0xC0000 && jo.ai_vehicle_write_off_count == 3410 &&
 			jo.spawn_kit == nullptr);
+	CHECK(!jo.bms_table_warnings && jo.bms_loadout_sanitized && jo.mission_start_sets_difficulty);
+	CHECK(jo.part_spin.full == 186413 && jo.part_spin.mid == 163110 && jo.part_spin.low == 139809 &&
+			jo.part_spin.ground_decay == 186413 && jo.part_spin.helo_decay == 46603);
+	CHECK(!jo.parachute_opens_on_jump && !jo.airborne_steer_glide &&
+			!jo.tracked_impact_speed_xz_first);
 
 	const world::TitleRules &dfx2 = world::title_rules("dfx2");
 	CHECK(dfx2.waypoint_completion == world::WaypointCompletion::CoopCheckpoint); // DFX2-9
@@ -162,70 +266,250 @@ void retail_rules_values() {
 	CHECK(!dfx2.medic_heal_and_revive && !dfx2.downed_state_resend && !dfx2.revive_window); // 19, 20
 	CHECK(dfx2.emplaced_turret_update == world::EmplacedTurretUpdate::CounterRotate && // DFX2-25
 			dfx2.emplaced_solo_planar_slew == 0x3AB948 && dfx2.narrow_still_player_radius); // 26, 31
+	CHECK(dfx2.emplaced_solo_holds_fire); // DFX2-37
 	CHECK(dfx2.ai_vehicle_near_reach == 0x40000 && dfx2.ai_vehicle_write_off_count == 1860); // 32
+	CHECK(dfx2.bms_table_warnings); // DFX2-24
+	CHECK(!dfx2.bms_loadout_sanitized); // DFX2-27
+	CHECK(!dfx2.mission_start_sets_difficulty); // DFX2-28
+	CHECK(dfx2.parachute_opens_on_jump && dfx2.airborne_steer_glide && // DFX2-111..113
+			dfx2.tracked_impact_speed_xz_first);
+	CHECK(dfx2.part_spin.full == 372827 && dfx2.part_spin.mid == 326222 && // DFX2-23
+			dfx2.part_spin.low == 279619 && dfx2.part_spin.ground_decay == 372827 &&
+			dfx2.part_spin.helo_decay == 93206);
 	size_t kit = 0;
 	while (dfx2.spawn_kit != nullptr && dfx2.spawn_kit[kit] != nullptr) ++kit; // DFX2-33
 	CHECK(kit == 8 && std::string(dfx2.spawn_kit[2]) == "WPN_MK23");
 }
 
-// The bump-rule row (plan decision 12): what a game's joiner reads or writes as it does, so a
-// change to a game's row lands with a bump of its protocol version in its <code>_protocol.cpp
-// (games/CLAUDE.md). It is the game's ProtocolInMatch, every field of which shapes the bytes the
-// host sends or the joiner sends (docs/titles/dfx2-vs-jo-re.md §8), whether it has a CD key
-// (Protocol::cd_key: the DFX2-13 LAN join check), and its TitleRules fields marked joiner-side
-// (read on a joiner's world or its replica). JO's and DFX2's rows are retail-pinned and never
-// change.
-std::string bump_rule_row(const char *title_code) {
-	const Protocol *protocol = title_protocol(title_code);
-	if (protocol == nullptr || !protocol->in_match.has_value())
-		return "no in-match protocol";
-	const ProtocolInMatch &m = *protocol->in_match;
-	const world::TitleRules &r = world::title_rules(title_code);
+// The Title's knobs read on the local player's input alone (docs/titles/dfx2-vs-jo-re.md §8, the
+// three with no catalog id): JO's the defaults, DFX2's dfx2.exe's, OP: Acid Gambit's JO's (its
+// every field past the identity, acidgambit_speaks_jo).
+void retail_local_input_title_values() {
+	const Title &jo = games::jo_title();
+	CHECK(jo.map_zoom_max_q16 == 0x100000); // section 7.12
+	// Section 5.3: every mode's toast the gametext key's, no death-screen step.
+	for (const char *literal : jo.friendly_tag_toast_literals) CHECK(literal == nullptr);
+	CHECK(!jo.friendly_tags_skip_mode_1_on_death_screen);
+
+	const Title &dfx2 = games::dfx2_title();
+	CHECK(dfx2.map_zoom_max_q16 == 0x80000); // section 7.12
+	// Section 5.3: modes 1 and 2 the literal lines, the death screen's step past mode 1.
+	CHECK(dfx2.friendly_tag_toast_literals[0] == nullptr &&
+			dfx2.friendly_tag_toast_literals[3] == nullptr);
+	CHECK(std::string(dfx2.friendly_tag_toast_literals[1]) == "Friendly Tags: On" &&
+			std::string(dfx2.friendly_tag_toast_literals[2]) == "Friendly Tags: Smart");
+	CHECK(dfx2.friendly_tags_skip_mode_1_on_death_screen);
+}
+
+// A protocol's in-match sheet: every knob of its ProtocolInMatch, and its CD key (Protocol::cd_key,
+// the C2S 0x00 JOIN's LAN check), under every message net/protocol/protocol.h's kProtocolDialect
+// names it for, one line per message. Every group is bound whole, so a knob added to a group, or a
+// group added, stops this building until the sheet names it; a knob the index leaves out, or one
+// it names that the sheet does not, fails.
+std::string in_match_sheet(const Protocol &protocol) {
+	const ProtocolInMatch &m = *protocol.in_match;
+	const auto &[s2c_0a, s2c_0f, s2c_14, s2c_25, s2c_5a, s2c_64, s2c_66, c2s_2f, slot_state,
+			person_index] = m;
+	const auto &[objective_checkpoint] = s2c_0a;
+	const auto &[spawn_zone_flag_always, deploy_screen_always] = s2c_0f;
+	const auto &[chat_squad_tag_wrapped] = s2c_14;
+	const auto &[end_round_linger_ticks] = s2c_25;
+	const auto &[select_last_primary_row] = s2c_5a;
+	const auto &[rules_word_bits] = s2c_64;
+	const auto &[armory_only_availability] = s2c_66;
+	const auto &[loadout_class_fixed] = c2s_2f;
+	const auto &[join_state_fixed] = slot_state;
+	const auto &[pool0_wire_capacity] = person_index;
 	char rules_word[16];
-	std::snprintf(rules_word, sizeof(rules_word), "0x%X", static_cast<unsigned>(m.rules_word_bits));
+	std::snprintf(rules_word, sizeof(rules_word), "0x%X", static_cast<unsigned>(rules_word_bits));
+	const std::vector<std::pair<std::string, std::string>> knobs = {
+		{ "s2c_0a.objective_checkpoint", std::to_string(objective_checkpoint) },
+		{ "s2c_0f.spawn_zone_flag_always", std::to_string(spawn_zone_flag_always) },
+		{ "s2c_0f.deploy_screen_always", std::to_string(deploy_screen_always) },
+		{ "s2c_14.chat_squad_tag_wrapped", std::to_string(chat_squad_tag_wrapped) },
+		{ "s2c_25.end_round_linger_ticks", std::to_string(end_round_linger_ticks) },
+		{ "s2c_5a.select_last_primary_row", std::to_string(select_last_primary_row) },
+		{ "s2c_64.rules_word_bits", rules_word },
+		{ "s2c_66.armory_only_availability", std::to_string(armory_only_availability) },
+		{ "c2s_2f.loadout_class_fixed", std::to_string(loadout_class_fixed) },
+		{ "slot_state.join_state_fixed", std::to_string(join_state_fixed) },
+		{ "person_index.pool0_wire_capacity", std::to_string(pool0_wire_capacity) },
+		{ "cd_key", std::to_string(protocol.cd_key != nullptr) },
+	};
+	for (const auto &knob : knobs) {
+		bool indexed = false;
+		for (const ProtocolDialectRow &row : kProtocolDialect)
+			indexed = indexed || knob.first == row.knob;
+		CHECK(indexed);
+	}
+	std::string out;
+	for (size_t i = 0; i < std::size(kProtocolDialect); ++i) {
+		const ProtocolDialectRow &row = kProtocolDialect[i];
+		const ProtocolDialectRow *prev = i > 0 ? &kProtocolDialect[i - 1] : nullptr;
+		// The index runs S2C then C2S, each by id, so a message's rows sit together.
+		const bool same_message = prev != nullptr && prev->dir == row.dir && prev->tag == row.tag;
+		CHECK(prev == nullptr || same_message || (prev->dir == row.dir && prev->tag < row.tag) ||
+				(prev->dir == 'S' && row.dir == 'C'));
+		const auto knob = std::find_if(
+				knobs.begin(), knobs.end(), [&](const auto &k) { return k.first == row.knob; });
+		CHECK(knob != knobs.end());
+		if (knob == knobs.end())
+			continue;
+		if (!same_message) {
+			char head[16];
+			std::snprintf(
+					head, sizeof(head), "%c 0x%02X:", row.dir, static_cast<unsigned>(row.tag));
+			out += (out.empty() ? "" : "\n") + std::string(head);
+		}
+		out += " " + knob->first + "=" + knob->second;
+	}
+	return out;
+}
+
+// The TitleRules fields marked joiner-side (read on a joiner's world or its replica, not only on
+// the authority): what a joiner of the protocol does as its host's game does.
+std::string joiner_rules_row(const world::TitleRules &r) {
 	std::string kit;
 	for (const char *const *name = r.spawn_kit; name != nullptr && *name != nullptr; ++name)
 		kit += std::string(kit.empty() ? "" : ",") + *name;
-	return "objective_checkpoint=" + std::to_string(m.objective_checkpoint) +
-			" spawn_zone_flag_always=" + std::to_string(m.spawn_zone_flag_always) +
-			" armory_only_availability=" + std::to_string(m.armory_only_availability) +
-			" join_state_fixed=" + std::to_string(m.join_state_fixed) +
-			" loadout_class_fixed=" + std::to_string(m.loadout_class_fixed) +
-			" cd_key=" + std::to_string(protocol->cd_key != nullptr) +
-			" chat_squad_tag_wrapped=" + std::to_string(m.chat_squad_tag_wrapped) +
-			" rules_word_bits=" + rules_word +
-			" | waypoint_goals_met_advance=" + std::to_string(r.waypoint_goals_met_advance) +
+	return "waypoint_goals_met_advance=" + std::to_string(r.waypoint_goals_met_advance) +
 			" waypoint_advance_needs_done=" + std::to_string(r.waypoint_advance_needs_done) +
 			" route_done_records=" + std::to_string(r.route_done_records) +
-			" emplaced_turret_update=" + std::to_string(static_cast<int>(r.emplaced_turret_update)) +
+			" emplaced_turret_update=" +
+			std::to_string(static_cast<int>(r.emplaced_turret_update)) +
 			" emplaced_solo_planar_slew=" + std::to_string(r.emplaced_solo_planar_slew) +
 			" narrow_still_player_radius=" + std::to_string(r.narrow_still_player_radius) +
-			" spawn_kit=" + (r.spawn_kit == nullptr ? std::string("jo_single_player_page") : kit);
+			" emplaced_solo_holds_fire=" + std::to_string(r.emplaced_solo_holds_fire) +
+			" part_spin=" + std::to_string(r.part_spin.full) + "/" +
+			std::to_string(r.part_spin.mid) + "/" + std::to_string(r.part_spin.low) + "/" +
+			std::to_string(r.part_spin.ground_decay) + "/" +
+			std::to_string(r.part_spin.helo_decay) +
+			" parachute_opens_on_jump=" + std::to_string(r.parachute_opens_on_jump) +
+			" airborne_steer_glide=" + std::to_string(r.airborne_steer_glide) +
+			" tracked_impact_speed_xz_first=" + std::to_string(r.tracked_impact_speed_xz_first) +
+			" spawn_kit=" + (r.spawn_kit == nullptr ? std::string("jo_single_player_page") : kit) +
+			" script_voice_volume=" + std::to_string(r.script_voice_volume) +
+			" trail_surface_alternate=" + std::to_string(r.trail_surface_alternate);
 }
 
-void bump_rule_row_per_game() {
+// The bump-rule sheets (ADR 0076 decision 6), one per protocol: what its joiner reads or writes as
+// it does, so a change to one lands with a protocol of its own and the next protocol version in
+// its <code>_protocol.cpp (games/CLAUDE.md). A sheet is the protocol's in-match sheet and the
+// joiner-side TitleRules its titles run, which every title speaking one Protocol object shares: a
+// joiner of one title meets a host of another as that protocol, so a joiner-side difference is a
+// protocol of its own. JO's and DFX2's sheets are retail-pinned and never change.
+void bump_rule_sheet_per_protocol() {
+	// Each protocol with an in-match part, and the titles that speak it.
+	std::vector<std::pair<const Protocol *, std::vector<std::string>>> speakers;
+	for (size_t i = 0; i < title_count(); ++i) {
+		const Title *title = title_at(i);
+		const Protocol *protocol = title != nullptr ? title_protocol(title->code) : nullptr;
+		if (protocol == nullptr || !protocol->in_match.has_value())
+			continue;
+		auto it = std::find_if(speakers.begin(), speakers.end(),
+				[&](const auto &s) { return s.first == protocol; });
+		if (it == speakers.end()) {
+			speakers.push_back({ protocol, {} });
+			it = std::prev(speakers.end());
+		}
+		it->second.push_back(title->code);
+	}
+	for (const auto &speaker : speakers) {
+		const std::string rules = joiner_rules_row(world::title_rules(speaker.second.front()));
+		for (const std::string &code : speaker.second)
+			CHECK(joiner_rules_row(world::title_rules(code)) == rules);
+	}
+	// A protocol's sheet, by its code: its in-match sheet and its titles' joiner-side rules.
+	const auto sheet = [&](const char *code) {
+		const Protocol *protocol = protocol_by_code(code);
+		const auto it = std::find_if(speakers.begin(), speakers.end(),
+				[&](const auto &s) { return s.first == protocol; });
+		if (it == speakers.end())
+			return std::string("no in-match protocol");
+		const std::string rules = joiner_rules_row(world::title_rules(it->second.front()));
+		return in_match_sheet(*protocol) + "\njoiner: " + rules;
+	};
 	const std::string jo =
-			"objective_checkpoint=0 spawn_zone_flag_always=0 armory_only_availability=2 "
-			"join_state_fixed=0 loadout_class_fixed=0 cd_key=0 chat_squad_tag_wrapped=0 "
-			"rules_word_bits=0x0 | waypoint_goals_met_advance=1 waypoint_advance_needs_done=0 "
+			"S 0x0A: s2c_0a.objective_checkpoint=0 slot_state.join_state_fixed=0\n"
+			"S 0x0F: s2c_0f.spawn_zone_flag_always=0 s2c_0f.deploy_screen_always=0\n"
+			"S 0x14: s2c_14.chat_squad_tag_wrapped=0\n"
+			"S 0x1E: person_index.pool0_wire_capacity=256\n"
+			"S 0x25: s2c_25.end_round_linger_ticks=0\n"
+			"S 0x2D: person_index.pool0_wire_capacity=256\n"
+			"S 0x33: person_index.pool0_wire_capacity=256\n"
+			"S 0x46: person_index.pool0_wire_capacity=256\n"
+			"S 0x5A: s2c_5a.select_last_primary_row=0\n"
+			"S 0x64: s2c_64.rules_word_bits=0x0\n"
+			"S 0x66: s2c_66.armory_only_availability=2\n"
+			"S 0x6D: person_index.pool0_wire_capacity=256\n"
+			"C 0x00: cd_key=0\n"
+			"C 0x2F: c2s_2f.loadout_class_fixed=0 s2c_66.armory_only_availability=2 "
+			"slot_state.join_state_fixed=0\n"
+			"joiner: waypoint_goals_met_advance=1 waypoint_advance_needs_done=0 "
 			"route_done_records=0 emplaced_turret_update=0 emplaced_solo_planar_slew=0 "
-			"narrow_still_player_radius=0 spawn_kit=jo_single_player_page";
+			"narrow_still_player_radius=0 emplaced_solo_holds_fire=0 "
+			"part_spin=186413/163110/139809/186413/46603 parachute_opens_on_jump=0 "
+			"airborne_steer_glide=0 tracked_impact_speed_xz_first=0 "
+			"spawn_kit=jo_single_player_page script_voice_volume=210 trail_surface_alternate=0";
 	const std::string dfx2 =
-			"objective_checkpoint=1 spawn_zone_flag_always=1 armory_only_availability=3 "
-			"join_state_fixed=1 loadout_class_fixed=1 cd_key=1 chat_squad_tag_wrapped=1 "
-			"rules_word_bits=0x10000 | waypoint_goals_met_advance=0 waypoint_advance_needs_done=1 "
+			"S 0x0A: s2c_0a.objective_checkpoint=1 slot_state.join_state_fixed=1\n"
+			"S 0x0F: s2c_0f.spawn_zone_flag_always=1 s2c_0f.deploy_screen_always=1\n"
+			"S 0x14: s2c_14.chat_squad_tag_wrapped=1\n"
+			"S 0x1E: person_index.pool0_wire_capacity=256\n"
+			"S 0x25: s2c_25.end_round_linger_ticks=1240\n"
+			"S 0x2D: person_index.pool0_wire_capacity=256\n"
+			"S 0x33: person_index.pool0_wire_capacity=256\n"
+			"S 0x46: person_index.pool0_wire_capacity=256\n"
+			"S 0x5A: s2c_5a.select_last_primary_row=1\n"
+			"S 0x64: s2c_64.rules_word_bits=0x10000\n"
+			"S 0x66: s2c_66.armory_only_availability=3\n"
+			"S 0x6D: person_index.pool0_wire_capacity=256\n"
+			"C 0x00: cd_key=1\n"
+			"C 0x2F: c2s_2f.loadout_class_fixed=1 s2c_66.armory_only_availability=3 "
+			"slot_state.join_state_fixed=1\n"
+			"joiner: waypoint_goals_met_advance=0 waypoint_advance_needs_done=1 "
 			"route_done_records=1 emplaced_turret_update=1 emplaced_solo_planar_slew=3848520 "
-			"narrow_still_player_radius=1 spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,"
-			"WPN_GRENADEFB,WPN_GRENADEHE,WPN_GRENADESM,WPN_KNIFE";
-	CHECK(bump_rule_row("jo") == jo);
-	CHECK(bump_rule_row("dfx2") == dfx2);
-	// OP: Acid Gambit's row is JO's, as it speaks JO's protocol at JO's protocol version.
-	CHECK(bump_rule_row("acidgambit") == jo);
+			"narrow_still_player_radius=1 emplaced_solo_holds_fire=1 "
+			"part_spin=372827/326222/279619/372827/93206 parachute_opens_on_jump=1 "
+			"airborne_steer_glide=1 tracked_impact_speed_xz_first=1 "
+			"spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,"
+			"WPN_GRENADEFB,WPN_GRENADEHE,WPN_GRENADESM,WPN_KNIFE script_voice_volume=240 "
+			"trail_surface_alternate=1";
+	CHECK(sheet("jo") == jo);
+	CHECK(sheet("dfx2") == dfx2);
+	// Two protocols have an in-match part: JO's, which OP: Acid Gambit speaks (the one object, at
+	// JO's protocol version), and DFX2's.
+	CHECK(speakers.size() == 2);
+	for (const auto &speaker : speakers) {
+		if (speaker.first == title_protocol("jo"))
+			CHECK((speaker.second == std::vector<std::string>{ "jo", "acidgambit" }));
+		else
+			CHECK(speaker.first == title_protocol("dfx2") &&
+					(speaker.second == std::vector<std::string>{ "dfx2" }));
+	}
 	CHECK(std::string(protocol_version(*title_protocol("acidgambit"))) ==
 			protocol_version(*title_protocol("jo")));
-	// The unwitnessed titles have no in-match protocol: their session part is refused by name.
-	for (const char *code : { "jodemo", "dfx", "bhd" })
-		CHECK(bump_rule_row(code) == "no in-match protocol");
+	// The unwitnessed titles' protocols have no in-match part: their session part is refused by
+	// name.
+	for (const char *code : { "dfx", "bhd" })
+		CHECK(sheet(code) == "no in-match protocol");
+}
+
+// DFX2-10's mission word sits on two axes: the protocol's (the S2C 0x66 group's armory-only word,
+// the mission's the other) and the game.cfg defaults' (Config_SetDefaults fills every weapon with
+// the mission's word, keyed by the title's config table, as formats/gamecfg cannot read a
+// protocol). Each title's config table fills its protocol's mission word, so the two never part.
+// [orig: Config_SetDefaults @0x54D030 - memset32(3, 0xFF) @0x54D410]
+// [orig: Config_SetDefaults @0x54a2c0 - memset32(dword_254F25C, 2, 0xFF) (dfx2.exe)]
+void config_table_fills_the_protocols_mission_word() {
+	for (size_t i = 0; i < title_count(); ++i) {
+		const Title *title = title_at(i);
+		const Protocol *protocol = title != nullptr ? title_protocol(title->code) : nullptr;
+		if (protocol == nullptr || !protocol->in_match.has_value())
+			continue;
+		const gamecfg::GameCfg cfg = gamecfg::defaults({}, 0, 0, title->config_table);
+		CHECK(cfg.weapon_availability[0] == protocol->in_match->s2c_66.mission_availability());
+	}
 }
 
 // A version line's title parts (title_versions): the title's name where the line names no game,
@@ -243,10 +527,10 @@ void title_parts_of_the_version_line() {
 	named.game = "My Game";
 	title_versions("acidgambit", named);
 	CHECK(named.game == "My Game" && named.protocol == "JO" && named.protocol_version == "16");
-	Versions demo;
-	title_versions("jodemo", demo);
-	CHECK(demo.game == "Joint Operations (Demo)" && demo.protocol.empty() &&
-			demo.protocol_version.empty());
+	Versions dfx;
+	title_versions("dfx", dfx);
+	CHECK(dfx.game == "Delta Force: Xtreme" && dfx.protocol.empty() &&
+			dfx.protocol_version.empty());
 	Versions unknown;
 	title_versions("nosuchgame", unknown);
 	title_versions("", unknown);
@@ -262,7 +546,9 @@ int main() {
 	unwitnessed_titles_refused();
 	every_title_runs_rules();
 	retail_rules_values();
-	bump_rule_row_per_game();
+	retail_local_input_title_values();
+	bump_rule_sheet_per_protocol();
+	config_table_fills_the_protocols_mission_word();
 	title_parts_of_the_version_line();
 	if (g_failures == 0) {
 		std::printf("games: all checks passed\n");

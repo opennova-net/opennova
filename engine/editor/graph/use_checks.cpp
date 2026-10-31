@@ -17,7 +17,6 @@
 #include <base/io/file_io.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
-#include <base/title/title.h>
 #include <base/vfs/vfs.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/install_view.h>
@@ -281,15 +280,14 @@ std::string slot_fault_words(const ParticleSlotFault &fault) {
 	       " tokens come first (in this file, or in a particle file whose name sorts before it).";
 }
 
-// A file of the validation's scan as it sits, decoded as the game reads it (an SCR- or BFC-wrapped one unwrapped under
-// the target game's policy): through the paths' source by its logical name where they have one (the game install as
+// A file of the validation's scan as it sits, decoded as the game reads it (an SCR- or BFC-wrapped one unwrapped, its SCR
+// key by its version byte): through the paths' source by its logical name where they have one (the game install as
 // the game is served it, ProjectPaths::files), else the project's folder; false where it does not read.
 bool listed_bytes(const ValidationInput &input, const AssetEntry &asset, std::vector<uint8_t> &out) {
 	std::string error;
-	const int policy = title_scr_policy_for_code(input.project.target_game.c_str());
 	return (input.paths.files ? input.paths.files->read(asset.logical_name, out)
 	                          : io::read_file_bytes(join_path(input.paths.root, asset.relative_path), out, error)) &&
-	       vfs_decode_payload(out, policy);
+	       vfs_decode_payload(out);
 }
 
 // A fault in a base game's file that the base alone does not make: under the expansion's mount another file parsed
@@ -324,8 +322,8 @@ std::string fault_place(const std::string &file, const ParticleSlotFault &fault)
 // under the base alone, and a fault in a base file the base alone does not make is the project's, said of the
 // project (no file of its own to point at). The loose ptl\ leg, the game folder's own that the walk reads first
 // [orig: CEffectSystem_Init @ 0x5f6228], no build writes (the export packs every particle file): it is not read.
-// The token slots' findings by what they were read from: the project's folder (or its paths' source), the SCR policy,
-// the gore sets, and each particle file in the walk's order with its stamp (an open document's instance, load and
+// The token slots' findings by what they were read from: the project's folder (or its paths' source), the gore sets,
+// and each particle file in the walk's order with its stamp (an open document's instance, load and
 // revision; else the file's size and last write as the scan lists it; a base entry's archive stamp and size, under
 // the base source read, InstallFileSource::serial, an export stamping every entry alike), and the paths' source itself:
 // another source's files are no read of these (the game install mounted again lists a patched archive's members at
@@ -373,16 +371,15 @@ void check_particle_token_slots(const AssetGraph &, const ValidationCache &, con
 		alone_walk.clear();
 	}
 	if (names.empty() && base_walk.empty()) return;
-	const int policy = title_scr_policy_for_code(input.project.target_game.c_str());
 	// The files in the walk's order, each with what it is read from, which the findings are kept by: read again
-	// only once a stamp, the order or the policy moved (every composition read them all before).
+	// only once a stamp or the order moved (every composition read them all before).
 	struct Read {
 		const AssetEntry *entry = nullptr; // the project's own
 		const TextDocument *text = nullptr;
 		std::string base; // a base game's entry by its name, where `entry` is null
 	};
 	std::vector<Read> reads;
-	std::string key = input.paths.root + "\x1f" + std::to_string(policy) + "\x1f" + gore +
+	std::string key = input.paths.root + "\x1f" + gore +
 	                  (input.paths.files ? "\x1fsource" : "");
 	const auto own = [&](const AssetEntry &entry) {
 		const std::shared_ptr<const DocumentBase> open = input.open_document(entry);

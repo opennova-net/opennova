@@ -152,9 +152,10 @@ const RequiredResource k_required_resources[] = {
     { "footer.bik", BOOT_PHASE_MENU, RES_OPTIONAL, 0,
       "expansion -> default path fallback; missing -> no menu video",
       "[orig: UI_CreateMenuBinkVideos @ 0x54b590; strings @ 0x7d2a00-0x7d2a54]", "footer_bik" },
-    { "nw_cdata.coo", BOOT_PHASE_MENU, RES_REQUIRED, 0,
-      "HRESULT ignored",
-      "[orig: Menu_InitShellResources @ 0x55262b -> CookieJar_OpenAndLoadFile @ 0x63a500]", "nw_cdata" },
+    { "nw_cdata.coo", BOOT_PHASE_MENU, RES_REQUIRED, RES_F_PLAYER_FILE,
+      "HRESULT ignored; the game rewrites it with the player's cookies as the menu closes",
+      "[orig: Menu_InitShellResources @ 0x55262b -> CookieJar_OpenAndLoadFile @ 0x63a500; "
+      "written by CUIScene_SaveCookieJarFile @ 0x63ba60 (\"wb\" @ 0x63ba9a)]", "nw_cdata" },
     { "main.mnu", BOOT_PHASE_MENU, RES_FATAL, 0,
       "menu never appears — boot dead-ends silently (no dialog); the entry node is \"Startup\"",
       "[orig: Menu_InitShellResources @ 0x552651 -> UIScene_LoadAndParseContent @ 0x63c830 -> CUIScene_SelectNodeByName @ 0x63b6b0]", "main_menu" },

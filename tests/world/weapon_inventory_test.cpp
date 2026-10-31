@@ -1160,7 +1160,7 @@ void test_the_current_slot_word() {
     body.equipped_adm_index = static_cast<uint8_t>(f.pistol);
     CHECK(local_loadout_apply_accept(*world, local->loadout, local->weapon, inv,
             local->inventory_valid, {{"WPN_M4AUTO", -1, -1, -1}, {"WPN_PISTOL", -1, -1, -1}},
-            8, false));
+            8, false, LoadoutApplySelect::HeldWeapon));
     CHECK(inv.current_slot == 130);
     CHECK(inv.equipped_combo == 130);
     CHECK(body.equipped_adm_index == static_cast<uint8_t>(f.pistol));
@@ -1168,13 +1168,14 @@ void test_the_current_slot_word() {
     inv.current_slot = 130;
     CHECK(local_loadout_apply_accept(*world, local->loadout, local->weapon, inv,
             local->inventory_valid, {{"WPN_M4AUTO", -1, -1, -1}, {"WPN_PISTOL", -1, -1, -1}},
-            8, false));
+            8, false, LoadoutApplySelect::HeldWeapon));
     CHECK(inv.current_slot == 130);
     CHECK(inv.equipped_combo == 130);
     body.equipped_adm_index = kAdmSlotNone;
     inv.current_slot = 196;
     CHECK(local_loadout_apply_accept(*world, local->loadout, local->weapon, inv,
-            local->inventory_valid, {{"WPN_M4AUTO", -1, -1, -1}}, 8, false));
+            local->inventory_valid, {{"WPN_M4AUTO", -1, -1, -1}}, 8, false,
+            LoadoutApplySelect::HeldWeapon));
     CHECK(inv.current_slot == 196);
 }
 

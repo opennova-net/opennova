@@ -326,8 +326,9 @@ RetailMachineInputs fallback_machine_inputs(std::string_view stable_identity) {
 	return in;
 }
 
-LobbyMachineTokens fallback_machine_tokens(std::string_view stable_identity) {
-	return make_retail_machine_tokens(fallback_machine_inputs(stable_identity));
+LobbyMachineTokens fallback_machine_tokens(
+		std::string_view stable_identity, const FingerprintSerialMix &mix) {
+	return make_retail_machine_tokens(fallback_machine_inputs(stable_identity), mix);
 }
 
 } // namespace opennova

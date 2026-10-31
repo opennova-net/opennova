@@ -22,8 +22,8 @@ void read_session_listing_columns(
 			gametext, "GateTypeAbbrev", game_type::host_abbreviation_key(config.game_type), "");
 	// The mission text's [info] title, else, when it reads empty, the mission header's name
 	// [orig: MissionText_GetString("info", "title") @0x4FE989..0x4FE993; the strlen test and
-	//  dword_A761D4, the header's mission_name (header +4), @0x4FE99D..0x4FE9AD; the SetOrCreate
-	//  @0x4FE9D0]
+	//  g_MissionHeaderName, the header's mission_name (header +4), @0x4FE99D..0x4FE9AD; the
+	//  SetOrCreate @0x4FE9D0]
 	if (!ctx.mission_text_title.empty())
 		r.mission_name = ctx.mission_text_title;
 	else if (ctx.mission != nullptr)
@@ -33,7 +33,7 @@ void read_session_listing_columns(
 	if (ctx.mission != nullptr)
 		r.region_index = static_cast<int>(ctx.mission->header.climate);
 	// [orig: dword_24D211C @0x4FEB03]
-	r.published_cap = static_cast<int>(config.player_slot_limit());
+	r.published_cap = static_cast<int>(config.live_slot_limit());
 	// MI1..MI3: the host CNetQuality's send-window averages (its +0x14 / +0x18 / +0x1C), the
 	// frame-pressure, ping and loss terms over the window's five samples as the main frame's last
 	// sample left them, 0 from a mission start's reset to its first sample (D-NET-1330).

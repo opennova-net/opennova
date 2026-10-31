@@ -116,7 +116,8 @@ import type { ProgramsResponse } from '../../../types/usage';
 import { shortTaskId } from '../../../utils/adminView';
 import type { Crumb } from '../../../utils/adminNav';
 import { buildOf, programBuilds } from '../../../utils/buildView';
-import { countLabel, healthLabel, taskStatusLabel } from '../../../utils/infraView';
+import { countLabel } from '../../../utils/format';
+import { healthLabel, taskStatusLabel } from '../../../utils/infraView';
 import { usageLine } from '../../../utils/usageView';
 
 const POLL_MS = 30_000;

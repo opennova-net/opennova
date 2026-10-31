@@ -59,6 +59,10 @@ var _menu_pose_set := false
 # model rotates without moving the camera; the camera only zooms.
 var _model_root: Node3D
 var _hovered := false
+## Whether the pointer hovers the portrait at all (the title's: MenuDriver.
+## player_info_preview_hovers, engine Title::player_info_preview_hover); false, it is
+## never hovered, so it spins at rest and never zooms or sways.
+var hovers := true
 var _zoom_blend := 0.0      # 0 at rest, damped toward 1 while hovered
 var _yaw_bam := 0           # the model's yaw, a signed 32-bit BAM word
 var _update_bank := 0.0     # seconds not yet run as a menu update
@@ -391,7 +395,7 @@ func _apply_yaw() -> void:
 # Hover toggles the zoom + sway, matching the original's "active when over the preview"
 # test [orig: PlayerInfo_UpdatePlayerPreviewAnimation @ 0x55dba0].
 func set_hovered(value: bool) -> void:
-	_hovered = value
+	_hovered = value and hovers
 
 
 # The PLAYER_INFO portrait animation [orig: PlayerInfo_UpdatePlayerPreviewAnimation @ 0x55dba0]:
@@ -418,7 +422,7 @@ func advance(delta: float) -> void:
 	if is_inside_tree():
 		var r := get_global_rect()
 		if r.has_area():
-			var hov: bool = r.has_point(get_global_mouse_position())
+			var hov: bool = hovers and r.has_point(get_global_mouse_position())
 			if hov != _hovered:
 				_hovered = hov
 	# The zoom blend toward the hover, the yaw's rest spin or hovered sway, one
