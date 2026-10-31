@@ -596,16 +596,17 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
 
 // The carry attach of any def: the link both ways, the carried (hidden) bit and
 // the object's scars cleared. The three flags then put back the def's own
-// update and raise the pickup feed with the return window; any other def's
-// sound reads dword_24E098C, which nothing writes (its one xref is that read),
-// so that carry is silent and sends nothing (the carrier's 0x0A tail carries
-// the link).
+// update and raise the pickup feed with the return window; any other def plays
+// the SPGOAL_PU set at the carrier, its sound-trigger registry row, and sends
+// nothing (the carrier's 0x0A tail carries the link).
 // [orig: Entity_AttachCarriedObject @0x43C130 - the def @0x43C135, +0x268
 //  @0x43C144, Flags |= 1 @0x43C14A, +0x170 @0x43C14F,
 //  Scar_ClearEntriesByEntity @0x43C155, the flag ids @0x43C15A..0x43C172, the
-//  non-flag Sound_PlayAtPosition(dword_24E098C) @0x43C174..0x43C17E;
-//  Entity_AttachCarriedObject @0x43BF30, the sound @0x43BF74..0x43BF7E
-//  (dfx2.exe)]
+//  non-flag Sound_PlayAtPosition(dword_24E098C, &carrier->Position)
+//  @0x43C174..0x43C17E; dword_24E098C is registry row 58 "SPGOAL_PU" @0x82FDB8
+//  (its pointer @0x82FDD8), resolved by DialogSystem_Init @0x5275E0 (the store
+//  @0x5276C0); Entity_AttachCarriedObject @0x43BF30, the sound
+//  @0x43BF74..0x43BF7E, row @0x82E510, DialogSystem_Init @0x524770 (dfx2.exe)]
 void Match::attach_carried_object(World &world, Entity &carrier, Entity &carried) {
     if (!carried.has_item_def)
         return;
@@ -613,8 +614,12 @@ void Match::attach_carried_object(World &world, Entity &carrier, Entity &carried
     carried.flags |= kEntityFlagCarried;
     carried.primary_occupant = carrier.handle;
     world.out.scars.clear_entity(carried.handle);
-    if (!is_flag(carried.item_id))
+    if (!is_flag(carried.item_id)) {
+        // Sound_PlayAtPosition is the full-volume positional play with no
+        // entity, as the NEW_GOAL action's. [orig: @0x527E60]
+        world.out.fire_sounds.play_immediate("SPGOAL_PU", carrier.position, 0);
         return;
+    }
     // The attach puts back the def's own update callback, ending a drop's
     // fall or ride. [orig: Entity_AttachCarriedObject @0x43c191]
     carried.drop_motion = def_update_drop_motion(carried);

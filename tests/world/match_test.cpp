@@ -1288,12 +1288,13 @@ void test_flag_contact_requires_the_retail_move_callback_gate() {
 // Movecb`, is the Night Trap objective) touched by a moving Player with empty
 // hands is carried off ahead of the flag/bay id switch, whatever its id and
 // with no game-type gate: the link both ways, the carried bit, the scars
-// cleared, and nothing else (no pickup score, no feed, no sound), so the
-// mission's GroupHoldingGroup reads it at once.
+// cleared and the SPGOAL_PU set at the carrier, nothing else (no pickup score,
+// no feed), so the mission's GroupHoldingGroup reads it at once.
 // [orig: Entity_ProcessWaypointInteraction @0x4AD85B..0x4AD883 ->
 //  Entity_TryAttachCarriedObject @0x43C1F0 -> Entity_AttachCarriedObject
-//  @0x43C130; @0x4AD8BB..0x4AD8D8 -> @0x43BFF0 -> @0x43BF30 (dfx2.exe);
-//  TriggerGroup_AnyMemberHoldingItemGroup @0x43c870]
+//  @0x43C130 (the SPGOAL_PU play @0x43C174..0x43C17E); @0x4AD8BB..0x4AD8D8 ->
+//  @0x43BFF0 -> @0x43BF30 (dfx2.exe); TriggerGroup_AnyMemberHoldingItemGroup
+//  @0x43c870]
 struct TakeableRig {
     static constexpr int32_t kTakeableId = 9001; // an authored non-flag def
     std::unique_ptr<World> world = std::make_unique<World>();
@@ -1317,6 +1318,15 @@ struct TakeableRig {
                            kItemAttribMoveCallback | kItemAttribTakeable);
         world->registry.get(object)->group_id = 4;
         contacts.bind(object);
+        // A presenting peer: the positional plays ready only with a listener.
+        world->out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+    }
+    int sounds_named(const char *set_name) {
+        int count = 0;
+        for (const ReadyFireSound &sound : world->out.fire_sounds.drain())
+            if (sound.set_name == set_name)
+                ++count;
+        return count;
     }
     Entity &carrier_entity() { return *world->registry.get(carrier); }
     Entity &object_entity() { return *world->registry.get(object); }
@@ -1341,6 +1351,7 @@ void test_takeable_contact_carries_any_def() {
         CHECK(world.match.player(rig.carrier)->stats[MatchStats::kFlagPickups] == 0);
         CHECK(world.match.player(rig.carrier)->stats[MatchStats::kPoints] == 0);
         CHECK(world.match.drain_gameplay_events().empty());
+        CHECK(rig.sounds_named("SPGOAL_PU") == 1);
         // E10's GroupHoldingGroup(1, 4) reads the live link.
         CHECK(world.commands.group_holding_group(1, 4));
         CHECK(!world.commands.group_holding_group(1, 3));
@@ -1435,6 +1446,7 @@ void test_takeable_contact_carries_any_def() {
         CHECK(rig.world->match.player(rig.carrier)->stats[MatchStats::kPoints] == 0);
         const std::vector<MatchGameplayEvent> events = rig.world->match.drain_gameplay_events();
         CHECK(events.size() == 1 && events[0].kind == MatchGameplayEventKind::FlagPickup);
+        CHECK(rig.sounds_named("SPGOAL_PU") == 0);
     }
     {
         // The same 4095 row without Takeable keeps the switch's scored pickup.
