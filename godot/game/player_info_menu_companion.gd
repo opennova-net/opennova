@@ -512,6 +512,9 @@ func _wire_preview() -> void:
 	_preview = AvatarPreviewScript.new()
 	_preview.name = "PlayerInfoAvatarPreview"
 	_preview.drawn.connect(player_preview_drawn.emit)
+	# The title's portrait hovers under the pointer, or never (engine
+	# Title::player_info_preview_hover).
+	_preview.hovers = _driver.player_info_preview_hovers()
 	frame.add_child(_preview)
 	_place_mount(_preview, preview_id)
 	# Runtime PLAYER_INFO portrait: camera fixed, character facing the viewer,

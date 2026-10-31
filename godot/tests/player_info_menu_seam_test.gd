@@ -430,6 +430,30 @@ func test_mounts_3d_preview_when_widget_present() -> void:
 				"%s under the portrait is mouse-transparent too" % child.name)
 
 
+# DFX2-76: the mounted portrait hovers under Jointops.exe's title and never under dfx2.exe's
+# (engine Title::player_info_preview_hover).
+func test_the_portrait_hovers_as_its_title_does() -> void:
+	for game_code in ["", "dfx2"]:
+		var root := _staged_avatars_root(game_code)
+		assert_not_null(root, "the minted table stages")
+		if root == null:
+			return
+		var frame := MenuFrame.new()
+		frame.size = Vector2(800, 600)
+		add_child_autofree(frame)
+		var driver := MenuDriver.new()
+		driver.attach(frame, null)
+		assert_true(driver.open_document(MenuDriverFixture.doc_from_xml(self, _avatar_screen_xml(true)),
+				root if game_code != "" else null, null, null, "player.mnu"), "the document opens")
+		var companion := PlayerInfoMenuCompanion.new()
+		companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
+		var preview := frame.find_child("PlayerInfoAvatarPreview", true, false) as AvatarPreview
+		assert_not_null(preview, "the portrait is mounted")
+		if preview != null:
+			assert_eq(preview.hovers, game_code == "", "%s's portrait hovers" % [game_code if game_code != "" else "the launch title"])
+		companion.on_menu_released()
+
+
 func test_preview_render_activity_follows_visibility() -> void:
 	# A hidden portrait must not keep paying for a 3D pass or its animation
 	# (the reflection-viewport rule): UPDATE_ALWAYS and _process follow

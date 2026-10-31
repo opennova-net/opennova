@@ -68,6 +68,7 @@ Title make() {
 	// Its PLAYER_INFO screen is Joint Operations', as its code is.
 	t.player_info_combo_names = jo_title().player_info_combo_names;
 	t.player_info_combo_spins = jo_title().player_info_combo_spins;
+	t.player_info_preview_hover = jo_title().player_info_preview_hover;
 	return t;
 }
 

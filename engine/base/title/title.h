@@ -497,6 +497,10 @@ struct Title {
 	// executable registers the one callback for the event class its own player.mnu's control
 	// sends (jo_title.cpp, dfx2_title.cpp).
 	bool player_info_combo_spins = false;
+	// DFX2-76: the PLAYER_INFO portrait's hover (menu::player_info_preview_blend_step /
+	// player_info_preview_yaw_step): true, the pointer over PLAYER_PREVIEW zooms and sways it;
+	// false, never hovered, so it spins at rest and never zooms (jo_title.cpp, dfx2_title.cpp).
+	bool player_info_preview_hover = true;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

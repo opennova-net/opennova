@@ -481,6 +481,12 @@ Title make() {
 	// spin list [orig: sub_55F720 @0x55f720 - the mask 0x40 @0x55f847, sub_55E0C0 registered
 	//  @0x55f853 (dfx2.exe)].
 	t.player_info_combo_spins = true;
+	// DFX2-76: the PLAYER_INFO portrait never hovers: the twin of
+	// PlayerInfo_UpdatePlayerPreviewAnimation tests no window under the pointer and stores 0 as
+	// the hover each update, so the blend's target is 0 and the yaw spins 0x800000 [orig:
+	//  sub_55BED0 @0x55bed0 - @0x55bf03..0x55bf05, the target @0x55bf0a, the spin @0x55bf9c
+	//  (dfx2.exe)].
+	t.player_info_preview_hover = false;
 	return t;
 }
 

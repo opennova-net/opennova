@@ -88,7 +88,12 @@ int32_t player_info_preview_initial_yaw_bam(uint32_t seed);
 // spins 0x800000 an update at rest; hovered it closes 5% of its error each update on a sway about
 // a fixed facing: sway = ftol(sin(ticks * 0.0008) * 2^28), the yaw moved by
 // ftol((yaw - sway + 0x58000000) * -0.05), all in 32-bit words. The hover is
-// the pointer over PLAYER_PREVIEW alone.
+// the pointer over PLAYER_PREVIEW alone, under a title that hovers it at all
+// (Title::player_info_preview_hover): dfx2.exe's twin clears the hover each
+// update, so its portrait spins at rest and never zooms or sways
+// [orig: sub_55BED0 @0x55bed0, from Menu_UpdateFrame @0x54fb57 - `xor eax, eax`
+//  / `mov dword_25DAAE4, eax` @0x55bf03..0x55bf05 under the registered screen's
+//  flag, the target 0 @0x55bf0a, the rest spin @0x55bf9c (dfx2.exe)].
 // [orig: PlayerInfo_UpdatePlayerPreviewAnimation @0x55dba0, from Menu_UpdateFrame
 //  @0x5528f7 - the hover walk exiting after PLAYER_PREVIEW @0x55dc36, the blend
 //  flt_25DC538 * 0.95 (flt_7C6FB8) + target * 0.05 (flt_7C68E8) @0x55dc4b..0x55dc61,

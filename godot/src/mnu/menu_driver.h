@@ -261,6 +261,9 @@ public:
 	// The value change kind the COMBO_LIST callback hears under the session's title (engine
 	// player_info_combo_list_event): "combo" or "spinlist".
 	String player_info_combo_list_event() const;
+	// Whether the PLAYER_INFO portrait hovers at all under the session's title (engine
+	// Title::player_info_preview_hover).
+	bool player_info_preview_hovers() const;
 	PackedInt32Array player_info_nationality_rows() const;
 	int player_info_avatar_nationality() const { return avatars_.nationality; }
 	int player_info_avatar_division() const { return avatars_.division; }

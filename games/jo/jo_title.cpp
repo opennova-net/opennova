@@ -169,6 +169,10 @@ Title make() {
 	// box [orig: PlayerInfo_RegisterAllControls @0x561470 - the mask 0x220 @0x561597,
 	//  PlayerInfo_HandleComboListSelect registered @0x5615a6].
 	t.player_info_combo_spins = false;
+	// DFX2-76: the PLAYER_INFO portrait hovers while the pointer is over PLAYER_PREVIEW [orig:
+	//  PlayerInfo_UpdatePlayerPreviewAnimation @0x55dba0 - CWnd_IsMouseOver @0x55dc1f, the walk
+	//  ending past PLAYER_PREVIEW @0x55dc36].
+	t.player_info_preview_hover = true;
 	return t;
 }
 
