@@ -1,7 +1,8 @@
 #include <runtime/inmatch/player_input_frame.h>
 
 #include <base/gameprofile/game_type.h>
-#include <runtime/controls/controls.h> // action_code, action_for_code, catalog
+#include <base/title/title.h> // Title::friendly_tags_skip_mode_1_on_death_screen
+#include <runtime/controls/controls.h> // Catalog (the rows' dispatch codes)
 #include <runtime/controls/device_messages.h>
 #include <runtime/hud/hud_chat_entry.h> // chat_talk_row_token
 #include <runtime/world/player_look.h>  // pass_through_close_axis
@@ -13,35 +14,32 @@ namespace opennova::inmatch {
 
 namespace {
 
-// The held USE row's catalog row (useitem; its dispatch code is the action head's key).
-constexpr int kUseItemRow = 44;
+// The held USE row's dispatch code (useitem), the action head's key.
+constexpr int kUseItemCode = 177;
 
 // The records whose arms are the shell's (PlayerInputShell::record_leg): the special-key chain's
-// deploy pick, input event 12, and the escape row's, catalog row 67 (code 18)
-// (controls::KeyRowEvent and PlayerAction::EmbedderRow carry the witness).
+// deploy pick, input event 12, and the escape row's, code 18 (controls::KeyRowEvent and
+// PlayerAction::EmbedderRow carry the witness).
 constexpr int kDeployPickCode = 12;
-constexpr int kEscapeRow = 67;
+constexpr int kEscapeCode = 18;
 // The Screen Shot row (code 2): its case writes the frame to a file, the shell's device leg
 // (gameprofile/player_files.h screenshot_file_name carries the witness).
-constexpr int kScreenShotRow = 69;
-// The cheat row 117's code 40, past the role's gates (out of a session, a local player): the
-// shell's weapon-screen toggle (Role::dispatch_record carries the witness).
-constexpr int kWeaponScreenRow = 117;
+constexpr int kScreenShotCode = 2;
+// The cheat row's code 40, past the role's gates (out of a session, a local player): the shell's
+// weapon-screen toggle (Role::dispatch_record carries the witness).
+constexpr int kWeaponScreenCode = 40;
 
 // A talk or HUD row's dispatch code by its token, as the key scan queues it (the catalog row's
 // code).
-int32_t row_token_code(std::string_view token) {
-	std::size_t count = 0;
-	const controls::ActionDef *rows = controls::catalog(&count);
-	for (std::size_t i = 0; i < count; ++i)
-		if (token == rows[i].token) return controls::action_code(rows[i].id);
-	return -1;
+int32_t row_token_code(const controls::Catalog &catalog, const char *token) {
+	const controls::ActionDef *def = catalog.for_token(token);
+	return def != nullptr ? def->code : -1;
 }
 
 } // namespace
 
-int PlayerInputFrame::talk_row_of(int code) {
-	const controls::ActionDef *def = controls::action_for_code(code);
+int PlayerInputFrame::talk_row_of(int code) const {
+	const controls::ActionDef *def = catalog_->for_code(code);
 	if (def == nullptr) return -1;
 	const std::string_view token(def->token);
 	for (int row = 0; row < hud::kChatTalkRowCount; ++row)
@@ -50,18 +48,14 @@ int PlayerInputFrame::talk_row_of(int code) {
 }
 
 int PlayerInputFrame::hud_row_of(int code) {
-	const controls::ActionDef *def = controls::action_for_code(code);
-	if (def == nullptr) return -1;
-	const std::string_view token(def->token);
 	for (int row = 0; row < hud::kHudToggleRowCount; ++row)
-		if (token == hud::hud_toggle_row_token(row)) return row;
+		if (code == hud::hud_toggle_row_code(row)) return row;
 	return -1;
 }
 
 bool PlayerInputFrame::shell_record(int code) {
-	return code == kDeployPickCode || code == controls::action_code(kEscapeRow) ||
-			code == controls::action_code(kScreenShotRow) ||
-			code == controls::action_code(kWeaponScreenRow);
+	return code == kDeployPickCode || code == kEscapeCode || code == kScreenShotCode ||
+			code == kWeaponScreenCode;
 }
 
 void PlayerInputFrame::bind(PlayerInputDevice *device, PlayerInputSession *session,
@@ -69,6 +63,12 @@ void PlayerInputFrame::bind(PlayerInputDevice *device, PlayerInputSession *sessi
 	device_ = device;
 	session_ = session;
 	shell_ = shell;
+}
+
+void PlayerInputFrame::set_catalog(const controls::Catalog &catalog) {
+	// The action table over the catalog, the title's.
+	catalog_ = &catalog;
+	actions_ = controls::PlayerActions(catalog);
 }
 
 void PlayerInputFrame::clear_queues() {
@@ -174,7 +174,7 @@ InputPacket PlayerInputFrame::sample_tick(uint32_t logic_tick) {
 		// their parameter, and a keylist binding on a row no arm of the poll owns;
 		// controls::player_actions_own_code carries the witness).
 		for (const controls::KeyRowEvent &event : action_events_)
-			if (!event.release && !controls::player_actions_own_code(event.code))
+			if (!event.release && !controls::player_actions_own_code(*catalog_, event.code))
 				sample_records_.push_back({event.code, event.param, 0, 0, event.sign});
 		action_events_.clear();
 	}
@@ -225,11 +225,11 @@ void PlayerInputFrame::run_update_rows(uint32_t logic_tick, bool new_sample) {
 		for (int row = 0; row < hud::kChatTalkRowCount; ++row)
 			if ((talk_fired & (1u << row)) != 0)
 				row_records_.push_back(
-						{row_token_code(hud::chat_talk_row_token(row)), 0, 0, 0, false});
+						{row_token_code(*catalog_, hud::chat_talk_row_token(row)), 0, 0, 0, false});
 		for (int row = 0; row < hud::kHudToggleRowCount; ++row) {
 			if ((hud_fired & (1u << row)) == 0) continue;
 			const char *token = hud::hud_toggle_row_token(row);
-			row_records_.push_back({row_token_code(token), 0, 0, 0,
+			row_records_.push_back({row_token_code(*catalog_, token), 0, 0, 0,
 					device_ != nullptr && device_->fire_signed(token)});
 		}
 	}
@@ -287,7 +287,7 @@ void PlayerInputFrame::dispatch_record(const controls::InputEventRecord &record)
 	// a pass-through screen's input frame too): its Scroll Lock turn-off and the arm the press
 	// latch decides (controls::PlayerActions::use_item_record carries the witness). A dropped
 	// record arms nothing, so the hold ends at the frame's tail.
-	if (record.code == controls::action_code(kUseItemRow)) {
+	if (record.code == kUseItemCode) {
 		if (!session_->action_head_admits(record.code)) return;
 		apply_immediate(actions_.use_item_record(session_->take_use_item_press()));
 		return;
@@ -315,7 +315,18 @@ void PlayerInputFrame::dispatch_record(const controls::InputEventRecord &record)
 		}
 		default: break;
 	}
-	if (const auto request = controls::player_action_request(record)) {
+	if (const auto request = controls::player_action_request(*catalog_, record)) {
+		// The 1st Person Toggle past the head: its first-person arm turns the FP gun bit on, the
+		// HUD toggles' flag, whose event the embedder's HUD applies (world/player_view.h
+		// player_view_apply_view_action carries the witness).
+		if (request->action == controls::PlayerAction::ViewToggle) {
+			if (session_->action_head_admits(request->code) && session_->view_toggle() &&
+					hud_toggles_ != nullptr) {
+				hud_toggles_->showhud_flags |= hud::kShowHudFlagGun;
+				hud_toggle_events_.push_back(hud::hud_toggle_event::kGunBitChanged);
+			}
+			return;
+		}
 		apply_player_action(*session_, *request);
 		return;
 	}
@@ -479,7 +490,7 @@ void PlayerInputFrame::sample(InputPacket &packet, float look_x, float look_y, b
 		const auto joystick = device_->joystick_records(spectating, scroll_lock);
 		gate.key_events.insert(gate.key_events.end(), joystick.begin(), joystick.end());
 	}
-	gate.embedder_row = [](int code) {
+	gate.embedder_row = [this](int code) {
 		return talk_row_of(code) >= 0 || hud_row_of(code) >= 0 || shell_record(code);
 	};
 	gate.scroll_lock_on = scroll_lock;
@@ -544,9 +555,7 @@ bool PlayerInputFrame::dispatch_hud_rows(PlayerInputSession &session, uint32_t r
 	// drops this input frame (hud::HudKeyPoll::head_drops carries the witness).
 	uint32_t head_drops = 0;
 	for (int row = 0; row < hud::kHudToggleRowCount; ++row)
-		if (!session.action_head_admits(
-					controls::action_code(hud::hud_toggle_row_catalog_row(row))))
-			head_drops |= 1u << row;
+		if (!session.action_head_admits(hud::hud_toggle_row_code(row))) head_drops |= 1u << row;
 	// The connection mode's two bits: an authority is any role but a joiner, a session peer any
 	// role but a dedicated host. The mousescale row steps by its fire's sign bit (Shift on a
 	// modifier-less key).
@@ -561,6 +570,11 @@ bool PlayerInputFrame::dispatch_hud_rows(PlayerInputSession &session, uint32_t r
 	keys.mp_session_peer = !facts.dedicated_host;
 	keys.mouse_scale_negative = mouse_scale_negative;
 	keys.head_drops = head_drops;
+	// The friendly-tags cycle reads the death-screen latch under the session title's rule
+	// (hud::HudKeyPoll::death_screen).
+	keys.death_screen = facts.death_screen;
+	keys.friendly_tags_skip_mode_1_on_death_screen =
+			facts.title != nullptr && facts.title->friendly_tags_skip_mode_1_on_death_screen;
 	uint64_t events = hud::hud_toggles_dispatch(*hud_toggles_, keys);
 	// A typed mousescale's argument rides above the event bits (hud_toggle_event::
 	// kMouseScaleParamShift carries the witness).

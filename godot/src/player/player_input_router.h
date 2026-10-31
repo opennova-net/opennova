@@ -73,7 +73,7 @@ public:
 	// teardown; unset, the frame head's read holds for the frame.
 	void set_menu_screen_probe(const Callable &p_probe) { shell_.menu_screen_probe_ = p_probe; }
 	// The shell's arms for the records it owns, called as (code, first argument): the escape
-	// row's (code 18), the screen shot's (code 2), the cheat row 117's weapon-screen toggle
+	// row's (code 18), the screen shot's (code 2), the cheat row's weapon-screen toggle
 	// (code 40) and the deploy pick's (input event 12, its pick). Kept across a teardown;
 	// unset, those records do nothing.
 	void set_record_leg(const Callable &p_leg) { shell_.record_leg_ = p_leg; }
@@ -169,6 +169,7 @@ private:
 		opennova::controls::UseItemPressArm take_use_item_press() override;
 		void run_action(const opennova::controls::PlayerActionRequest &p_request) override;
 		bool dispatch_action_record(int32_t p_code, int32_t p_param) override;
+		bool view_toggle() override;
 		void left_button_down() override;
 		void clear_deferred_input() override;
 		void dispatch_talk_rows(uint32_t p_rows_fired, bool p_active) override;

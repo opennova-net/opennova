@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <base/platform/input_sample.h>
+#include <runtime/controls/controls.h>
 #include <runtime/controls/input_event_queue.h>
 #include <runtime/controls/key_event_queue.h>
 #include <runtime/controls/player_actions.h>
@@ -11,6 +12,10 @@
 #include <runtime/inmatch/session.h>
 #include <runtime/inmatch/special_key_chain.h>
 #include <runtime/world/player_input.h>
+
+namespace opennova {
+struct Title; // base/title/title.h
+} // namespace opennova
 
 namespace opennova::inmatch {
 
@@ -73,6 +78,9 @@ public:
 		bool mp_session = false;
 		uint32_t game_type = 0;
 		int64_t logic_tick = -1;
+		// The title the session runs as (its HUD and input rules: the friendly-tags cycle's
+		// death-screen step, Title::friendly_tags_skip_mode_1_on_death_screen); null = none.
+		const Title *title = nullptr;
 	};
 	virtual Facts facts() const = 0;
 	// The dispatcher's head by the row's flags (Role::action_head_admits carries the witness).
@@ -86,6 +94,10 @@ public:
 	// The session's own records: the exit (3), the punt by slot (34), the punt log (48). False
 	// when the code is none of them.
 	virtual bool dispatch_action_record(int32_t code, int32_t param) = 0;
+	// dfx2.exe's 1st Person Toggle (code 412) past its head: the view toggle over the local
+	// player's view (world::player_view_apply_view_action with kViewActionToggle). True when its
+	// first-person arm turned the FP gun bit on.
+	virtual bool view_toggle() = 0;
 	// The left button's down: the PowerThrow windup test (world::local_weapon_left_button_down).
 	virtual void left_button_down() = 0;
 	// The deferred input queue's clear (the whole input reset's).
@@ -109,7 +121,7 @@ public:
 	// exit confirmation), read at each update's input-frame head.
 	virtual bool menu_screen_open() = 0;
 	// A drained record whose arm is the shell's: the escape row's (code 18), the screen shot's
-	// (code 2), the cheat row 117's weapon-screen toggle (code 40) and the deploy pick's (input
+	// (code 2), the cheat row's weapon-screen toggle (code 40) and the deploy pick's (input
 	// event 12, its pick the first argument).
 	virtual void record_leg(int32_t code, int32_t param) = 0;
 };
@@ -132,6 +144,10 @@ class PlayerInputFrame final : public TickInputSource {
 public:
 	// The seams, which outlive every call into the frame (the embedder's members).
 	void bind(PlayerInputDevice *device, PlayerInputSession *session, PlayerInputShell *shell);
+	// The binding catalog the device's live records follow (the title's, controls::title_catalog),
+	// which outlives the frame: the rows' dispatch codes resolve there, and the action table is
+	// built again over it. Jointops.exe's (controls::default_catalog) until set.
+	void set_catalog(const controls::Catalog &catalog);
 	// The HUD's key toggles, whose F9 Emotes / F10 Radio menus take a digit before the weapon
 	// rows do (special_key): the embedder's process-lifetime state. Null = no menus, and no HUD
 	// rows dispatched.
@@ -218,12 +234,13 @@ public:
 	bool take_armory_request();
 	bool take_vehicle_menu_request();
 
-	// Which records' arms are whose (the embedder's dispatch and the poll's embedder rows).
-	static int talk_row_of(int code);
+private:
+	// Which records' arms are whose (the drain's dispatch and the poll's embedder rows): the talk
+	// row and the HUD toggle row a dispatch code names (-1 for none), and the shell's records.
+	int talk_row_of(int code) const;
 	static int hud_row_of(int code);
 	static bool shell_record(int code);
 
-private:
 	struct RowSample {
 		uint32_t talk = 0;
 		uint32_t hud = 0;
@@ -245,7 +262,9 @@ private:
 	PlayerInputSession *session_ = nullptr;
 	PlayerInputShell *shell_ = nullptr;
 	hud::HudToggleState *hud_toggles_ = nullptr;
-	controls::PlayerActions actions_;
+	const controls::Catalog *catalog_ = &controls::default_catalog();
+	// Jointops.exe's rows until set_catalog names the title's.
+	controls::PlayerActions actions_{controls::default_catalog()};
 	std::vector<uint64_t> hud_toggle_events_;
 	bool armory_requested_ = false;
 	bool vehicle_menu_requested_ = false;

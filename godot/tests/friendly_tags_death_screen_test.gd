@@ -2,9 +2,10 @@ extends GutTest
 
 # The friendly-tags cycle's death-screen step over the REAL bindings: a poll handed the latch
 # and a title rule that steps past mode 1 (dfx2.exe's) lands on mode 2; without the rule, or
-# without the latch, the cycle reaches mode 1 (Jointops.exe's). The no-router poll reads both
-# from its sim through HudToggles.sim_death_screen / sim_friendly_tags_skip_mode_1, which give
-# false with no sim. The witness rides the engine (base/title/title.h section 5.3).
+# without the latch, the cycle reaches mode 1 (Jointops.exe's). The input frame's HUD row
+# dispatch reads both off its session (engine inmatch::PlayerInputFrame::dispatch_hud_rows);
+# HudToggles.sim_death_screen / sim_friendly_tags_skip_mode_1 read them off a sim and give false
+# with no sim. The witness rides the engine (base/title/title.h section 5.3).
 
 
 func _cycle_to_off(toggles: HudToggles) -> void:

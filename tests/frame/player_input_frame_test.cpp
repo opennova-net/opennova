@@ -4,7 +4,10 @@
 // record's arm (the talk and HUD rows, the shell's records, the held USE row, the movement rows'
 // Scroll Lock turn-off, an action request past its head, the session's own records), the mouse
 // events and the wheel's notches, the PowerThrow left-down ahead of the drain, the HUD rows' head
-// drops and role bits, and the cursor's whole-pixel carry.
+// drops and role bits, the friendly-tags cycle's death-screen step under the session's title, the
+// title's catalog (dfx2.exe's 1st Person Toggle and its Objectives row), and the cursor's
+// whole-pixel carry.
+#include <base/title/title.h>
 #include <runtime/controls/controls.h>
 #include <runtime/controls/device_messages.h>
 #include <runtime/hud/hud_chat_entry.h>
@@ -32,13 +35,15 @@ int g_failures = 0;
 		}                                                                             \
 	} while (0)
 
+// A row's dispatch code by its token in Jointops.exe's catalog, the frame's until set_catalog.
 int code_of(const char *token) {
-	std::size_t count = 0;
-	const controls::ActionDef *rows = controls::catalog(&count);
-	for (std::size_t i = 0; i < count; ++i)
-		if (std::string(token) == rows[i].token) return controls::action_code(rows[i].id);
-	return -1;
+	const controls::ActionDef *def = controls::default_catalog().for_token(token);
+	return def != nullptr ? def->code : -1;
 }
+
+// The escape row's code (18) and the held USE row's (177).
+constexpr int kEscapeCode = 18;
+constexpr int kUseItemCode = 177;
 
 struct FakeDevice final : inmatch::PlayerInputDevice {
 	std::set<std::string> held;           // tokens held through an off-keyboard arm
@@ -88,6 +93,12 @@ struct FakeSession final : inmatch::PlayerInputSession {
 	bool dispatch_action_record(int32_t code, int32_t param) override {
 		log.push_back("record " + std::to_string(code) + " " + std::to_string(param));
 		return true;
+	}
+	// The view toggle's first-person arm (the FP gun bit's turn-on) or its chase arm.
+	bool view_toggle_first_person = true;
+	bool view_toggle() override {
+		log.push_back("view_toggle");
+		return view_toggle_first_person;
 	}
 	void left_button_down() override { log.push_back("left_down"); }
 	void clear_deferred_input() override { log.push_back("clear_deferred"); }
@@ -206,7 +217,7 @@ void test_record_order_and_mouse() {
 	const int fire = code_of("attack_1");
 	const int wheel_row = code_of("scope");
 	const int hud_detail = code_of(hud::hud_toggle_row_token(hud::kRowHudDetail));
-	const int escape = controls::action_code(67);
+	const int escape = kEscapeCode;
 	rig.device.clicks = {{2u, fire}, {controls::kMouseWheelUpEvent, wheel_row}};
 	// The message pump's records: a click, then half a notch twice (one whole notch).
 	(void)rig.frame.device_event(button(platform::MouseButton::Left, true));
@@ -267,7 +278,7 @@ void test_row_edges_across_frames() {
 void test_dispatch_arms() {
 	Rig rig;
 	const int talk = code_of(hud::chat_talk_row_token(0));
-	const int escape = controls::action_code(67);
+	const int escape = kEscapeCode;
 	const int scope = code_of("scope");
 	// A talk row's record opens its line.
 	rig.frame.dispatch_record({talk, 0, 0, 0, false});
@@ -279,7 +290,7 @@ void test_dispatch_arms() {
 			"the escape row's and the deploy pick's records are the shell's");
 	// The held USE row: the press latch's armory arm.
 	rig.session.log.clear();
-	rig.frame.dispatch_record({controls::action_code(44), 0, 0, 0, false});
+	rig.frame.dispatch_record({kUseItemCode, 0, 0, 0, false});
 	CHECK(rig.frame.take_armory_request(), "the USE row's armory arm takes its open");
 	CHECK(rig.device.turn_offs == 1, "case 0xB1 turns the auto-run off");
 	CHECK(rig.session.log.size() == 1 && rig.session.log[0] == "use",
@@ -311,9 +322,8 @@ void test_hud_rows_head_and_roles() {
 	Rig rig;
 	const uint32_t detail = 1u << hud::kRowHudDetail;
 	const uint32_t dotsize = 1u << hud::kRowDotsize;
-	// The head drops the row by its catalog row's code: no event.
-	rig.session.dropped.insert(controls::action_code(hud::hud_toggle_row_catalog_row(
-			hud::kRowHudDetail)));
+	// The head drops the row by its dispatch code: no event.
+	rig.session.dropped.insert(hud::hud_toggle_row_code(hud::kRowHudDetail));
 	rig.frame.begin_frame(true, true, true, false);
 	CHECK(!rig.frame.dispatch_hud_rows(rig.session, detail, false, 0), "no pause");
 	CHECK(rig.frame.take_hud_toggle_events().empty(), "a dropped row fires nothing");
@@ -333,6 +343,71 @@ void test_hud_rows_head_and_roles() {
 	events = rig.frame.take_hud_toggle_events();
 	CHECK(events.size() == 1 && (events[0] & hud::hud_toggle_event::kDotsizeCycled) != 0,
 			"a session peer's dotsize cycles");
+}
+
+// The friendly-tags cycle under the death screen: the session title's rule steps dfx2.exe's past
+// mode 1 to mode 2; Jointops.exe's, or either with the death screen down, reaches mode 1
+// (hud::HudKeyPoll::death_screen carries the witness).
+void test_friendly_tags_death_screen() {
+	const Title *jo = title_by_code("jo");
+	const Title *dfx2 = title_by_code("dfx2");
+	CHECK(jo != nullptr && dfx2 != nullptr, "both titles are installed");
+	if (jo == nullptr || dfx2 == nullptr) return;
+	Rig rig;
+	rig.frame.begin_frame(true, true, true, false);
+	const auto cycle = [&rig](const Title *title, bool death_screen) {
+		rig.toggles.friendly_tag_mode = hud::FriendlyTagMode::kOff;
+		rig.session.session_facts.title = title;
+		rig.session.session_facts.death_screen = death_screen;
+		(void)rig.frame.dispatch_hud_rows(rig.session, 1u << hud::kRowFriendlyTags, false, 0);
+		const auto events = rig.frame.take_hud_toggle_events();
+		return events.size() == 1 && (events[0] & hud::hud_toggle_event::kFriendlyTagsCycled) != 0
+				? rig.toggles.friendly_tag_mode
+				: hud::FriendlyTagMode::kOff;
+	};
+	CHECK(cycle(dfx2, true) == hud::FriendlyTagMode::kFull, "dfx2.exe's step past mode 1");
+	CHECK(cycle(jo, true) == hud::FriendlyTagMode::kFarBrief, "Jointops.exe's reaches mode 1");
+	CHECK(cycle(dfx2, false) == hud::FriendlyTagMode::kFarBrief, "no death screen: mode 1");
+	CHECK(cycle(nullptr, true) == hud::FriendlyTagMode::kFarBrief, "no title: no rule");
+}
+
+// The title's catalog: dfx2.exe's 1st Person Toggle (code 412) runs the view toggle past its head,
+// whose first-person arm turns the HUD's FP gun bit on with its event; Jointops.exe's catalog has
+// no such row, so its record is the session's. dfx2.exe's Objectives row's off-keyboard edge is
+// its code 58's record, the HUD row the drain dispatches.
+void test_title_catalog() {
+	const Title *dfx2 = title_by_code("dfx2");
+	CHECK(dfx2 != nullptr, "dfx2 is installed");
+	if (dfx2 == nullptr) return;
+	Rig rig;
+	rig.frame.dispatch_record({412, 0, 0, 0, false});
+	CHECK(rig.session.log.size() == 1 && rig.session.log[0] == "record 412 0",
+			"Jointops.exe's catalog: 412 is the session's record");
+	rig.frame.set_catalog(controls::title_catalog(*dfx2));
+	rig.session.log.clear();
+	rig.toggles.showhud_flags = 0;
+	rig.session.dropped.insert(412);
+	rig.frame.dispatch_record({412, 0, 0, 0, false});
+	CHECK(rig.session.log.empty() && rig.frame.take_hud_toggle_events().empty(),
+			"the head drops the toggle");
+	rig.session.dropped.clear();
+	rig.frame.dispatch_record({412, 0, 0, 0, false});
+	auto events = rig.frame.take_hud_toggle_events();
+	CHECK(rig.session.log.size() == 1 && rig.session.log[0] == "view_toggle", "the view toggle");
+	CHECK((rig.toggles.showhud_flags & hud::kShowHudFlagGun) != 0, "the FP gun bit turns on");
+	CHECK(events.size() == 1 && events[0] == hud::hud_toggle_event::kGunBitChanged,
+			"with its event");
+	rig.toggles.showhud_flags = 0;
+	rig.session.view_toggle_first_person = false;
+	rig.frame.dispatch_record({412, 0, 0, 0, false});
+	CHECK(rig.toggles.showhud_flags == 0 && rig.frame.take_hud_toggle_events().empty(),
+			"the chase arm leaves the gun bit");
+	// The Objectives row held through an off-keyboard arm: its code's record leads the update.
+	const int objectives = hud::hud_toggle_row_code(hud::kRowObjectives);
+	rig.device.held.insert(hud::hud_toggle_row_token(hud::kRowObjectives));
+	const auto drained = rig.run_frame(1, false);
+	CHECK(drained.size() == 1 && drained[0].code == objectives,
+			"dfx2.exe's Objectives edge is its record");
 }
 
 void test_cursor_and_menu() {
@@ -379,6 +454,8 @@ int main() {
 	test_row_edges_across_frames();
 	test_dispatch_arms();
 	test_hud_rows_head_and_roles();
+	test_friendly_tags_death_screen();
+	test_title_catalog();
 	test_cursor_and_menu();
 	if (g_failures != 0) {
 		std::printf("%d failure(s)\n", g_failures);
