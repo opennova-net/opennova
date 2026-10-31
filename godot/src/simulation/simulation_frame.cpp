@@ -86,7 +86,9 @@ void Simulation::apply_session_rules() {
 
 bool Simulation::adopt_role(std::unique_ptr<opennova::inmatch::Role> p_role,
 		opennova::inmatch::HostRole *p_host, opennova::inmatch::JoinerRole *p_joiner) {
-	// The session title's binding catalog: the dispatcher's head reads its rows' flags.
+	// The session title and its binding catalog: the dispatcher's head reads its rows' flags, the
+	// frame's role view the title (inmatch::Session::frame_role_view).
+	p_role->set_title(session_title(net_, assets_.root));
 	p_role->set_controls(opennova::controls::title_catalog(session_title(net_, assets_.root)));
 	const opennova::inmatch::TransitionResult out = session_.configure_role(*p_role);
 	if (out.code != opennova::inmatch::TransitionCode::Applied &&

@@ -851,7 +851,9 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// keeps them, and the socket with them.
 	if (!next_mission) {
 		role_ = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost);
-		// The game's binding catalog, whose rows the dispatcher's head and the console's walks read.
+		// The game's title (the frame's role view, inmatch::Session::frame_role_view) and its binding
+		// catalog, whose rows the dispatcher's head and the console's walks read.
+		role_->set_title(*title_by_code(game_code_));
 		role_->set_controls(controls::title_catalog(*title_by_code(game_code_)));
 		role_->set_socket(&demux_->game());
 		role_->set_rotation(&rotation_);

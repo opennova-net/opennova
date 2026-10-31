@@ -1373,6 +1373,7 @@ RoleView Session::frame_role_view() const {
 	view.kernel = role_ != nullptr ? role_->kernel() : nullptr;
 	view.runtime = role_ != nullptr ? role_->client_runtime() : nullptr;
 	view.joiner = kind_ == RoleKind::Joiner;
+	view.title = role_ != nullptr ? role_->title() : nullptr;
 	return view;
 }
 
