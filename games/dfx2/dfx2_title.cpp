@@ -172,11 +172,13 @@ Title make() {
 	// too (DFX2-33, dfx2_rules.cpp).
 	t.profile_single_player_kit = kSinglePlayerKit;
 	t.profile_class_kits = kProfileClassKits;
-	// DFX2-41: the DEATH map pane's ceiling 6.0 (flt_7CC0C8) and its frame, four lines round the
-	// pane's rect in 0xFFE1DF4B after the map [orig: sub_550690 @0x550922 / @0x550974; sub_550F40
-	// @0x551178 (the right drag), @0x550fe6..0x551052 (the map, then the frame); sub_550C60
-	// @0x550ca6 (the wheel) (dfx2.exe)].
-	t.death_map_zoom_max = 6.0f;
+	// DFX2-58: the map views' ceiling 6.0 (flt_7CC0C8): the CMAP window's [orig:
+	// CMapWindow_HandleEvent @0x546a60 - @0x5454e6, @0x546fcc] and the DEATH map pane's [orig:
+	// sub_550690 @0x550922 / @0x550967 (the reset @0x550974); sub_550F40 @0x551178 (the right
+	// drag); sub_550C60 @0x550ca6 (the wheel) (dfx2.exe)].
+	t.map_view_zoom_max = 6.0f;
+	// DFX2-41: the DEATH map pane's frame, four lines round the pane's rect in 0xFFE1DF4B after
+	// the map [orig: sub_550F40 @0x550fe6..0x551052 (the map, then the frame) (dfx2.exe)].
 	t.death_map_frame_color = 0xFFE1DF4Bu;
 	// DFX2-41: the reveal 360 ticks past the death, MAIN shown before the shroud; the activation
 	// hides MAIN with it [orig: sub_552770 @0x552792 (360), CWnd_SetShown(MAIN, 1) @0x5527b1;

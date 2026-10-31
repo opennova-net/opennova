@@ -194,13 +194,16 @@ struct Title {
 	// fresh record init_defaults gives no page.
 	const char *const *profile_single_player_kit = nullptr;
 	const char *const *const *profile_class_kits = nullptr;
-	// DFX2-41: the DEATH screen's map pane, the executable's values: its zoom ceiling (the show's
-	// fit, the right drag and the wheel clamp to it, and a fit landing on it resets the pan, the
-	// target and the zoom ease), and the colour of the frame it draws round the map after it (0:
-	// none). Jointops.exe's: 10.0 and no frame [orig: CMap_OverlayInputHandler @0x554310 -
-	// flt_7C44B4 @0x5544dd; DeathScreen_UpdateUI @0x553150 - @0x5533ad / @0x5533f2;
-	// DeathScreen_ZoomStep @0x5535d0].
-	float death_map_zoom_max = 10.0f;
+	// DFX2-58: the map views' zoom ceiling, the CMAP window's (its right drag and its ZOOMIN /
+	// ZOOMOUT step clamp to it) and the DEATH screen's map pane's (the show's fit, the right drag
+	// and the wheel clamp to it, and a fit landing on it resets the pan, the target and the zoom
+	// ease): Jointops.exe's 10.0 (flt_7C44B4) at every site, dfx2.exe's 6.0 (flt_7CC0C8)
+	// [orig: CMapWindow_HandleEvent @0x5497f0 - @0x548276, @0x549d5c; CMap_OverlayInputHandler
+	//  @0x554310 - @0x5544df; DeathScreen_UpdateUI @0x553150 - @0x5533a0 / @0x5533e5;
+	//  DeathScreen_ZoomStep @0x5535d0 - @0x553616].
+	float map_view_zoom_max = 10.0f;
+	// DFX2-41: the colour of the frame the DEATH screen's map pane draws round the map after it
+	// (0: none, Jointops.exe's).
 	uint32_t death_map_frame_color = 0;
 	// DFX2-41: the DEATH screen's reveal: the ticks past the local death after which its
 	// DEATH_SHROUD shows (at once under the deploy overlay), and whether its MAIN window hides

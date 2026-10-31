@@ -683,7 +683,7 @@ void test_death_zoom_ease() {
 //  (dfx2.exe)]
 void test_death_title_pane() {
     opennova::Title dfx2;
-    dfx2.death_map_zoom_max = 6.0f;
+    dfx2.map_view_zoom_max = 6.0f;
     dfx2.death_map_frame_color = 0xFFE1DF4Bu;
     DeathMapView v;
     v.apply_title(dfx2);
@@ -768,7 +768,33 @@ void test_death_zone_markers() {
     CHECK(label);
 }
 
+// DFX2-58: the CMAP window's ceiling is the title's too: dfx2.exe's 6.0 for the right drag and
+// the ZOOMIN / ZOOMOUT step, Jointops.exe's 10.0; the titles' rows carry 10.0 and 6.0.
+// [orig: CMapWindow_HandleEvent @0x5497f0 - @0x548276, @0x549d5c] [orig: CMapWindow_HandleEvent
+//  @0x546a60 - @0x5454e6, @0x546fcc (dfx2.exe)]
+void test_command_title_zoom() {
+    CHECK(opennova::title_by_code("jo")->map_view_zoom_max == 10.0f);
+    CHECK(opennova::title_by_code("dfx2")->map_view_zoom_max == 6.0f);
+    CommandMapView v;
+    v.apply_title(*opennova::title_by_code("dfx2"));
+    v.on_load();
+    v.on_event(MapViewEvent::kRightDown, 100, 100, 0, 0);
+    v.on_event(MapViewEvent::kMove, -2000, 100, kMapViewButtonRight, 0);
+    CHECK(v.view.zoom == 6.0f);
+    v.on_event(MapViewEvent::kRightUp, -2000, 100, 0, 0);
+    v.view.zoom = 5.5f;
+    v.zoom_button(-1);
+    CHECK(v.view.zoom == 6.0f);
+    CommandMapView jo;
+    jo.apply_title(*opennova::title_by_code("jo"));
+    jo.on_load();
+    jo.view.zoom = 9.5f;
+    jo.zoom_button(-1);
+    CHECK(jo.view.zoom == 10.0f);
+}
+
 int main() {
+    test_command_title_zoom();
     test_death_title_pane();
     test_death_zoom_ease();
     test_death_zone_markers();

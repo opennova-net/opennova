@@ -95,8 +95,8 @@ struct MapViewPan {
 	int32_t window_w = 0;
 	int32_t window_h = 0;
 	float pixel_ratio = 0.0f;
-	// The zoom ceiling the drag, the wheel and the DEATH fit clamp to: 10.0 (the CMAP's, and the
-	// DEATH pane's by its title, DeathMapView::apply_title).
+	// The zoom ceiling the drag, the wheel, the CMAP step and the DEATH fit clamp to: 10.0, each
+	// view's by its title (Title::map_view_zoom_max; CommandMapView / DeathMapView::apply_title).
 	float zoom_max = kMapViewZoomMax;
 
 	// The render-pass stamps: the window size and the menu's device ratio,
@@ -168,7 +168,7 @@ struct DeathMapView {
 	uint32_t frame_color = 0;
 
 	// The pane the title's executable draws: its zoom ceiling and its frame
-	// (Title::death_map_zoom_max / death_map_frame_color).
+	// (Title::map_view_zoom_max / death_map_frame_color).
 	void apply_title(const Title &title);
 
 	// The screen's load event: once per load, the first-ever load seeds zoom
@@ -252,6 +252,10 @@ struct CommandMapView {
 	// per mission) and allocates the orders list (the presenter's).
 	// [orig: CMap_InitScreenOnce @0x54b280]
 	void on_load();
+	// The window the title's executable draws: its zoom ceiling (Title::map_view_zoom_max,
+	// DFX2-58), the right drag's and the step's [orig: CMapWindow_HandleEvent @0x5497f0 -
+	// @0x548276, @0x549d5c] [orig: @0x5454e6, @0x546fcc in its twin @0x546a60 (dfx2.exe)].
+	void apply_title(const Title &title);
 	// The mouse-class events. A left press with CREATE_WAYPOINTS set asks for
 	// the waypoint-name dialog instead of panning (kPlaceWaypoint: the
 	// embedder runs the dialog leg and stores the click point); the wheel is

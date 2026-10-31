@@ -116,15 +116,15 @@ opennova::hud::MapViewRect MapViewWindow::device_rect_(const Vector2 &p_surface)
 }
 
 void MapViewWindow::screen_load() {
+	// The session's title's view (opennova::hud::CommandMapView / DeathMapView::apply_title).
+	const opennova::Title *title = nullptr;
+	if (Simulation *sim = sim_()) title = sim->role_view().title;
 	if (view_kind_ == VIEW_COMMAND) {
+		if (title != nullptr) state_->command.apply_title(*title);
 		state_->command.on_load();
 		return;
 	}
-	// The session's title's pane (opennova::hud::DeathMapView::apply_title).
-	if (Simulation *sim = sim_()) {
-		const opennova::inmatch::RoleView view = sim->role_view();
-		if (view.title != nullptr) state_->death.apply_title(*view.title);
-	}
+	if (title != nullptr) state_->death.apply_title(*title);
 	state_->death.on_load();
 }
 

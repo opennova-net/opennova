@@ -296,8 +296,12 @@ void DeathMapView::on_load() {
 	initialized = true;
 }
 
+void CommandMapView::apply_title(const Title &title) {
+	view.zoom_max = title.map_view_zoom_max;
+}
+
 void DeathMapView::apply_title(const Title &title) {
-	view.zoom_max = title.death_map_zoom_max;
+	view.zoom_max = title.map_view_zoom_max;
 	frame_color = title.death_map_frame_color;
 }
 
