@@ -19,6 +19,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <formats/lwf/lwf.h>
@@ -75,14 +76,20 @@ public:
 	// resolution filters against (runtime/audio/dialog_queue.h).
 	const opennova::audio::SoundSetIndex &set_index() const { return index_; }
 
-	// Return lightweight layer descriptors for the mission ambient mixer. No WAV
-	// is read or decoded here: placed emitters remain data until one of the eight
-	// physical channels actually needs the layer. The emitter path always uses
-	// member 0 of each layer (engine: runtime/audio/oneshot_play.cpp).
+	// A set's layers as the emitter mix takes them as candidates (the engine's
+	// ambient_layer_rows: member 0 of each layer whose wave the root holds), the
+	// rows the engine's ambient emitters (runtime/audio/ambient_emitters.h)
+	// describe their markers and lanes with; empty for a set the chain lacks. No
+	// WAV is read or decoded here: placed emitters remain data until one of the
+	// eight physical channels actually needs the layer. C++-side seam (not bound).
+	std::vector<opennova::audio::AmbientLayerRow> ambient_layer_rows(const std::string &p_name) const;
+	// The same rows as AmbientLayer records, the GDScript read.
 	TypedArray<AmbientLayer> describe_ambient(const String &p_name);
-	// Resolve a descriptor returned by describe_ambient(). Description and decode
-	// are separate so hundreds of candidates can be ranked while only selected
-	// channel entrants cause VFS reads and WAV decoding.
+	// Resolve a layer's wave (a row's wave as the bank names it, or a descriptor
+	// returned by describe_ambient()). Description and decode are separate so
+	// hundreds of candidates can be ranked while only selected channel entrants
+	// cause VFS reads and WAV decoding.
+	Ref<AudioStreamWAV> resolve_ambient_wave(const String &p_wav_path);
 	Ref<AudioStreamWAV> resolve_ambient_stream(const Ref<AmbientLayer> &p_layer);
 	// Bind a resolved stream to a reusable physical ambient channel. Playback is
 	// owned by MissionAudio: incumbents continue while new bindings restart, and

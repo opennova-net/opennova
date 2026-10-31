@@ -40,13 +40,10 @@ var _selected_server := -1
 var _browse_error := ""        # last LAN search failure, shown in the empty list
 
 
-# True when this menu is the JO multiplayer menu (so the shell delegates to us). Keyed on
-# control names unique to mp.mnu's LAN/host screens rather than a screen name, since the
-# whole document (all screens) is addressable at once.
-func owns_menu(driver: MenuDriver) -> bool:
-	if driver == null:
-		return false
-	return driver.has_widget("LAN_GAME_LIST") or driver.has_widget("SELECTED_MISSIONS")
+# The LAN multiplayer screens' delegate: the engine gives it a document holding
+# LAN_GAME_LIST or SELECTED_MISSIONS (menu::MenuCommands::wire).
+func owner_name() -> String:
+	return "lan"
 
 
 # Provide the LAN discovery session. Kept injectable for menu and socket seam tests.

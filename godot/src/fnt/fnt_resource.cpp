@@ -1,8 +1,5 @@
 #include "fnt/fnt_resource.h"
 
-#include <base/io/cp1252.h>
-
-#include <godot_cpp/classes/text_server.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -30,8 +27,6 @@ void FntResource::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_pixel_alpha", "page", "x", "y"), &FntResource::get_pixel_alpha);
 	ClassDB::bind_method(D_METHOD("set_pixel_alpha", "page", "x", "y", "alpha"), &FntResource::set_pixel_alpha);
-
-	ClassDB::bind_method(D_METHOD("to_font_file"), &FntResource::to_font_file);
 
 	ClassDB::bind_static_method("FntResource", D_METHOD("pack_shelf", "sizes"), &FntResource::pack_shelf);
 
@@ -246,84 +241,6 @@ Error FntResource::set_pixel_alpha(int p_page, int p_x, int p_y, int p_alpha) {
 	page[offset + 3] = static_cast<uint8_t>(p_alpha);
 	emit_changed();
 	return OK;
-}
-
-Ref<FontFile> FntResource::to_font_file() const {
-	if (!_has_valid_font()) {
-		return Ref<FontFile>();
-	}
-
-	Ref<FontFile> font;
-	font.instantiate();
-	font->set_allow_system_fallback(false);
-
-	const int32_t cache_index = 0;
-	int32_t font_height = 16;
-	for (uint32_t i = 0; i < FNT_GLYPH_COUNT; ++i) {
-		int width = 0;
-		int height = 0;
-		fnt_get_glyph_size(&font_.glyphs[i], &width, &height);
-		if (height > font_height) {
-			font_height = height;
-		}
-	}
-
-	Vector2i size_key(font_height, 0);
-
-	for (uint32_t page = 0; page < font_.num_pages; ++page) {
-		Ref<Image> image = get_page_image(static_cast<int>(page));
-		if (image.is_valid()) {
-			font->set_texture_image(cache_index, size_key, static_cast<int32_t>(page), image);
-		}
-	}
-
-	int32_t advance_adjust = font_.glyph_spacing - 1;
-	for (uint32_t i = 0; i < FNT_GLYPH_COUNT; ++i) {
-		const std::uint8_t retail_byte = static_cast<std::uint8_t>(FNT_FIRST_CHAR + i);
-		// The non-printing byte range and its witness live at fnt.h's
-		// fnt_byte_is_nonprinting; every printing byte directly selects its FNT
-		// record. Expose that record at the codepoint produced by OpenNova's
-		// CP1252 string boundary so Godot selects the same bitmap and metrics.
-		if (fnt_byte_is_nonprinting(retail_byte)) {
-			continue;
-		}
-		const int32_t char_code = static_cast<int32_t>(opennova::cp1252_decode_byte(retail_byte));
-		const fnt_glyph_t *glyph = &font_.glyphs[i];
-
-		int x0 = 0;
-		int y0 = 0;
-		int x1 = 0;
-		int y1 = 0;
-		fnt_uv_to_pixels(&glyph->uv, &x0, &y0, &x1, &y1);
-		int width = x1 - x0;
-		int height = y1 - y0;
-
-		if (width <= 0 || height <= 0) {
-			if (char_code == 32) {
-				// font_height / 3 as the empty-space advance is an uncited
-				// runtime choice pending witness (the retail advance walk is
-				// glyph-width driven; see docs/fonts/fnt-re.md).
-				font->set_glyph_advance(cache_index, font_height, char_code, Vector2(font_height / 3.0f, 0));
-			}
-			continue;
-		}
-
-		font->set_glyph_texture_idx(cache_index, size_key, char_code, static_cast<int32_t>(glyph->page));
-		font->set_glyph_uv_rect(cache_index, size_key, char_code, Rect2(x0, y0, width, height));
-		font->set_glyph_size(cache_index, size_key, char_code, Vector2(width, height));
-		font->set_glyph_offset(cache_index, size_key, char_code, Vector2(0, 0));
-		int advance = width + advance_adjust;
-		if (advance < 1) {
-			advance = 1;
-		}
-		font->set_glyph_advance(cache_index, font_height, char_code, Vector2(advance, 0));
-	}
-
-	font->set_fixed_size(font_height);
-	font->set_fixed_size_scale_mode(TextServer::FIXED_SIZE_SCALE_DISABLE);
-	font->set_cache_ascent(cache_index, font_height, 0);
-	font->set_cache_descent(cache_index, font_height, font_height);
-	return font;
 }
 
 } // namespace godot

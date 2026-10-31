@@ -1,4 +1,6 @@
 #include "terrain/foliage_dispatcher.h"
+
+#include <runtime/assets/foliage_assets.h>
 #include "util/data_format.h"
 
 #include "render/visual_layers.h"
@@ -20,7 +22,6 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <base/io/bam.h>
-#include <base/io/fixed.h>
 #include <formats/foliage/runtime.h>
 #include <runtime/terrain/foliage_detail_collector.h>
 
@@ -62,12 +63,6 @@ namespace godot {
 namespace {
 
 constexpr float INVALID_HEIGHT_THRESHOLD = -1.0e6f;
-
-bool finite_vector(const Vector3 &p_value) {
-  return std::isfinite(static_cast<float>(p_value.x)) &&
-         std::isfinite(static_cast<float>(p_value.y)) &&
-         std::isfinite(static_cast<float>(p_value.z));
-}
 
 // The pass names and per-draw uniform names the applier writes every frame.
 // Function-local statics: a godot::StringName cannot be a file-scope static
@@ -151,18 +146,15 @@ FoliageDispatcher::~FoliageDispatcher() {
       tile_info_->is_connected("changed", tile_info_changed)) {
     tile_info_->disconnect("changed", tile_info_changed);
   }
-  const Callable colormap_changed =
-      callable_mp(this, &FoliageDispatcher::_on_colormap_source_changed);
-  if (colormap_source_.is_valid() &&
-      colormap_source_->is_connected("terrain_changed", colormap_changed)) {
-    colormap_source_->disconnect("terrain_changed", colormap_changed);
-  }
 }
 
 void FoliageDispatcher::_bind_methods() {
   ClassDB::bind_method(
-      D_METHOD("configure_slots", "defs", "meshes", "fd_textures"),
-      &FoliageDispatcher::configure_slots);
+      D_METHOD("configure_for_terrain", "resource_root", "data", "tiles"),
+      &FoliageDispatcher::configure_for_terrain);
+  ClassDB::bind_method(
+      D_METHOD("configure_slots_from_defs", "resource_root", "defs"),
+      &FoliageDispatcher::configure_slots_from_defs);
   ClassDB::bind_method(D_METHOD("set_terrain", "terrain"),
                        &FoliageDispatcher::set_terrain);
   ClassDB::bind_method(D_METHOD("set_wind_clock_override_ms", "ms"),
@@ -185,22 +177,6 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::set_tile_info);
   ClassDB::bind_method(D_METHOD("get_tile_info"),
                        &FoliageDispatcher::get_tile_info);
-  ClassDB::bind_method(D_METHOD("set_colormap_source", "data"),
-                       &FoliageDispatcher::set_colormap_source);
-  ClassDB::bind_method(D_METHOD("get_colormap_source"),
-                       &FoliageDispatcher::get_colormap_source);
-  ClassDB::bind_method(D_METHOD("set_height_sampler", "sampler"),
-                       &FoliageDispatcher::set_height_sampler);
-  ClassDB::bind_method(D_METHOD("get_height_sampler"),
-                       &FoliageDispatcher::get_height_sampler);
-  ClassDB::bind_method(D_METHOD("set_detail_foliage_sampler", "sampler"),
-                       &FoliageDispatcher::set_detail_foliage_sampler);
-  ClassDB::bind_method(D_METHOD("get_detail_foliage_sampler"),
-                       &FoliageDispatcher::get_detail_foliage_sampler);
-  ClassDB::bind_method(D_METHOD("set_foliage_sampler", "sampler"),
-                       &FoliageDispatcher::set_foliage_sampler);
-  ClassDB::bind_method(D_METHOD("get_foliage_sampler"),
-                       &FoliageDispatcher::get_foliage_sampler);
   ClassDB::bind_method(D_METHOD("set_silhouette_anchors", "anchors"),
                        &FoliageDispatcher::set_silhouette_anchors);
   ClassDB::bind_method(D_METHOD("get_silhouette_anchors"),
@@ -242,16 +218,6 @@ void FoliageDispatcher::_bind_methods() {
                        &FoliageDispatcher::clear_asset_cache);
   ClassDB::bind_method(D_METHOD("asset_cache_entry_count"),
                        &FoliageDispatcher::asset_cache_entry_count);
-  ClassDB::bind_method(D_METHOD("resolve_slot_meshes", "resource_root", "defs"),
-                       &FoliageDispatcher::resolve_slot_meshes);
-  ClassDB::bind_method(
-      D_METHOD("resolve_slot_fd_textures", "resource_root", "defs"),
-      &FoliageDispatcher::resolve_slot_fd_textures);
-  ClassDB::bind_method(D_METHOD("load_mesh", "resource_root", "graphic"),
-                       &FoliageDispatcher::load_mesh);
-  ClassDB::bind_static_method("FoliageDispatcher",
-                              D_METHOD("aggregate_lod0_submeshes", "submeshes"),
-                              &FoliageAssetCache::aggregate_lod0_submeshes);
 
   ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data",
                             PROPERTY_HINT_RESOURCE_TYPE, "TerrainData"),
@@ -259,15 +225,6 @@ void FoliageDispatcher::_bind_methods() {
   ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "tile_info",
                             PROPERTY_HINT_RESOURCE_TYPE, "TerrainTileInfo"),
                "set_tile_info", "get_tile_info");
-  ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "colormap_source",
-                            PROPERTY_HINT_RESOURCE_TYPE, "TerrainData"),
-               "set_colormap_source", "get_colormap_source");
-  ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "height_sampler"),
-               "set_height_sampler", "get_height_sampler");
-  ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "detail_foliage_sampler"),
-               "set_detail_foliage_sampler", "get_detail_foliage_sampler");
-  ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "foliage_sampler"),
-               "set_foliage_sampler", "get_foliage_sampler");
   ADD_PROPERTY(
       PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "silhouette_anchors"),
       "set_silhouette_anchors", "get_silhouette_anchors");
@@ -292,9 +249,10 @@ void FoliageDispatcher::_notification(int p_what) {
   }
 }
 
-void FoliageDispatcher::configure_slots(const Array &p_defs,
-                                            const Array &p_meshes,
-                                            const Array &p_fd_textures) {
+void FoliageDispatcher::configure_slot_geometry(
+    const Array &p_defs,
+    std::vector<opennova::renderer::FoliageSlotGeometry> p_geometry,
+    const std::vector<bool> &p_supplied, const Array &p_fd_textures) {
   palette_masks_.fill(0u);
   slot_diagnostics_.clear();
   authored_slot_count_ = 0;
@@ -315,11 +273,11 @@ void FoliageDispatcher::configure_slots(const Array &p_defs,
       def = p_defs[slot];
     }
 
-    Ref<Mesh> mesh;
-    if (slot < p_meshes.size()) {
-      mesh = p_meshes[slot];
+    const bool mesh_supplied =
+        static_cast<size_t>(slot) < p_supplied.size() && p_supplied[static_cast<size_t>(slot)];
+    if (static_cast<size_t>(slot) < p_geometry.size()) {
+      source_geometry_[slot] = std::move(p_geometry[static_cast<size_t>(slot)]);
     }
-    source_geometry_[slot] = _extract_source_geometry(mesh);
 
     if (slot < p_fd_textures.size()) {
       fd_textures_[slot] = p_fd_textures[slot];
@@ -327,14 +285,18 @@ void FoliageDispatcher::configure_slots(const Array &p_defs,
 
     Dictionary diagnostic;
     diagnostic["slot"] = slot;
-    diagnostic["mesh_supplied"] = mesh.is_valid();
+    diagnostic["mesh_supplied"] = mesh_supplied;
     diagnostic["fd_texture_loaded"] = fd_textures_[slot].is_valid();
     diagnostic["source_vertices"] =
         static_cast<int64_t>(source_geometry_[slot].vertices.size());
     diagnostic["source_indices"] =
         static_cast<int64_t>(source_geometry_[slot].indices.size());
 
-    if (def.is_null()) {
+    // Which slots draw is the engine's (assets::foliage_slot_status carries
+    // the witness).
+    const opennova::assets::FoliageSlotStatus status = opennova::assets::foliage_slot_status(
+        def.is_valid(), mesh_supplied, source_geometry_[slot]);
+    if (status == opennova::assets::FoliageSlotStatus::MissingDefinition) {
       diagnostic["graphic"] = String();
       diagnostic["match"] = PackedInt32Array();
       diagnostic["status"] = "missing_definition";
@@ -345,15 +307,11 @@ void FoliageDispatcher::configure_slots(const Array &p_defs,
     ++authored_slot_count_;
     diagnostic["graphic"] = def->get_graphic();
     diagnostic["match"] = def->get_match();
-    if (mesh.is_null()) {
+    if (status != opennova::assets::FoliageSlotStatus::Enabled) {
       ++disabled_slot_count_;
-      diagnostic["status"] = "missing_mesh";
-      slot_diagnostics_.append(diagnostic);
-      continue;
-    }
-    if (!source_geometry_[slot].valid) {
-      ++disabled_slot_count_;
-      diagnostic["status"] = "invalid_mesh";
+      diagnostic["status"] = status == opennova::assets::FoliageSlotStatus::MissingModel
+          ? "missing_mesh"
+          : "invalid_mesh";
       slot_diagnostics_.append(diagnostic);
       continue;
     }
@@ -498,68 +456,7 @@ void FoliageDispatcher::_on_tile_info_changed() {
   }
 }
 
-void FoliageDispatcher::set_colormap_source(
-    const Ref<TerrainData> &p_data) {
-  if (colormap_source_ == p_data) {
-    return;
-  }
-  const Callable changed =
-      callable_mp(this, &FoliageDispatcher::_on_colormap_source_changed);
-  if (colormap_source_.is_valid() &&
-      colormap_source_->is_connected("terrain_changed", changed)) {
-    colormap_source_->disconnect("terrain_changed", changed);
-  }
-  colormap_source_ = p_data;
-  if (colormap_source_.is_valid()) {
-    colormap_source_->connect("terrain_changed", changed);
-  }
-  reset();
-}
-
-Ref<TerrainData> FoliageDispatcher::get_colormap_source() const {
-  return colormap_source_;
-}
-
 void FoliageDispatcher::_on_terrain_data_changed() { reset(); }
-
-void FoliageDispatcher::_on_colormap_source_changed() { reset(); }
-
-void FoliageDispatcher::set_height_sampler(const Callable &p_sampler) {
-  if (height_sampler_ == p_sampler) {
-    return;
-  }
-  height_sampler_ = p_sampler;
-  reset();
-}
-
-Callable FoliageDispatcher::get_height_sampler() const {
-  return height_sampler_;
-}
-
-void FoliageDispatcher::set_detail_foliage_sampler(
-    const Callable &p_sampler) {
-  if (detail_foliage_sampler_ == p_sampler) {
-    return;
-  }
-  detail_foliage_sampler_ = p_sampler;
-  reset();
-}
-
-Callable FoliageDispatcher::get_detail_foliage_sampler() const {
-  return detail_foliage_sampler_;
-}
-
-void FoliageDispatcher::set_foliage_sampler(const Callable &p_sampler) {
-  if (foliage_sampler_ == p_sampler) {
-    return;
-  }
-  foliage_sampler_ = p_sampler;
-  reset();
-}
-
-Callable FoliageDispatcher::get_foliage_sampler() const {
-  return foliage_sampler_;
-}
 
 void FoliageDispatcher::set_silhouette_anchors(
     const PackedVector3Array &p_anchors) {
@@ -575,18 +472,18 @@ PackedVector3Array FoliageDispatcher::get_silhouette_anchors() const {
 void FoliageDispatcher::configure_slots_from_defs(
     const Ref<ResourceRoot> &p_resource_root, const Array &p_defs) {
   asset_cache_.check_epoch();
-  configure_slots(p_defs, asset_cache_.resolve_slot_meshes(p_resource_root, p_defs),
-                  asset_cache_.resolve_slot_fd_textures(p_resource_root, p_defs));
+  std::vector<bool> supplied;
+  std::vector<opennova::renderer::FoliageSlotGeometry> geometry =
+      asset_cache_.resolve_slot_geometry(p_resource_root, p_defs, supplied);
+  configure_slot_geometry(p_defs, std::move(geometry), supplied,
+                          asset_cache_.resolve_slot_fd_textures(p_resource_root, p_defs));
 }
 
 void FoliageDispatcher::configure_for_terrain(
     const Ref<ResourceRoot> &p_resource_root, const Ref<TerrainData> &p_data,
     const Ref<TerrainTileInfo> &p_tiles) {
-  // The runtime source already supplies height, detail/model foliage indices,
-  // colormap, and change invalidation. Binding the same TerrainData again as
-  // the fallback colormap source attempts a duplicate terrain_changed
-  // connection in Godot and makes mission reloads report
-  // ERR_INVALID_PARAMETER.
+  // The runtime source supplies height, detail/model foliage indices,
+  // colormap, and change invalidation.
   set_terrain_data(p_data);
   if (p_data.is_null()) {
     return;
@@ -601,127 +498,6 @@ void FoliageDispatcher::clear_asset_cache() { asset_cache_.clear(); }
 
 int FoliageDispatcher::asset_cache_entry_count() {
   return asset_cache_.entry_count();
-}
-
-Array FoliageDispatcher::resolve_slot_meshes(
-    const Ref<ResourceRoot> &p_resource_root, const Array &p_defs) {
-  return asset_cache_.resolve_slot_meshes(p_resource_root, p_defs);
-}
-
-Array FoliageDispatcher::resolve_slot_fd_textures(
-    const Ref<ResourceRoot> &p_resource_root, const Array &p_defs) {
-  return asset_cache_.resolve_slot_fd_textures(p_resource_root, p_defs);
-}
-
-Ref<Mesh> FoliageDispatcher::load_mesh(const Ref<ResourceRoot> &p_resource_root,
-                                       const String &p_graphic) {
-  return asset_cache_.load_mesh(p_resource_root, p_graphic);
-}
-
-opennova::renderer::FoliageSlotGeometry
-FoliageDispatcher::_extract_source_geometry(const Ref<Mesh> &p_mesh) const {
-  opennova::renderer::FoliageSlotGeometry result;
-  if (p_mesh.is_null()) {
-    return result;
-  }
-
-  Vector3 minimum(std::numeric_limits<real_t>::max(),
-                  std::numeric_limits<real_t>::max(),
-                  std::numeric_limits<real_t>::max());
-  Vector3 maximum(std::numeric_limits<real_t>::lowest(),
-                  std::numeric_limits<real_t>::lowest(),
-                  std::numeric_limits<real_t>::lowest());
-
-  for (int surface = 0; surface < p_mesh->get_surface_count(); ++surface) {
-    // VegAssets supplies an ArrayMesh aggregate. Validate its public surface
-    // topology before concatenating; PrimitiveMesh inputs (used by previews
-    // and tests) are engine-generated triangle meshes.
-    const ArrayMesh *array_mesh =
-        Object::cast_to<ArrayMesh>(p_mesh.ptr());
-    if (array_mesh != nullptr &&
-        array_mesh->surface_get_primitive_type(surface) !=
-            Mesh::PRIMITIVE_TRIANGLES) {
-      continue;
-    }
-    const Array arrays = p_mesh->surface_get_arrays(surface);
-    if (arrays.size() < Mesh::ARRAY_MAX ||
-        arrays[Mesh::ARRAY_VERTEX].get_type() !=
-            Variant::PACKED_VECTOR3_ARRAY) {
-      continue;
-    }
-
-    const PackedVector3Array positions = arrays[Mesh::ARRAY_VERTEX];
-    if (positions.is_empty()) {
-      continue;
-    }
-
-    PackedVector2Array uvs;
-    if (arrays[Mesh::ARRAY_TEX_UV].get_type() ==
-        Variant::PACKED_VECTOR2_ARRAY) {
-      uvs = arrays[Mesh::ARRAY_TEX_UV];
-    }
-
-    PackedInt32Array source_indices;
-    if (arrays[Mesh::ARRAY_INDEX].get_type() == Variant::PACKED_INT32_ARRAY) {
-      source_indices = arrays[Mesh::ARRAY_INDEX];
-    }
-
-    const int32_t vertex_base = static_cast<int32_t>(result.vertices.size());
-    for (int vertex = 0; vertex < positions.size(); ++vertex) {
-      const Vector3 position = positions[vertex];
-      if (!finite_vector(position)) {
-        return opennova::renderer::FoliageSlotGeometry{};
-      }
-      opennova::renderer::FoliageSourceVertex source_vertex;
-      source_vertex.x = static_cast<float>(position.x);
-      source_vertex.y = static_cast<float>(position.y);
-      source_vertex.z = static_cast<float>(position.z);
-      if (vertex < uvs.size()) {
-        source_vertex.u = static_cast<float>(uvs[vertex].x);
-        source_vertex.v = static_cast<float>(uvs[vertex].y);
-      }
-      result.vertices.push_back(source_vertex);
-      minimum.x = std::min(minimum.x, position.x);
-      minimum.y = std::min(minimum.y, position.y);
-      minimum.z = std::min(minimum.z, position.z);
-      maximum.x = std::max(maximum.x, position.x);
-      maximum.y = std::max(maximum.y, position.y);
-      maximum.z = std::max(maximum.z, position.z);
-    }
-
-    if (source_indices.is_empty()) {
-      for (int index = 0; index + 2 < positions.size(); index += 3) {
-        result.indices.push_back(vertex_base + index);
-        result.indices.push_back(vertex_base + index + 1);
-        result.indices.push_back(vertex_base + index + 2);
-      }
-      continue;
-    }
-
-    for (int index = 0; index + 2 < source_indices.size(); index += 3) {
-      const int32_t a = source_indices[index];
-      const int32_t b = source_indices[index + 1];
-      const int32_t c = source_indices[index + 2];
-      if (a < 0 || b < 0 || c < 0 || a >= positions.size() ||
-          b >= positions.size() || c >= positions.size()) {
-        continue;
-      }
-      result.indices.push_back(vertex_base + a);
-      result.indices.push_back(vertex_base + b);
-      result.indices.push_back(vertex_base + c);
-    }
-  }
-
-  if (result.vertices.empty() || result.indices.empty()) {
-    return opennova::renderer::FoliageSlotGeometry{};
-  }
-
-  result.center_x = static_cast<float>((minimum.x + maximum.x) * 0.5);
-  result.center_z = static_cast<float>((minimum.z + maximum.z) * 0.5);
-  result.radius = std::max(static_cast<float>((maximum.x - minimum.x) * 0.5),
-                           static_cast<float>((maximum.z - minimum.z) * 0.5));
-  result.valid = std::isfinite(result.radius) && result.radius > 1.0e-6f;
-  return result;
 }
 
 void FoliageDispatcher::_ensure_visuals() {
@@ -780,11 +556,9 @@ bool FoliageDispatcher::MaterialInputs::operator==(
 }
 
 void FoliageDispatcher::_update_materials() {
-  Ref<TerrainData> color_source =
-      terrain_data_.is_valid() ? terrain_data_ : colormap_source_;
   Ref<Texture2D> colormap;
-  if (color_source.is_valid()) {
-    colormap = color_source->get_colormap();
+  if (terrain_data_.is_valid()) {
+    colormap = terrain_data_->get_colormap();
   }
   const bool has_colormap = colormap.is_valid();
   Ref<Texture2D> heightfield_normal;
@@ -1480,40 +1254,13 @@ float FoliageDispatcher::_sample_height(float p_world_x,
     return terrain_data_->get_height_world_bilinear(
         Vector3(p_world_x, 0.0f, p_world_z));
   }
-  if (!height_sampler_.is_valid()) {
-    return INVALID_HEIGHT_THRESHOLD;
-  }
-  Array arguments;
-  arguments.push_back(p_world_x);
-  arguments.push_back(p_world_z);
-  const Variant result = height_sampler_.callv(arguments);
-  if (result.get_type() != Variant::FLOAT &&
-      result.get_type() != Variant::INT) {
-    return INVALID_HEIGHT_THRESHOLD;
-  }
-  return static_cast<float>(static_cast<double>(result));
+  return INVALID_HEIGHT_THRESHOLD;
 }
 
 int FoliageDispatcher::_sample_detail_foliage_index(
     int32_t p_atlas_x_fixed, int32_t p_atlas_z_fixed) const {
   if (terrain_data_.is_valid()) {
     return terrain_data_->get_detail_foliage_index_fixed(
-        p_atlas_x_fixed, p_atlas_z_fixed);
-  }
-  if (detail_foliage_sampler_.is_valid()) {
-    Array arguments;
-    arguments.push_back(static_cast<double>(p_atlas_x_fixed) / opennova::io::kFp16OneD);
-    arguments.push_back(static_cast<double>(p_atlas_z_fixed) / opennova::io::kFp16OneD);
-    return static_cast<int>(detail_foliage_sampler_.callv(arguments));
-  }
-  if (foliage_sampler_.is_valid()) {
-    Array arguments;
-    arguments.push_back(static_cast<double>(p_atlas_x_fixed) / opennova::io::kFp16OneD);
-    arguments.push_back(static_cast<double>(p_atlas_z_fixed) / opennova::io::kFp16OneD);
-    return static_cast<int>(foliage_sampler_.callv(arguments));
-  }
-  if (colormap_source_.is_valid()) {
-    return colormap_source_->get_detail_foliage_index_fixed(
         p_atlas_x_fixed, p_atlas_z_fixed);
   }
   return 0;
@@ -1528,15 +1275,6 @@ int FoliageDispatcher::_sample_model_foliage_index(
   if (terrain_data_.is_valid()) {
     return terrain_data_->get_foliage_index_fixed(p_world_x_fixed, mission_y_fixed);
   }
-  if (foliage_sampler_.is_valid()) {
-    Array arguments;
-    arguments.push_back(static_cast<double>(p_world_x_fixed) / opennova::io::kFp16OneD);
-    arguments.push_back(static_cast<double>(p_world_z_fixed) / opennova::io::kFp16OneD);
-    return static_cast<int>(foliage_sampler_.callv(arguments));
-  }
-  if (colormap_source_.is_valid()) {
-    return colormap_source_->get_foliage_index_fixed(p_world_x_fixed, mission_y_fixed);
-  }
   return 0;
 }
 
@@ -1549,7 +1287,7 @@ uint32_t FoliageDispatcher::_mask_for_palette_index(int p_index) const {
 
 Vector2 FoliageDispatcher::_terrain_uv(float p_world_x,
                                            float p_world_z) const {
-  Ref<TerrainData> source = terrain_data_.is_valid() ? terrain_data_ : colormap_source_;
+  const Ref<TerrainData> &source = terrain_data_;
   if (source.is_null()) {
     return Vector2();
   }

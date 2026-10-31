@@ -22,12 +22,12 @@
 #include <runtime/environment/water_mirror.h>
 
 #include "env/water_core.h"
+#include "render/q3_source_registry.h"
 #include "terrain/terrain_data.h"
 
 namespace godot {
 
 class Compositor;
-class EnvFile;
 class Environment;
 class FrameFxCompositorEffect;
 class MissionEnvironment;
@@ -64,7 +64,6 @@ public:
 		VISUAL_LAYER_FP_BODY_SHADOW_ONLY = visual_layers::FP_BODY_SHADOW_ONLY,
 		VISUAL_LAYER_STATIC_SHADOW_CASTER = visual_layers::STATIC_SHADOW_CASTER,
 		VISUAL_LAYER_DYNAMIC_SHADOW_CASTER = visual_layers::DYNAMIC_SHADOW_CASTER,
-		VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER = visual_layers::TERRAIN_SHADOW_RECEIVER,
 		VISUAL_LAYER_WORLD_NO_MIRROR = visual_layers::WORLD_NO_MIRROR,
 		VISUAL_LAYER_TERRAIN_FOLIAGE = visual_layers::TERRAIN_FOLIAGE,
 		VISUAL_LAYER_TERRAIN_FLAT_FALLBACK = visual_layers::TERRAIN_FLAT_FALLBACK,
@@ -196,7 +195,7 @@ public:
 	// whose world held its entity update regenerates the same pair. A Water
 	// nobody feeds counts its own render frames.
 	void set_noise_frame_counter(uint32_t p_counter);
-	int get_noise_frame_counter() const { return frame_counter_; }
+	int get_noise_frame_counter() const { return static_cast<int>(noise_clock_.counter()); }
 	// The mirror's outdoors flag (renderer::ScenePassGates::mirror_sky, off
 	// under the indoors blink letter), fed from the scene-pass gates; it
 	// selects the mirror target's own clear (EnvironmentState::
@@ -226,6 +225,12 @@ public:
 	// Its material: the water program sampling the mirror the frame rendered
 	// last (environment/water_mirror.h bloom_water_mirror_image).
 	Ref<ShaderMaterial> get_night_vision_material() const { return night_vision_material_; }
+	// The lit water colour every strip's material takes (u_water_color: the
+	// reflection's t2 stand-in a reflection-less owner draws) and the
+	// night-vision strip's Q3 values: the march inputs' lit colour each frame
+	// an environment is loaded; an envless owner (a headless run, a device
+	// test) sets its own.
+	void set_lit_water_color(const Vector3 &p_lit);
 	SubViewport *get_reflection_viewport() const { return mirror_.viewport; }
 	Camera3D *get_reflection_camera() const { return mirror_.camera; }
 	// The weapon Inset pass's own mirror and strip (advance_inset_frame).
@@ -305,11 +310,12 @@ private:
 	// The march inputs a frame's water passes share, with the lit colours
 	// pushed to every water material.
 	struct MarchInputs {
+		// The engine's frame block (the per-side pass fog ends among it).
+		opennova::env::WaterFrameInputs frame;
 		float murk = 0.0f;
 		float fog_end = 0.0f;
 		opennova::env::WaterDepthCurve depth_curve;
 		Color lit;
-		Ref<EnvFile> env_data;
 	};
 	MarchInputs _march_inputs(MissionEnvironment *p_env);
 	// The animated noise pair at this frame's counter, once per counter value.
@@ -324,6 +330,7 @@ private:
 	// The bloom strip's mirror image (environment/water_mirror.h
 	// bloom_water_mirror_image).
 	void _apply_night_vision_reflection();
+	void _publish_night_vision_q3();
 	void _retire_inset();
 	// The last march as ArrayMesh surface arrays.
 	Array _strip_arrays() const;
@@ -360,6 +367,10 @@ private:
 	MeshInstance3D *inset_mesh_instance_ = nullptr;
 	Ref<ShaderMaterial> water_material_;
 	Ref<ShaderMaterial> night_vision_material_;
+	// The night-vision strip's Q3 block, kept beside each write of its
+	// material and published to the focused Q3 compile
+	// (_publish_night_vision_q3): the compile never reads the material back.
+	opennova::renderer::Q3WaterMaterialParameters night_vision_q3_{};
 	Ref<ShaderMaterial> inset_material_;
 	// The main frame's mirror and the weapon Inset pass's own.
 	MirrorRig mirror_;
@@ -378,9 +389,9 @@ private:
 	float inset_max_height_ = 0.0f;
 	// The latch as the main collect left it, the Inset's g_WaterActive input.
 	bool inset_blink_latch_ = false;
-	// The counter the noise pair was last generated at.
-	int noise_counter_ = 0;
-	bool noise_counter_valid_ = false;
+	// The noise pair's frame counter and its last regeneration (engine
+	// environment/water_frame.h).
+	opennova::env::WaterNoiseClock noise_clock_;
 	bool mirror_scene_outdoors_ = true;
 	bool built_ = false;
 	bool has_drawable_surface_ = false;
@@ -397,8 +408,6 @@ private:
 	Ref<Image> noise_normal_img_;
 	Ref<ImageTexture> noise_color_tex_;
 	Ref<ImageTexture> noise_normal_tex_;
-	int frame_counter_ = 0;
-	bool frame_counter_fed_ = false;
 };
 
 } // namespace godot

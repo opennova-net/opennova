@@ -312,7 +312,7 @@ func test_rigid_marker_parts_ignore_live_panm_and_rest_offsets() -> void:
 	marker.set_rigid_parts(true)
 	for level in [0, 1, 0]:
 		marker.set_active_lod(level)
-		ObjectModel.advance_awake_frame(0.125)
+		ObjectModel.advance_awake_frame(GameWorld.current_frame_clock_ms())
 		for part in marker.get_render_part_nodes().values():
 			assert_true((part as Node3D).transform.is_equal_approx(Transform3D.IDENTITY))
 

@@ -373,6 +373,7 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 			if (const Threedi3di3 *model = deps.models.model(key).get()) {
 				traits->model_loaded = true;
 				const uint16_t fx_mask = threedi_3di3_user_point_mask(model, def->particlefx.userpoint);
+				traits->particlefx_mask = fx_mask;
 				for (size_t i = 0; i < model->user_point_count && i < 16; ++i) {
 					if ((fx_mask & (1u << i)) == 0) continue;
 					const auto &point = model->user_points[i];

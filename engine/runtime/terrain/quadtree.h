@@ -215,8 +215,4 @@ void track_visible_bounds(const std::vector<QuadNode>& quad_nodes,
                           VisibleBounds& out_bounds,
                           bool zero_height = false);
 
-// Convert triangle strip to triangle list.
-void strip_to_list(const std::vector<uint16_t>& strip,
-                   std::vector<uint32_t>& out, uint32_t base);
-
 } // namespace opennova

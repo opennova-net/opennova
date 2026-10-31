@@ -112,9 +112,9 @@ Run loop:
 ## 5. Optional: engine binding
 
 - Binding: `godot/src/<name>/<type>.{h,cpp}` — a binding file is named after the
-  type it declares, e.g. `godot/src/audio/ambient_mixer.h` wrapping
-  `opennova::audio::AmbientMixer` (ADR 0040 decisions 2 and 5; bindings include
-  root-relative, `"audio/ambient_mixer.h"`). `GDREGISTER_CLASS` in
+  type it declares, e.g. `godot/src/lwf/lwf_data.h` declaring `LwfData` over
+  `opennova::lwf::File` (ADR 0040 decisions 2 and 5; bindings include
+  root-relative, `"lwf/lwf_data.h"`). `GDREGISTER_CLASS` in
   `godot/src/register_types.cpp` (`godot/src` already links the group —
   no CMake link edit), then `bash scripts/build_godot.sh` and fully restart
   any open editor (no hot-reload). Add a GDScript smoke test

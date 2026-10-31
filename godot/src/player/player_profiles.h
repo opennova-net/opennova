@@ -41,10 +41,9 @@ public:
 	opennova::profile::PlayerProfiles &native() { return store_; }
 
 	// The defaults a fresh record takes: the character table (null: none), the
-	// menu table and the expansion's override table the macros read (either
-	// null), and the joystick's capability bits.
+	// menu table the macros read (null: none) after the process's text-override
+	// table (rtxt::text_override), and the joystick's capability bits.
 	void set_defaults(const Ref<AvatarDatabase> &p_avatars,
-			const Ref<RtxtStringFile> &p_override_table,
 			const Ref<RtxtStringFile> &p_menu_table, int p_joystick_caps);
 
 	// The load from `dir` (player.sav there, weapon.sav at weapon_sav_relpath
@@ -109,12 +108,11 @@ public:
 	Ref<PlayerInfoKitRestore> restore_player_info_kit(int p_side,
 			const Ref<WeaponDatabase> &p_weapons) const;
 	// PLAYER_INFO's dialog save (its ACCEPT, a side radio, a class pick) into the
-	// current weapon.sav record: `player_class` (5..9) to both sides, the shown
-	// side's (`team`, 0 or 1) `side_profiles[team]` {avatar_a, avatar_b,
-	// avatar_packed} to that side alone when non-empty, and a `kit` array to its
-	// page of `kit_class`, the class whose page the screen restored (`player_class`
-	// when absent or outside 5..9). ERR_INVALID_PARAMETER for a snapshot the record
-	// cannot take.
+	// current weapon.sav record, the dialog's snapshot marshalled into the engine's
+	// CharacterSelection (engine profile::PlayerProfiles::apply_character_selection
+	// holds the rules): `player_class`, `team`, `side_profiles[team]` {avatar_a,
+	// avatar_b, avatar_packed} when non-empty, and a `kit` array to the page of
+	// `kit_class`. ERR_INVALID_PARAMETER for a snapshot the record cannot take.
 	Error apply_character_selection(const Dictionary &p_profile);
 
 	void record_mission_start(int p_campaign) { store_.record_mission_start(p_campaign); }

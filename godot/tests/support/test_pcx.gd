@@ -1,8 +1,8 @@
 class_name TestPcx
 extends RefCounted
 
-## Minimal 8-bit palettized 2x2 PCX files (RLE, every pixel a literal) that the
-## texture tests hand ResourceRoot.load_texture.
+## Minimal 8-bit palettized PCX files: 2x2 ones (RLE, every pixel a literal) that
+## the texture tests hand ResourceRoot.load_texture, and a solid map of one index.
 
 
 ## Pixels take palette indices 0..3 over a grey-ramp palette (entry i = i,i,i).
@@ -34,6 +34,35 @@ static func solid_2x2(color: Color) -> PackedByteArray:
 			bytes.append(0)
 			bytes.append(0)
 			bytes.append(0)
+	return bytes
+
+
+## A `width` x `height` 8-bit indexed PCX whose every pixel is palette index
+## `index` (each row RLE runs of at most 63), the palette a grey ramp.
+static func solid_indexed(width: int, height: int, index: int) -> PackedByteArray:
+	var bytes := PackedByteArray()
+	bytes.resize(128)
+	bytes[0] = 0x0A  # manufacturer
+	bytes[1] = 5     # version
+	bytes[2] = 1     # RLE
+	bytes[3] = 8     # bits per pixel
+	bytes.encode_u16(8, width - 1)    # xmax
+	bytes.encode_u16(10, height - 1)  # ymax
+	bytes[65] = 1    # planes
+	bytes.encode_u16(66, width)       # bytes per line
+	bytes.encode_u16(68, 1)           # palette info
+	for _row in range(height):
+		var left := width
+		while left > 0:
+			var run := mini(left, 63)
+			bytes.append(0xC0 | run)
+			bytes.append(index)
+			left -= run
+	bytes.append(0x0C)  # palette marker
+	for i in range(256):
+		bytes.append(i)
+		bytes.append(i)
+		bytes.append(i)
 	return bytes
 
 

@@ -21,23 +21,22 @@ class MeshInstance3D;
 class ArrayMesh;
 class ShaderMaterial;
 class EffectWorld;
-class ItemEffectDirector;
 class Simulation;
 
 // Fixed-tick device owner for the simulation's shared movement-emitter bank, and for
-// the weapon overheat emitters, which ride the same keyed, parameterized groups.
+// the weapon overheat emitters, which ride the same keyed, parameterized groups. Each
+// held group is moved to its row's pose at every sync (EffectWorld::move_group), as the
+// trail lanes' re-pose moves its handle.
 class VehicleTrailPresenter : public RefCounted {
 	GDCLASS(VehicleTrailPresenter, RefCounted)
 
 public:
-	void setup(Simulation *p_sim, EffectWorld *p_fx, const Ref<ItemEffectDirector> &p_anchors);
+	void setup(Simulation *p_sim, EffectWorld *p_fx);
 	void sync_fixed_tick_effects();
 	void sync_visuals(const std::vector<opennova::world::VehicleTrailVisualRow> &p_visuals);
 	void sync_heat_glows(const std::vector<opennova::world::WeaponHeatGlowRow> &p_rows);
 	void reset_runtime_state();
 	void teardown();
-
-	Variant resolve_trail_anchor(String p_key);
 
 protected:
 	static void _bind_methods();
@@ -45,7 +44,6 @@ protected:
 private:
 	struct TrailGroup {
 		String effect;
-		String owner_key;
 		int64_t group_id = 0;
 		bool weapon_heat = false; // an overheat emitter, not a trail point
 	};
@@ -78,8 +76,6 @@ private:
 
 	ObjectID sim_id_;
 	ObjectID fx_id_;
-	Ref<ItemEffectDirector> anchors_;
-	HashMap<String, Transform3D> transforms_;
 	HashMap<String, TrailGroup> groups_;
 	HashMap<int, ZoneGroup> zone_groups_;
 };

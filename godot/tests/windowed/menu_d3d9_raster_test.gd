@@ -88,7 +88,7 @@ func _render_menu(size: Vector2i) -> Image:
 	var frame := MenuFrame.new()
 	frame.size = Vector2(size)
 	viewport.add_child(frame)
-	assert_true(frame.configure(doc, "", root, null, null))
+	assert_true(frame.configure(doc, "", root, null))
 	await get_tree().process_frame
 	await get_tree().process_frame
 	RenderingServer.force_draw(true)

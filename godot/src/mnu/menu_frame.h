@@ -133,13 +133,14 @@ public:
 	// last of that name; empty = the first screen), loading through the mounted
 	// VFS root what the screen reads: the widget art (by retail's extension
 	// dispatch, engine menu_assets.h), every FONT's .fnt, and every TEXT_RSRC
-	// string table; `style` supplies the %VAR% stylesheet; `override_text` is
-	// the expansion's table every string lookup tries first (null: none). The
+	// string table; `style` supplies the %VAR% stylesheet; every string lookup
+	// tries the process's text-override table first (the engine's
+	// rtxt::text_override, the expansion's table; none installed: none). The
 	// document Ref is retained; re-configure after document edits. A null
 	// document lets everything go.
 	bool configure(const Ref<MnuDocument> &p_document,
 			const String &p_screen_name, const Ref<ResourceRoot> &p_root,
-			const Ref<MnsStyleSheet> &p_style, const Ref<RtxtStringFile> &p_override_text);
+			const Ref<MnsStyleSheet> &p_style);
 	// The C++ core (not bound): `p_screen` of `p_document` through any file source
 	// (the game's root, the editor's project files), the engine's loader
 	// (runtime/menu/menu_frame_assets.h) keeping what it loaded by (file, stamp)
@@ -459,7 +460,8 @@ private:
 	uint64_t configure_count_ = 0;
 	// Each kept font's pages, uploaded on first draw, by the load's serial.
 	std::map<uint64_t, std::vector<Ref<Texture2D>>> font_pages_by_serial_;
-	Ref<RtxtStringFile> override_text_;
+	// The text-override table the last configure() borrowed (configure_screen's).
+	std::shared_ptr<const opennova::rtxt::File> override_text_;
 	// The menu-top overlay: a child canvas item one z above this Control, so
 	// the compiled draw list's popup + cursor ops (MenuDrawList
 	// overlay_op_start) paint over any Control a companion mounts as a frame child

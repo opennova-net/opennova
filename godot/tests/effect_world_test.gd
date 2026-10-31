@@ -10,15 +10,6 @@ extends GutTest
 var _root_dir := ""
 
 
-class OwnerPositions:
-	extends RefCounted
-	var state: Variant = Vector3.ZERO
-	var alive := true
-
-	func resolve(_owner_key: Variant) -> Variant:
-		return state if alive else null
-
-
 func before_each() -> void:
 	# OS cache dir, not user:// — resource roots inside the app user-data dir are
 	# rejected by ResourceRoot.is_valid_root (mirrors the other fixture roots).
@@ -298,8 +289,11 @@ func test_live_group_parameters_drive_rate_and_offset_without_clamping() -> void
 			"emit_dur = 0.1;\nemit_rate = 30;\nemit_rate_adj = 30;\nemit_burst = 1;\ny_offset = 2;\nz_offset = 4;\nage = 1;\nflags = FOREVEREMIT;\n", ["wake"])
 	var world := _make_world()
 	world.load_particle_file(file)
-	var receipt: EffectSpawnReceipt = world.spawn_effect_owned_request(
-			"wake-owner", "wake", Vector3.ZERO, Vector3.FORWARD)
+	var options := EffectSpawnOptions.new()
+	options.admission = EffectScene.ADMISSION_REPLACE_OWNED
+	options.slot_key = "wake-slot"
+	var receipt: EffectSpawnReceipt = world.spawn_effect_request(
+			"wake", EffectWorld.descriptor_pose(Vector3.ZERO, Vector3.FORWARD), options)
 	assert_true(receipt.spawned)
 
 	assert_true(world.set_group_parameters(receipt.group_id, 0.75, 0.25))
@@ -390,9 +384,6 @@ func test_particle_master_switch_suppresses_facades_and_checked_count() -> void:
 	assert_eq(world.active_entry_count(), 0, "the checked facade is zero while disabled")
 	assert_true(world.get_debug_group_report().is_empty(), "the debug page lists no active entries")
 	assert_eq(world.spawn_effect("puff", Vector3.ZERO), 0, "named facade no-ops")
-	assert_eq(world.spawn_effect_owned("owner", "puff", Vector3.ZERO), 0, "owned facade no-ops")
-	assert_eq(world.spawn_effect_attached("attached", "puff", Transform3D.IDENTITY,
-			Vector3.ZERO, Vector3.UP), 0, "attached facade no-ops")
 	assert_eq(world.spawn_effect_unless_alive("slot", "puff", Vector3.ZERO), 0,
 			"guarded facade no-ops")
 	assert_false(world.spawn_effect_by_handle(1, Vector3.ZERO), "handle facade no-ops")
@@ -403,152 +394,38 @@ func test_particle_master_switch_suppresses_facades_and_checked_count() -> void:
 	assert_eq(world.active_entry_count(), 1, "re-enabling exposes the still-live entry")
 
 
-func test_owned_effect_follows_entity_and_detaches_when_owner_disappears() -> void:
+# A holder's per-tick re-pose: every emitter of the held group moves to the pose's
+# origin, re-aimed along its forward; a detached group refuses the move
+# [orig: CEffectEmitter_UpdatePositionAndParams @ 0x5f6810].
+func test_move_group_re_poses_a_held_group() -> void:
 	var world := _make_world()
-	var file := _make_short_effect_file("flags = FOREVEREMIT;")
-	world.load_particle_file(file)
-	var positions := OwnerPositions.new()
-	positions.state = Vector3(1, 2, 3)
-	world.set_owner_position_provider(Callable(positions, "resolve"))
-	assert_gt(world.spawn_effect_owned(17, "puff", positions.state, Vector3.UP), 0)
-
-	assert_true(bool(_single_group(world).forever),
-			"the FOREVEREMIT group begins attached and infinite")
-	positions.state = Vector3(9, 8, 7)
-	world.advance_fixed_tick(0.0)
-	var moved_emitter := _single_emitter(world)
-	assert_almost_eq(moved_emitter.position, positions.state, Vector3(0.001, 0.001, 0.001),
-			"CEffect_UpdateEmitterTransform-style follow updates the emitter each sweep")
-	assert_eq(moved_emitter.forward, Vector3.UP,
-			"a position-only provider preserves the descriptor's initial up-vector fallback")
-
-	var attached_transform := Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(6, 5, 4))
-	positions.state = attached_transform
-	world.advance_fixed_tick(0.0)
-	var rotated_emitter := _single_emitter(world)
-	assert_almost_eq(rotated_emitter.position, attached_transform.origin,
-			Vector3(0.001, 0.001, 0.001))
-	assert_almost_eq(rotated_emitter.forward, attached_transform.basis.z.normalized(),
-			Vector3(0.001, 0.001, 0.001),
-			"the attached entity's live forward reaches the simulator frame")
-
-	positions.alive = false
-	world.advance_fixed_tick(0.0)
-	var detached_group := _single_group(world)
-	assert_true(bool(detached_group.detached), "owner removal detaches the group")
-	assert_false(bool(detached_group.forever), "detachment stops FOREVEREMIT emission")
-	assert_false(bool((_single_emitter(world)).emitting),
-			"the detached emitter drains without producing new particles")
-
-
-func test_attached_effect_composes_the_local_userpoint_offset() -> void:
-	# The per-item entity-attached emitter (the DBuggy1 exhaust shape): the model-local
-	# userpoint position AND direction compose onto the live owner transform every
-	# sweep, so the plume stays on the tailpipe as the vehicle moves and turns
-	# [orig: Entity_SpawnBoneTrailEffect @ 0x43bef0 — one mode-2 attached emitter per
-	#  masked userpoint, pos = the userpoint, forward = its direction; follow =
-	#  CEffect_UpdateEmitterTransform @ 0x5f7410].
-	var world := _make_world()
-	var file := _make_short_effect_file("flags = FOREVEREMIT;")
-	world.load_particle_file(file)
-	var positions := OwnerPositions.new()
-	var start := Transform3D(Basis.IDENTITY, Vector3(10, 0, 0))
-	positions.state = start
-	world.set_owner_position_provider(Callable(positions, "resolve"))
-	var local_pos := Vector3(-0.3, 1.4, -2.6)   # the FX00 rear-pipe point shape
-	var local_dir := Vector3(0, 0.643, -0.766)
-	assert_gt(world.spawn_effect_attached("itemfx:1:0", "puff", start, local_pos, local_dir), 0)
-	var initial_emitter := _single_emitter(world)
-	assert_almost_eq(initial_emitter.position, start * local_pos, Vector3(0.001, 0.001, 0.001),
-			"the spawn seeds at owner-transform * local userpoint")
-	assert_almost_eq(initial_emitter.forward.normalized(), local_dir.normalized(),
-			Vector3(0.001, 0.001, 0.001),
-			"the spawn seeds the userpoint direction before the first sweep")
-	# Drive the owner: the offset rides the basis, the direction re-orients with it.
-	var moved := Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(20, 3, 5))
-	positions.state = moved
-	world.advance_fixed_tick(0.0)
-	var moved_emitter := _single_emitter(world)
-	assert_almost_eq(moved_emitter.position, moved * local_pos, Vector3(0.001, 0.001, 0.001),
-			"the follow composes the local offset, not the owner origin")
-	assert_almost_eq(moved_emitter.forward, (moved.basis * local_dir).normalized(),
-			Vector3(0.001, 0.001, 0.001),
-			"the userpoint direction re-orients with the owner basis")
-	# Owner gone (vehicle freed) -> detach: emission stops and the group drains.
-	positions.alive = false
-	world.advance_fixed_tick(0.0)
-	assert_true(bool(_single_group(world).detached),
-			"owner removal detaches the attached group")
-
-
-func test_replacing_an_owned_group_detaches_the_old_group_transform() -> void:
-	var world := _make_world()
-	var file := _make_short_effect_file("flags = FOREVEREMIT;")
-	world.load_particle_file(file)
-	var positions := OwnerPositions.new()
-	positions.state = Transform3D(Basis.IDENTITY, Vector3(1, 2, 3))
-	world.set_owner_position_provider(Callable(positions, "resolve"))
-	assert_gt(world.spawn_effect_owned(17, "puff", Vector3(1, 2, 3), Vector3.UP), 0)
-
-	assert_gt(world.spawn_effect_owned(17, "puff", Vector3(4, 5, 6), Vector3.UP), 0)
-	var groups := world.get_debug_group_report()
-	assert_eq(groups.size(), 2)
-	assert_true((groups[0] as EffectGroupReport).detached,
-			"replacement stops and detaches the old FOREVEREMIT group")
-	assert_false((groups[1] as EffectGroupReport).detached,
-			"the replacement remains attached")
-
-	positions.state = Transform3D(Basis(Vector3.UP, PI * 0.25), Vector3(9, 8, 7))
-	world.advance_fixed_tick(0.0)
-	groups = world.get_debug_group_report()
-	var old_emitter := (groups[0] as EffectGroupReport).emitters[0] as EffectEmitterReport
-	var new_emitter := (groups[1] as EffectGroupReport).emitters[0] as EffectEmitterReport
-	assert_eq(old_emitter.position, Vector3(1, 2, 3),
-			"the detached old group drains at its last position")
-	assert_eq(new_emitter.position, Vector3(9, 8, 7),
-			"only the replacement follows the owner")
-
-
-func test_release_effect_binding_drops_generation_scoped_token_and_pose_state() -> void:
-	var world := _make_world()
-	var file := _make_short_effect_file("flags = FOREVEREMIT;")
-	world.load_particle_file(file)
-	var owner_key := "throwable-move:1024"
-	var receipt := world.spawn_effect_owned_request(
-			owner_key, "puff", Vector3(1, 2, 3), Vector3.UP)
+	world.load_particle_file(_make_short_effect_file("flags = FOREVEREMIT;"))
+	var options := EffectSpawnOptions.new()
+	options.admission = EffectScene.ADMISSION_REPLACE_OWNED
+	options.slot_key = "held"
+	var receipt := world.spawn_effect_request(
+			"puff", EffectWorld.descriptor_pose(Vector3(1, 2, 3), Vector3.UP), options)
 	assert_true(receipt.spawned)
-	assert_true(world.has_owner_binding(owner_key),
-			"a live owned spawn holds its binding identity in every table")
-	assert_true(world.has_cached_owner_pose(owner_key),
-			"a live owned spawn seeds a native owner pose")
-
+	var pose := Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(6, 5, 4))
+	assert_true(world.move_group(receipt.group_id, pose))
+	var moved := _single_emitter(world)
+	assert_almost_eq(moved.position, pose.origin, Vector3(0.001, 0.001, 0.001))
+	assert_almost_eq(moved.forward, pose.basis.z.normalized(), Vector3(0.001, 0.001, 0.001))
 	world.stop_group(receipt.group_id)
-	world.release_effect_binding(owner_key)
-
-	assert_true(world.has_no_owner_bindings(),
-			"retired round keys do not accumulate admission tokens, owner tokens, reverse lookups, or poses")
-	assert_true(bool(_single_group(world).detached),
-			"the already-live particles remain detached to drain naturally")
+	assert_false(world.move_group(receipt.group_id, pose), "a detached group is not moved")
+	assert_false(world.move_group(0, pose))
 
 
-func test_release_effect_binding_cleans_a_rejected_spawn_identity() -> void:
+# A slot key's release detaches what its slot holds and forgets the key's token, so
+# generation-scoped keys never accumulate.
+func test_release_slot_key_detaches_and_forgets_the_key() -> void:
 	var world := _make_world()
-	# No stockeffect fallback: the unknown name is rejected after the facade has
-	# allocated its generation-scoped slot and owner identities.
-	world.load_particle_file(_make_short_effect_file())
-	var owner_key := "throwable-move:2048"
-	var receipt := world.spawn_effect_owned_request(
-			owner_key, "missing-effect", Vector3.ZERO, Vector3.UP)
-	assert_false(receipt.spawned)
-	assert_true(world.has_owner_binding(owner_key),
-			"a rejected ReplaceOwned spawn still allocates its binding identities")
-	assert_false(world.has_cached_owner_pose(owner_key),
-			"a rejected ReplaceOwned spawn never seeds a native owner pose")
-
-	world.release_effect_binding(owner_key)
-
-	assert_true(world.has_no_owner_bindings(),
-			"failed throwable spawns leave no script-side binding state")
+	world.load_particle_file(_make_short_effect_file("flags = FOREVEREMIT;"))
+	assert_gt(world.spawn_effect_unless_alive("lane:7", "puff", Vector3.ZERO), 0)
+	assert_true(world.has_slot_key("lane:7"))
+	world.release_slot_key("lane:7")
+	assert_false(world.has_slot_key("lane:7"))
+	assert_true(bool(_single_group(world).detached), "the held group drains detached")
 
 
 func test_authored_water_flags_bind_to_the_mission_water_plane() -> void:
@@ -579,6 +456,7 @@ func test_clear_world_frees_live_groups() -> void:
 
 
 # --- Debug seams (the retail particle debug pages, mimicked; ptl-format-re.md §11) ---
+
 
 func test_debug_group_report_shapes() -> void:
 	var world := _make_world()

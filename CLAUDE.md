@@ -18,9 +18,9 @@ easier to relay than to rediscover.
   it runs, which `games::install_rules()` registers in a program that runs a match (STATIC
   `opennova_games_rules`, above `opennova_runtime`); engine/ never includes or links either. See
   `games/CLAUDE.md`.
-- `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
-  part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
-  `game/` (the game shell plus its game-level GDScript runtime),
+- `godot/` — the Godot 4.6.1 project, a platform and GPU backend (ADR 0077: the engine owns
+  everything above platform and GPU; `godot/` only shrinks): `src/` (the C++ GDExtension; see
+  `godot/src/CLAUDE.md`), `game/` (the game shell's GDScript, moving to engine C++),
   `editor/` (the OpenNova Editor's GDScript: its MCP service, catalog and tools,
   ADR 0046; loaded by path, never in a game export),
   `probes/` (the registered `game_probe` runtime probes, source-only and
@@ -137,8 +137,9 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
   ADR 0043 d3) runs the tick over the kernel it binds. The C++ `GameWorld` samples one
   typed frame input, advances that session, and orders Godot-only presentation/device
   work once per display frame through ONE static frame-leg table
-  (`godot/src/world/game_world_frame.cpp`, ADR 0043 d9). A `godot/` line earns its place only as that device
-  work (node writes, GPU dispatch, input sampling, audio players) or a thin typed seam.
+  (`godot/src/world/game_world_frame.cpp`, ADR 0043 d9), which ADR 0077 moves into the
+  engine. ADR 0077: the engine owns everything above platform and GPU, and Godot is the
+  platform and GPU backend, so a `godot/` line never gains behavior and the tree only shrinks.
   NovaLogic formats never touch Godot's resource system:
   documents read/write themselves (`load_from_path`/`save_to_path`).
 - Never carry raw original bytes through a writer to make a parity test pass — writers

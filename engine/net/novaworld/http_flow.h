@@ -64,6 +64,19 @@ struct HttpRequestSpec {
 std::string browser_cache_bust_url(const std::string &url, uint32_t tick_ms,
 		const std::array<uint8_t, 4> &server_ip);
 
+// A menu-browser GET's URL for a transport that connects to the host its URL names, once the
+// request resolved its server (browser_request_host's name) to `server_ip`: the host replaced by
+// the address's dotted quad, the port and the path kept, then the nocachefix pair over `tick_ms`
+// and that address (browser_cache_bust_url). The connect so reaches the one address the request
+// resolved, the one its pair reads, as the browser's does; the request's Host line still names
+// the URL's host (browser_request_host).
+// [orig: CNapiWinsock_InitFromUrl @0x658DA0 - CNapiWinsock_ResolveHostAsync called @0x658E4B into
+//  the request's +0x30 word, read for the pair (CUIBrowser_SendHTTPRequest @0x6588A3) and as the
+//  connect's address (`lea eax, [esi+30h]` @0x6597F3, CNapiWinsock_ConnectNonBlocking @0x667600
+//  called @0x6597F7)]
+std::string browser_resolved_get_url(const std::string &url, uint32_t tick_ms,
+		const std::array<uint8_t, 4> &server_ip);
+
 // The value of a menu-browser request's "Host:" line, which leads the lines past the request
 // line: the URL's host as the browser's URL parse cuts it, the text past its "//" up to the first
 // '/' or ':', so a port the URL names never rides it (the live login legs' URLs carry SessionInit's

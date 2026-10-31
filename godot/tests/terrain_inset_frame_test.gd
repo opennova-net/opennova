@@ -27,7 +27,7 @@ func _make_fixture() -> Dictionary:
 	main_view.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child_autofree(main_view)
 	var data := TerrainData.new()
-	data.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
+	data.set_trn_path(TestFs.staged_foliage_tmap(TMAP_STAGE))
 	assert_eq(data.load(), OK, "the Tmap fixture terrain must load")
 	var terrain: Terrain = Terrain.new()
 	main_view.add_child(terrain)
@@ -51,7 +51,7 @@ func _make_fixture() -> Dictionary:
 	inset_view.add_child(inset_camera)
 	inset_camera.make_current()
 	inset_camera.global_transform = camera.global_transform
-	return {"terrain": terrain, "camera": camera, "main_view": main_view,
+	return {"terrain": terrain, "data": data, "camera": camera, "main_view": main_view,
 			"inset_camera": inset_camera, "inset_view": inset_view}
 
 
@@ -104,12 +104,9 @@ func test_inset_foliage_takes_the_inset_frames_detail_cells() -> void:
 	inset_camera.global_transform = camera.global_transform
 	var dispatcher := FoliageDispatcher.new()
 	(fixture["main_view"] as SubViewport).add_child(dispatcher)
-	var definition := TerrainFoliageDef.new()
-	definition.graphic = "inset_frame_contract"
-	definition.match = PackedInt32Array([1])
-	dispatcher.configure_slots([definition], [BoxMesh.new()], [])
-	dispatcher.height_sampler = func(_x: float, _z: float) -> float: return 10.0
-	dispatcher.foliage_sampler = func(_x: float, _z: float) -> int: return 1
+	# The Tmap's own foliage, painted on every texel (TestFs.staged_foliage_tmap).
+	dispatcher.configure_for_terrain(TestFs.staged_tmap_root(TMAP_STAGE),
+			fixture["data"] as TerrainData, null)
 	dispatcher.set_terrain(terrain)
 
 	# A detail patch draws once its terrain page is resident, a few frames in.
@@ -136,6 +133,7 @@ func test_inset_foliage_takes_the_inset_frames_detail_cells() -> void:
 
 	# Release native texture owners before RenderingServer teardown.
 	dispatcher.set_terrain(null)
+	dispatcher.terrain_data = null
 	dispatcher.reset()
 	terrain.set_terrain_data(null)
 

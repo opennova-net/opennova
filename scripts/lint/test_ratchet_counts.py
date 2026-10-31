@@ -1,4 +1,5 @@
-"""Pins scripts/lint/ratchet_counts.py's godot_src_dictionary_params gauge (the Dictionary
+"""Pins scripts/lint/ratchet_counts.py's Godot boundary gauges (ADR 0077), its
+godot_src_dictionary_params gauge (the Dictionary
 parameters of the methods godot/src binds, whatever their names), the citation
 allowlist's stale-row check and the editor windows' raw wrapped text.
 
@@ -149,6 +150,59 @@ class EditorWrappedText(unittest.TestCase):
                 path.write_text(text, encoding="utf-8")
             with mock.patch.object(ratchet_counts, "REPO", Path(root)):
                 self.assertEqual(ratchet_counts.count_editor_ui_wrapped_text(), 3)
+
+
+class GodotBoundary(unittest.TestCase):
+    """ADR 0077's three gauges: cites per Godot area, shipping GDScript lines, and
+    the high-level Godot classes godot/src includes."""
+    FILES = {
+        "godot/src/register_types.cpp": "// [orig: A @0x1]\n",
+        "godot/src/world/frame.cpp": (
+            "// [orig: B @0x2] [orig: C @0x3]\n"
+            "#include <godot_cpp/classes/node3d.hpp>\n"
+            "#include <godot_cpp/classes/rendering_device.hpp>\n"  # the GPU server: not high level
+        ),
+        "godot/src/world/frame.h": "#include <godot_cpp/classes/node3d.hpp>\n#include \"godot_cpp/classes/camera3d.hpp\"\n",
+        "godot/src/backend/audio_device.cpp": (
+            "#include <godot_cpp/classes/audio_stream_player.hpp>\n"  # allowlisted below
+            "#include <godot_cpp/classes/label.hpp>\n"
+        ),
+        "godot/src/build/gen/node3d.cpp": "#include <godot_cpp/classes/node3d.hpp>\n// [orig: Z @0x9]\n",
+        "godot/game/main_game.gd": "# [orig: D @0x4]\nextends Node\n\nfunc _ready() -> void:\n\tpass\n",
+        "godot/game/world/hud.gd": "var a := 1 # [orig: E @0x5]\n",
+        "godot/game/mcp/tool.gd": "var a := 1\nvar b := 2\n",
+        "godot/game/fly_camera.gd": "var a := 1\n",
+        "godot/probes/render/p.gd": "# [orig: F @0x6]\n",
+    }
+
+    def run_in_tree(self, fn, **patches):
+        with tempfile.TemporaryDirectory() as root:
+            for rel, text in self.FILES.items():
+                path = Path(root, rel)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            with mock.patch.multiple(ratchet_counts, REPO=Path(root), **patches):
+                return fn()
+
+    def test_cites_count_per_area_and_skip_the_build_tree(self):
+        self.assertEqual(self.run_in_tree(ratchet_counts.count_godot_orig_cites_by_area), {
+            "godot_orig_cites:game": 1,
+            "godot_orig_cites:game/world": 1,
+            "godot_orig_cites:probes/render": 1,
+            "godot_orig_cites:src": 1,
+            "godot_orig_cites:src/world": 2,
+        })
+
+    def test_shipping_lines_skip_comments_blanks_and_dev_tooling(self):
+        self.assertEqual(self.run_in_tree(ratchet_counts.count_godot_shipping_gd_lines), 4)
+
+    def test_high_level_includes_count_each_file_and_class_once(self):
+        self.assertEqual(self.run_in_tree(ratchet_counts.count_godot_high_level_class_includes), 5)
+
+    def test_the_backend_allowlist_exempts_only_the_backend(self):
+        self.assertEqual(self.run_in_tree(
+            ratchet_counts.count_godot_high_level_class_includes,
+            BACKEND_ALLOWED_CLASSES=frozenset(("audio_stream_player", "node3d"))), 4)
 
 
 if __name__ == "__main__":

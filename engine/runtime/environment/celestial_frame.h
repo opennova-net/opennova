@@ -80,6 +80,42 @@ constexpr bool builds_celestial_draws(bool dedicated_host) noexcept {
 //  @0x5B5710 (the call @0x524A6F, on a start that is not a restart)]
 inline constexpr const char *kCelestialUplModel = "upl.3di";
 
+// The rotation the embedder gives a view-aligned body (the header's note: the
+// parts' collect copies the pass's inverse view rotation [orig:
+// Model_TransformBoneMatrices @ 0x58ec09]): the camera's rotation composed with
+// the authored quarter turn that faces the reference camera (level, looking
+// east). In presentation axes that is the camera's orthonormalized columns
+// with its right and back negated, (-right, up, -back), one turn for every
+// pass that shares the camera's rotation (the beauty, the bloom redraw).
+// `right`, `up` and `back` are the camera basis columns; the result's x, y and
+// z are the body's.
+struct CelestialBasis {
+	Vec3 x{1.0f, 0.0f, 0.0f};
+	Vec3 y{0.0f, 1.0f, 0.0f};
+	Vec3 z{0.0f, 0.0f, 1.0f};
+};
+inline CelestialBasis celestial_view_aligned_basis(const Vec3 &right, const Vec3 &up,
+		const Vec3 &back) {
+	const auto dot = [](const Vec3 &a, const Vec3 &b) { return a.x * b.x + a.y * b.y + a.z * b.z; };
+	const auto normalized = [&](const Vec3 &v) {
+		const float length = std::sqrt(dot(v, v));
+		return length > 0.0f ? Vec3{v.x / length, v.y / length, v.z / length} : v;
+	};
+	// Gram-Schmidt in column order, the rotation part of a scaled camera.
+	const Vec3 x = normalized(right);
+	const float xy = dot(x, up);
+	const Vec3 y = normalized({up.x - x.x * xy, up.y - x.y * xy, up.z - x.z * xy});
+	const float xz = dot(x, back);
+	const float yz = dot(y, back);
+	const Vec3 z = normalized({back.x - x.x * xz - y.x * yz, back.y - x.y * xz - y.y * yz,
+			back.z - x.z * xz - y.z * yz});
+	CelestialBasis basis;
+	basis.x = {-x.x, -x.y, -x.z};
+	basis.y = y;
+	basis.z = {-z.x, -z.y, -z.z};
+	return basis;
+}
+
 // One call of the water-glint leg [orig: Environment_UpdateSunGlare @ 0x5ad130, once
 // per scene pass from Terrain_RenderWorldScene @ 0x5c96c0: the main scene's,
 // then the weapon Inset pass's at its own camera and view, on the same

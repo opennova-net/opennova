@@ -498,11 +498,8 @@ void Lister::ship(const HttpRequestSpec &spec) {
 		// send and that server's address (browser_cache_bust_url, D-NET-1251).
 		std::string url = spec.url;
 		if (spec.cache_bust) {
-			const std::size_t scheme = url.find("://");
-			const std::size_t host_at = scheme == std::string::npos ? 0 : scheme + 3;
-			const std::size_t host_end = url.find_first_of(":/", host_at);
-			const std::string host = url.substr(host_at,
-					host_end == std::string::npos ? std::string::npos : host_end - host_at);
+			// The name the browser's request resolves: its Host line's (browser_request_host).
+			const std::string host = browser_request_host(url);
 			net::Endpoint server{};
 			if (!resolve(host, server)) {
 				net::HttpReply refused;

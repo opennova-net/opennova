@@ -1,3 +1,4 @@
+#include <base/vfs/dir_case_index.h>
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga_read.h>
@@ -13,11 +14,11 @@
 #include "util/data_format.h"
 #include "util/string_convert.h"
 
-#include <godot_cpp/classes/dir_access.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/image_texture3d.hpp>
+#include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 
 #include <algorithm>
@@ -41,7 +42,7 @@ bool is_resource_dir(const godot::String &dir) {
 // time; for a directory of thousands of files placing hundreds of objects that is the
 // dominant load cost. Keyed by dir / resolved-path so a different directory is a
 // separate entry.
-std::unordered_map<std::string, std::unordered_map<std::string, godot::String>> g_dir_index_cache;
+std::unordered_map<std::string, DirCaseIndex> g_dir_index_cache;
 std::unordered_map<std::string, godot::Ref<godot::Texture2D>> g_texture_cache;
 // Each directory's material-row texture registry (renderer::TextureRegistry): what a
 // row's loader made, by the row's key, the first row of a key to load deciding it. The
@@ -53,36 +54,20 @@ bool texture_loaded(const godot::Ref<godot::Texture> &texture) {
 	return texture.is_valid();
 }
 
-// List an absolute/external directory into a lower-cased filename -> real filename
-// index. Called once per directory by get_lowercase_dir_index(), which caches it.
-std::unordered_map<std::string, godot::String> build_lowercase_dir_index_uncached(const godot::String &dir) {
-	std::unordered_map<std::string, godot::String> index;
-	godot::Ref<godot::DirAccess> dir_access = godot::DirAccess::open(dir);
-	if (dir_access.is_null()) {
-		return index;
-	}
-	dir_access->list_dir_begin();
-	godot::String entry = dir_access->get_next();
-	while (!entry.is_empty()) {
-		if (!dir_access->current_is_dir()) {
-			index.emplace(to_std(entry.to_lower()), entry);
-		}
-		entry = dir_access->get_next();
-	}
-	dir_access->list_dir_end();
-	return index;
-}
-
-// Cached lower-cased filename index for `dir`: enumerate the directory once, then
-// reuse for every subsequent probe (callers do in-memory hash lookups instead of
-// re-listing the directory). Returns a const reference to avoid copying the map.
-const std::unordered_map<std::string, godot::String> &get_lowercase_dir_index(const godot::String &dir) {
+// `dir`'s files by name without case (the engine's DirCaseIndex), listed once per directory and
+// reused by every later probe; a res:// or user:// folder is listed at the OS path it stands for.
+const DirCaseIndex &get_dir_case_index(const godot::String &dir) {
 	const std::string key = to_std(dir);
 	auto it = g_dir_index_cache.find(key);
 	if (it != g_dir_index_cache.end()) {
 		return it->second;
 	}
-	auto inserted = g_dir_index_cache.emplace(key, build_lowercase_dir_index_uncached(dir));
+	godot::String os_dir = dir;
+	if (dir.begins_with("res://") || dir.begins_with("user://")) {
+		if (godot::ProjectSettings *settings = godot::ProjectSettings::get_singleton())
+			os_dir = settings->globalize_path(dir);
+	}
+	auto inserted = g_dir_index_cache.emplace(key, DirCaseIndex::scan(to_std(os_dir)));
 	return inserted.first->second;
 }
 
@@ -94,9 +79,8 @@ godot::String find_raw_file(const godot::String &dir, const godot::String &name)
 	if (dir.is_empty() || name.is_empty()) {
 		return godot::String();
 	}
-	const std::unordered_map<std::string, godot::String> &index = get_lowercase_dir_index(dir);
-	const auto it = index.find(to_std(name.to_lower()));
-	return it != index.end() ? dir.path_join(it->second) : godot::String();
+	const std::string found = get_dir_case_index(dir).find(to_std(name));
+	return found.empty() ? godot::String() : dir.path_join(to_gd(found));
 }
 
 godot::Ref<godot::Image> rgba_image(int width, int height, const uint8_t *pixels, size_t size) {
@@ -706,9 +690,7 @@ godot::String resolve_file_in_dir(const godot::String &dir, const godot::String 
 		const godot::String path = dir.path_join(name);
 		return godot::ResourceLoader::get_singleton()->exists(path) ? path : godot::String();
 	}
-	const std::unordered_map<std::string, godot::String> &index = get_lowercase_dir_index(dir);
-	auto it = index.find(to_std(name.to_lower()));
-	return it != index.end() ? dir.path_join(it->second) : godot::String();
+	return find_raw_file(dir, name);
 }
 
 godot::String resolve_sidecar_path(const godot::String &dir, const godot::String &filename, const char *ext) {
@@ -732,21 +714,9 @@ godot::String resolve_sidecar_path(const godot::String &dir, const godot::String
 		stem = file_name;
 	}
 
-	const godot::String stem_lower = stem.to_lower();
-	const godot::String stem_upper = stem.to_upper();
-	const godot::String stems[] = {stem, stem_lower, stem_upper};
-	const godot::String exts[] = {requested_ext, requested_ext.to_upper()};
+	// The sidecar in any case, as the folder spells it (the shared index, find_raw_file).
 	const godot::String search_dir = file_dir.is_empty() ? dir : dir.path_join(file_dir);
-	for (const godot::String &candidate_stem : stems) {
-		for (const godot::String &candidate_ext : exts) {
-			const godot::String candidate = search_dir.path_join(candidate_stem + godot::String(".") + candidate_ext);
-			if (godot::FileAccess::file_exists(candidate)) {
-				return candidate;
-			}
-		}
-	}
-
-	return godot::String();
+	return find_raw_file(search_dir, stem + godot::String(".") + requested_ext);
 }
 
 namespace {

@@ -252,6 +252,8 @@ public:
 	// local camera/avatar/viewmodel here gives action user points their
 	// production-tick pose; mission/vehicle Nodes retain the
 	// render-frame-batched present path that prevents 00TRa transform flicker.
+	// Bound: a test runs one fixed tick's weapon drain (the live action handles'
+	// re-pose, PlayerWeaponEffects::follow_action_effects) past a pose it set.
 	void present_fixed_weapon_tick(const TypedArray<PlayerWeaponEvent> &p_events);
 	// How many fixed-tick batches the router handed this presenter (a read
 	// seam: the world tests pin the fixed-tick order through it).
@@ -264,9 +266,8 @@ public:
 	// The USE hold the HUD's special-key chain reads (PlayerInputRouter::is_use_held).
 	bool is_use_held() const { return input_router_.is_use_held(); }
 	// One key-down through the special-key chain (PlayerInputRouter::special_key).
-	Ref<SpecialKeyOutcome> special_key(const Ref<Simulation> &p_session, int p_vk, int p_yes_vk,
-			int p_no_vk, int p_restart_vk) {
-		return input_router_.special_key(p_session, p_vk, p_yes_vk, p_no_vk, p_restart_vk);
+	Ref<SpecialKeyOutcome> special_key(const Ref<Simulation> &p_session, int p_vk) {
+		return input_router_.special_key(p_session, p_vk);
 	}
 	// The special-key chain's deploy pick into the input frame's event list
 	// (PlayerInputRouter::queue_pick_event), and the shell's arms for the escape row's and
@@ -398,6 +399,9 @@ private:
 	ObjectID camera_id_;
 	bool third_person_ = false;
 	ObjectID avatar_id_;
+	// The avatar's world transform as update_avatar composed it from the sim (its
+	// position, its body frame): the frame its attach legs place by.
+	Transform3D avatar_world_;
 	int avatar_type_id_ = 0; // the local body's type word the avatar was built for
 	ObjectID held_weapon_id_; // the 3P gun; a SIBLING of the avatar (see LocalPlayerVisuals)
 	String held_weapon_graphic_; // the gfx3 the live node was built from

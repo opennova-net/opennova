@@ -33,11 +33,14 @@
 #include "render/object_lod_frame.h"
 #include "util/axes.h"
 #include "util/texture_path_resolver.h"
+#include <runtime/environment/weather_ctrl_registers.h>
 #include <runtime/renderer/foliage_frame.h>
 #include <runtime/renderer/model_panm_cache.h>
 #include <runtime/renderer/object_lod.h>
+#include <runtime/world/entity_pose.h>
 #include <runtime/world/model_geometry.h>
 #include <runtime/world/occlusion_feed.h>
+#include <runtime/world/tick_count_clock.h>
 #include <runtime/renderer/render_order.h>
 
 using namespace opennova::threedi;
@@ -149,16 +152,47 @@ void ObjectModel::update_slot_shadow_group() {
 	if (!is_inside_tree()) {
 		return;
 	}
-	const StringName &group = SlotShadow::caster_group();
-	if (is_shadow_caster_enabled()) {
-		if (!is_in_group(group)) {
-			add_to_group(group);
-			SlotShadow::bump_caster_group_revision();
+	const auto keep = [this](const StringName &p_group, bool p_member) {
+		if (p_member == is_in_group(p_group)) {
+			return;
 		}
-	} else if (is_in_group(group)) {
-		remove_from_group(group);
+		if (p_member) {
+			add_to_group(p_group);
+		} else {
+			remove_from_group(p_group);
+		}
 		SlotShadow::bump_caster_group_revision();
+	};
+	keep(SlotShadow::caster_group(), is_shadow_caster_enabled());
+	keep(SlotShadow::ride_group(), slot_ride_ground_.is_valid() || slot_seat_walk_.is_valid());
+}
+
+void ObjectModel::set_slot_ride(uint32_t p_bits, ObjectModel *p_ground) {
+	const ObjectID ground = p_ground != nullptr ? ObjectID(p_ground->get_instance_id()) : ObjectID();
+	if (slot_ride_bits_ == p_bits && slot_ride_ground_ == ground) {
+		return;
 	}
+	slot_ride_bits_ = p_bits;
+	slot_ride_ground_ = ground;
+	update_slot_shadow_group();
+}
+
+ObjectModel *ObjectModel::get_slot_ride_ground() const {
+	return Object::cast_to<ObjectModel>(ObjectDB::get_instance(slot_ride_ground_));
+}
+
+void ObjectModel::set_slot_seat(uint32_t p_bits, ObjectModel *p_walk) {
+	const ObjectID walk = p_walk != nullptr ? ObjectID(p_walk->get_instance_id()) : ObjectID();
+	if (slot_seat_bits_ == p_bits && slot_seat_walk_ == walk) {
+		return;
+	}
+	slot_seat_bits_ = p_bits;
+	slot_seat_walk_ = walk;
+	update_slot_shadow_group();
+}
+
+ObjectModel *ObjectModel::get_slot_seat_walk() const {
+	return Object::cast_to<ObjectModel>(ObjectDB::get_instance(slot_seat_walk_));
 }
 
 void ObjectModel::set_slot_shadow_person(bool p_person) {
@@ -767,7 +801,7 @@ void ObjectModel::set_authored_occluders_enabled(bool p_enabled) {
 
 opennova::renderer::ControlRegisterValues ObjectModel::runtime_ctrl_values() {
 	int32_t flicker = 0, swing = 0;
-	ObjectData::weather_ctrl_registers(flicker, swing);
+	opennova::env::weather_ctrl_registers().pair(flicker, swing);
 	return controls_.runtime_values(flicker, swing);
 }
 
@@ -1000,13 +1034,13 @@ void ObjectModel::retire_geometry_instances() {
 	geometry_instance_count_ = 0;
 }
 
-void ObjectModel::advance_awake_frame(double p_delta) {
-	advance_awake_frame_impl(p_delta, nullptr);
+void ObjectModel::advance_awake_frame(int64_t p_frame_clock_ms) {
+	advance_awake_frame_impl(p_frame_clock_ms, nullptr);
 }
 
-PackedInt64Array ObjectModel::profile_awake_frame(double p_delta) {
+PackedInt64Array ObjectModel::profile_awake_frame(int64_t p_frame_clock_ms) {
 	AwakeFrameProfile profile;
-	advance_awake_frame_impl(p_delta, &profile);
+	advance_awake_frame_impl(p_frame_clock_ms, &profile);
 	PackedInt64Array result;
 	result.resize(AWAKE_PROFILE_SLOT_COUNT);
 	result.set(AWAKE_PROFILE_CLOCK_ANIMATION_US, profile.clock_animation_us);
@@ -1018,7 +1052,7 @@ PackedInt64Array ObjectModel::profile_awake_frame(double p_delta) {
 	return result;
 }
 
-void ObjectModel::advance_awake_frame_impl(double p_delta,
+void ObjectModel::advance_awake_frame_impl(int64_t p_frame_clock_ms,
 		AwakeFrameProfile *p_profile) {
 	// The set is process-global while the drivers are per-context; a per-frame
 	// guard keeps exactly one advance per Godot frame no matter how many
@@ -1030,6 +1064,11 @@ void ObjectModel::advance_awake_frame_impl(double p_delta,
 		return;
 	}
 	last_frame = frame;
+	// The frame's elapsed on the engine clock: the main loop's millisecond count less the
+	// previous frame's read (world::FrameTickElapsed), the step every awake model's clocks take.
+	static opennova::world::FrameTickElapsed clock;
+	const double elapsed =
+			static_cast<double>(clock.advance(static_cast<uint32_t>(p_frame_clock_ms))) / 1000.0;
 	if (awake_models_.is_empty()) {
 		return;
 	}
@@ -1045,7 +1084,7 @@ void ObjectModel::advance_awake_frame_impl(double p_delta,
 			if (p_profile != nullptr) {
 				++p_profile->awake_models;
 			}
-			model->advance_runtime_frame_profiled(p_delta, p_profile);
+			model->advance_runtime_frame_profiled(elapsed, p_profile);
 		}
 	}
 }
@@ -1488,12 +1527,7 @@ bool ObjectModel::needs_runtime_frame_work() const {
 			(render_order_dirty_ && !alpha_strip_draws_.is_empty()) || controls_.has_active_parts()) {
 		return true;
 	}
-	if (skeleton_ == nullptr || skeletal_.is_null() || anim_key_.is_empty()) {
-		return false;
-	}
-	return body_pose_dirty_ ||
-			(is_playing_ && anim_playing_ && !anim_external_phase_) ||
-			remote_body_.has_pending();
+	return skeleton_ != nullptr && body_.needs_frame(is_playing_);
 }
 
 void ObjectModel::refresh_live_panm_classification() {
@@ -1587,7 +1621,7 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 		const std::array<int32_t, 3> p = godot_to_mission_q16(get_global_position());
 		int32_t flicker = 0;
 		int32_t swing = 0;
-		if (ObjectData::weather_ctrl_registers_at(p[0], p[1], p[2], flicker, swing)) {
+		if (opennova::env::weather_ctrl_registers().sample_at(p[0], p[1], p[2], flicker, swing)) {
 			controls_.sample_weather(flicker, swing);
 		} else {
 			// No rings stand. The absent set clears them once a weather
@@ -1681,8 +1715,8 @@ void ObjectModel::apply_dynamic_material(const Ref<ShaderMaterial> &material,
 		int material_index, bool p_needs_eval, MaterialRuntimeStamp &stamp,
 		const opennova::renderer::ControlRegisterValues &p_ctrl) {
 	// The focused Q3 compile caches this material's block; every write
-	// below names the material so its surfaces re-read it once.
-	bool q3_parameters_changed = false;
+	// below publishes the new values so its surfaces re-read them once.
+	bool q3_runtime_changed = false;
 	if (p_needs_eval) {
 		opennova::renderer::MaterialRuntime runtime;
 		if (object_data_->eval_material_runtime_native(material_index,
@@ -1693,25 +1727,25 @@ void ObjectModel::apply_dynamic_material(const Ref<ShaderMaterial> &material,
 					runtime.uv.m20 != previous.uv.m20) {
 				material->set_shader_parameter("u_uv_transform_u",
 						Vector3(runtime.uv.m00, runtime.uv.m10, runtime.uv.m20));
-				q3_parameters_changed = true;
+				q3_runtime_changed = true;
 			}
 			if (!stamp.runtime_valid || runtime.uv.m01 != previous.uv.m01 ||
 					runtime.uv.m11 != previous.uv.m11 ||
 					runtime.uv.m21 != previous.uv.m21) {
 				material->set_shader_parameter("u_uv_transform_v",
 						Vector3(runtime.uv.m01, runtime.uv.m11, runtime.uv.m21));
-				q3_parameters_changed = true;
+				q3_runtime_changed = true;
 			}
 			if (!stamp.runtime_valid || runtime.rgb_r != previous.rgb_r ||
 					runtime.rgb_g != previous.rgb_g ||
 					runtime.rgb_b != previous.rgb_b) {
 				material->set_shader_parameter("u_rgb_mod",
 						Vector3(runtime.rgb_r, runtime.rgb_g, runtime.rgb_b));
-				q3_parameters_changed = true;
+				q3_runtime_changed = true;
 			}
 			if (!stamp.runtime_valid || runtime.alpha != previous.alpha) {
 				material->set_shader_parameter("u_alpha_mod", runtime.alpha);
-				q3_parameters_changed = true;
+				q3_runtime_changed = true;
 			}
 			if (!stamp.runtime_valid || runtime.reflect != previous.reflect) {
 				set_material_and_auxiliary_parameter(material,
@@ -1719,7 +1753,7 @@ void ObjectModel::apply_dynamic_material(const Ref<ShaderMaterial> &material,
 						"u_reflect_color",
 						Vector4(runtime.reflect[0], runtime.reflect[1],
 								runtime.reflect[2], runtime.reflect[3]));
-				q3_parameters_changed = true;
+				q3_runtime_changed = true;
 			}
 			stamp.runtime = runtime;
 			stamp.runtime_valid = true;
@@ -1735,16 +1769,17 @@ void ObjectModel::apply_dynamic_material(const Ref<ShaderMaterial> &material,
 			if (frame.is_valid()) {
 				const Ref<ShaderMaterial> postmultiply =
 						postmultiply_material_for_index(material_index);
+				const float frame_max_lod = opennova::texture_max_lod(frame);
 				set_material_and_auxiliary_parameter(material, postmultiply, "u_diffuse", frame);
 				set_material_and_auxiliary_parameter(material, postmultiply,
-						"u_diffuse_max_lod", opennova::texture_max_lod(frame));
+						"u_diffuse_max_lod", frame_max_lod);
 				stamp.anim_frame = frame_index;
-				q3_parameters_changed = true;
+				FrameFx::update_q3_object_diffuse(material, frame, frame_max_lod);
 			}
 		}
 	}
-	if (q3_parameters_changed) {
-		FrameFx::invalidate_q3_object_material(material);
+	if (q3_runtime_changed) {
+		FrameFx::update_q3_object_runtime(material, stamp.runtime);
 	}
 }
 
@@ -1944,8 +1979,12 @@ void ObjectModel::collect_point_light_draw_parts(
 
 Transform3D ObjectModel::subobject_model_to_world(int p_subobject) const {
 	if (skeleton_ != nullptr && p_subobject >= 0 && p_subobject < skeleton_->get_bone_count()) {
-		return skeleton_->get_global_transform() * skeleton_->get_bone_global_pose(p_subobject) *
-				skeleton_->get_bone_global_rest(p_subobject).affine_inverse();
+		opennova::world::PosedBoneFrames frames;
+		if (get_posed_bone_frames(p_subobject, get_global_transform(), frames)) {
+			return from_pose_transform(frames.model_to_world);
+		}
+		// A skeleton no rig poses stands at its rest: the model frame.
+		return get_global_transform();
 	}
 	Node3D *const *node = robj_nodes_.getptr(p_subobject);
 	if (node != nullptr && *node != nullptr) {
@@ -2050,7 +2089,7 @@ void ObjectModel::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_focal_sway", "active", "basis", "world_offset"),
 			&ObjectModel::set_focal_sway);
 	ClassDB::bind_static_method("ObjectModel",
-			D_METHOD("advance_awake_frame", "delta"),
+			D_METHOD("advance_awake_frame", "frame_clock_ms"),
 			&ObjectModel::advance_awake_frame);
 	ClassDB::bind_static_method("ObjectModel",
 			D_METHOD("update_authored_lods",

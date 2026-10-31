@@ -14,6 +14,7 @@
 #include <formats/mnu/mnu.h>
 #include <runtime/controls/binding_set.h>
 #include <runtime/menu/menu_commands.h>
+#include <runtime/menu/mission_screen.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_sound.h>
 #include <runtime/menu/menu_state_frame.h>
@@ -285,6 +286,28 @@ const char *kCharacterControlsElsewhere = R"(<SCREEN>
 </SCREEN>
 )";
 
+// The PLAYER_INFO screen's controls, which its delegate owns; and a Mods screen (a mod list, no mission list).
+const char *kPlayerInfo = R"(<SCREEN>
+	<NAME>PLAYER_INFO</NAME>
+	<WINDOW type="window" name="MAIN">
+		<WINDOW type="combobox" name="NATIONALITY"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+		<WINDOW type="list" name="COMBO_LIST"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+		<WINDOW type="button" name="ACCEPT"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+		<WINDOW type="button" name="EXIT"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+	</WINDOW>
+</SCREEN>
+)";
+
+const char *kMods = R"(<SCREEN>
+	<NAME>MODS</NAME>
+	<WINDOW type="window" name="MAIN">
+		<WINDOW type="list" name="AVAIL_LIST"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+		<WINDOW type="button" name="ACCEPT"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+		<WINDOW type="button" name="NW_MULTI_PLAYER"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+	</WINDOW>
+</SCREEN>
+)";
+
 // The updater's buttons: STARTUP's and OPTIONS's UPDATE, front end only, with no availability gate;
 // and an APPMSG row's "UPDATE" (without case, untrimmed), on any screen.
 // [orig: UI_RegisterStartupCallbacks @ 0x555890 (UPDATE @ 0x5558f2); UI_RegisterOptionsCallbacks
@@ -361,6 +384,29 @@ void test_commands() {
 		CHECK(commands.owner() == "lan");
 		CHECK(commands.command_of("LAN", "START_GAME") == MenuCommand::HostGame);
 		CHECK(commands.command_of("LAN", "EXIT") == MenuCommand::None);
+		CHECK(commands.mission_lists().empty() && commands.mod_lists().empty());
+	}
+	{
+		Run run;
+		CHECK(run.open(kPlayerInfo, "player.mnu"));
+		MenuCommands commands;
+		commands.wire(run.rt, false);
+		// PLAYER_INFO's delegate owns the document: its ACCEPT saves the profile, nothing else binds.
+		CHECK(commands.owner() == "player_info");
+		CHECK(commands.command_of("PLAYER_INFO", "ACCEPT") == MenuCommand::SaveProfile);
+		CHECK(commands.command_of("PLAYER_INFO", "EXIT") == MenuCommand::None);
+	}
+	{
+		Run run;
+		CHECK(run.open(kMods, "options.mnu"));
+		MenuCommands commands;
+		commands.wire(run.rt, false);
+		// A mod list and no mission list: ACCEPT applies the pick; NW_MULTI_PLAYER opens NovaWorld.
+		CHECK(commands.owner().empty());
+		CHECK(commands.mod_lists().size() == 1 && commands.mod_lists()[0] == run.rt.widget_id("AVAIL_LIST"));
+		CHECK(commands.mission_lists().empty());
+		CHECK(commands.command_of("MODS", "ACCEPT") == MenuCommand::ApplyExpansion);
+		CHECK(commands.command_of("MODS", "NW_MULTI_PLAYER") == MenuCommand::NovaWorld);
 	}
 	{
 		// The character screen is the screen named PLAYER_INFO, without case, whatever it holds
@@ -429,6 +475,27 @@ void test_options_policy() {
 	CHECK(run.rt.is_widget_disabled(run.rt.widget_id("DIFFICULTY")));
 }
 
+// The main frame's input under a mission's menu screen: none up runs the frame's own; INGAME,
+// WEAPON, CMAP and VEHICLE hold it; DEATH and STAT pass it through while the pass-through word
+// holds, which no other screen raises
+// [orig: UI_ProcessMenuScreenFrame @0x54E650 (@0x54E686); UI_SetMenuInputPassThrough @0x54B980].
+void test_mission_screens() {
+	CHECK(!mission_screen_open(MissionScreen::None));
+	CHECK(!mission_screen_holds_input(MissionScreen::None, false));
+	CHECK(!mission_screen_passes_input(MissionScreen::None, true));
+	for (const MissionScreen held : {MissionScreen::Ingame, MissionScreen::Weapon,
+			     MissionScreen::CommandMap, MissionScreen::Vehicle}) {
+		CHECK(mission_screen_open(held));
+		CHECK(mission_screen_holds_input(held, false) && mission_screen_holds_input(held, true));
+		CHECK(!mission_screen_passes_input(held, true));
+	}
+	for (const MissionScreen passing : {MissionScreen::Death, MissionScreen::Stat}) {
+		CHECK(mission_screen_open(passing));
+		CHECK(mission_screen_passes_input(passing, true) && !mission_screen_holds_input(passing, true));
+		CHECK(!mission_screen_passes_input(passing, false) && mission_screen_holds_input(passing, false));
+	}
+}
+
 } // namespace
 
 int main() {
@@ -437,6 +504,7 @@ int main() {
 	test_edit_sets_clamp_the_caret_and_reset_the_first_line();
 	test_a_focused_edit_types_at_its_start();
 	test_commands();
+	test_mission_screens();
 	test_update_routes();
 	test_options_policy();
 	if (failures) {

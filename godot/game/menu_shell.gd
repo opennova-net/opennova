@@ -16,8 +16,8 @@ extends Control
 # the named back/quit Command, and the gameplay launch. Shipped JO menus carry no "launch" action verb; the engine
 # wires those by well-known control NAME (START_GAME, ACCEPT, EXIT, ...), so
 # the shell resolves those names against the loaded document and routes the
-# driver's activation signal. The control-name sets are exported so a
-# different game's menu set can be pointed at the same shell.
+# driver's activation signal; the names and the commands are the engine's
+# (menu::MenuCommands).
 
 # The director var the current screen's MUSICVAR lands in is
 # MusicDirector.MENU_MUSIC_VAR_SLOT — the witness lives at the engine home,
@@ -52,57 +52,13 @@ const _LAN_MULTI_PLAYER := "LAN_MULTI_PLAYER"
 @export var menu_sound_bank_file := ""   # "" -> MENUMUS.SBF (M<n>.sbf under an expansion)
 @export var menu_music_file := ""        # "" -> MENUMUS.BIN (M<n>.bin under an expansion)
 
-# The well-known control names the shell binds Commands to (ADR 0001): the engine's table
-# (engine/runtime/menu/menu_commands.h, MenuDriver.command_names), which the editor's Try mode
-# reads too. A game whose menus name these controls otherwise points the sets at its own.
-# An activated control matching one routes to the shell handler; a document a companion owns
-# is the companion's.
-# The launch controls: a play screen's (a document holding a mission list) start its mission.
-@export var start_control_names := MenuDriver.command_names("start")
-@export var exit_control_names := MenuDriver.command_names("exit")
-# The mission-exit Command seam. Retail's in-game ABORT button does NOT leave
-# the mission: its authored actions raise the CONFIRM_EXIT "Are you sure?"
-# panel (SHOW CONFIRM_EXIT + HIDE MAIN_WRAPPER in the shipped game.mnu), and
-# the exit itself is the engine Command registered on CONFIRM_YES — the same
-# per-(screen,control) seam as the other named controls (docs/mnu/menu-re.md,
-# "The in-game exit confirmation"). Retail's ABORT command arms a
-# confirm-pending latch that CONFIRM_YES checks; here the latch is modeled by
-# reachability — the panel is only shown by ABORT's authored actions, hidden
-# widgets are unclickable, and the engine hotkey scan skips hidden subtrees —
-# so a CONFIRM_YES activation implies an armed ABORT. CONFIRM_NO needs no
-# binding: its authored actions restore MAIN_WRAPPER. Binding ABORT here was
-# the bug that skipped the confirmation (the teardown swapped the document
-# under the emit, so the authored SHOW never dispatched).
-@export var return_control_names := MenuDriver.command_names("return")
-# The in-game RESTART command (game.mnu INGAME), the engine's
-# World::ingame_restart_command behind the shell's restart_requested.
-@export var restart_control_names := MenuDriver.command_names("restart")
-# The generic BACK command seam: the actionless named button the original
-# engine's shell binds by name (game.mnu's ESC-hotkeyed HIDDEN_BACK is the ONLY
-# resume affordance the shipped in-game menu has — there is no visible RESUME
-# button). Witnessed names only: an invented alias could double-dispatch
-# against a shipped or modded button of the same name that carries a real
-# action. Routed through the top-level back/quit logic: cross-.mnu back first,
-# then resume (in-game) or exit-to-desktop (main menu).
-@export var back_control_names := MenuDriver.command_names("back")
-# List widgets the shell fills with the resource dir's missions (.bms).
-@export var mission_list_names := MenuDriver.command_names("mission_lists")
-# The engine menu flow recognizes these SP lists and owns their selection gate.
-@export var sp_mission_list_names := MenuDriver.command_names("sp_lists")
-# The SP briefing pane a selection fills (cleared on every populate).
-@export var briefing_pane_names := MenuDriver.command_names("briefings")
-# The SP confirm controls receive the engine selection gate.
-@export var sp_accept_control_names := MenuDriver.command_names("sp_accepts")
-# The Mods list (Options -> Mods): the base game's row, then the expansions under
-# the game folder's expansion/; ACCEPT switches the game to the pick for the run
-# (engine menu::ModList, D-MNU-31).
-@export var mod_list_names := MenuDriver.command_names("mod_lists")
-# Readonly text widgets that show the picked expansion's description.
-@export var mod_desc_names := MenuDriver.command_names("mod_descriptions")
+# The commands the game binds by control NAME (ADR 0001: START_GAME, ACCEPT,
+# EXIT, CONFIRM_YES, HIDDEN_BACK, NW_MULTI_PLAYER, ...), the lists it fills and
+# the delegate that owns a document are the engine's (menu::MenuCommands::wire,
+# engine/runtime/menu/menu_commands.h, which the editor's Try mode runs too): the
+# driver wires them after each open and the shell runs what a control's command
+# asks (_on_widget_activated).
 
-# Controls that open NovaWorld (online multiplayer). The shipped JO main menu
-# carries an NW_MULTI_PLAYER button and jo_mp.mnu a NOVAWORLD window/screen.
-@export var novaworld_control_names := MenuDriver.command_names("novaworld")
 ## The LAN multiplayer entry (an authored SCREEN action to mp.mnu), which the
 ## update gate disables beside the NovaWorld controls while an update waits.
 @export var lan_entry_control_names := PackedStringArray([_LAN_MULTI_PLAYER])
@@ -168,14 +124,13 @@ var _in_game := false
 # True from setup() until a mission's start leaves the menu (leave_menu_mode):
 # the next setup() on the same root is then the menu's re-entry.
 var _menu_mode := false
-# Named-control routing rebuilt per open_menu: NAME (upper) -> Callable.
-var _named_handlers: Dictionary = {}
 # The multiplayer entries the update gate disabled in the open document.
 var _update_gated_ids: Array[int] = []
 # Optional delegates that own game-specific menus the generic shell does not handle
 # (the JO multiplayer menu — mp_menu_companion.gd; the PLAYER_INFO character screen —
-# player_info_menu_companion.gd). Empty for a plain shell. The first whose owns_menu()
-# claims a loaded menu drives it; otherwise the shell's generic wiring runs.
+# player_info_menu_companion.gd). Empty for a plain shell. The one whose owner_name()
+# is the engine's owner of a loaded document (MenuDriver.command_owner) drives it;
+# otherwise the shell's generic wiring runs.
 var _companions: Array = []
 # The companion wired to the current document (null when the shell's generic
 # wiring runs); the next document swap releases it if it loses ownership.
@@ -201,12 +156,8 @@ func _process(delta: float) -> void:
 ## advance, and -- at the tail, the way the original orders it -- the deferred
 ## expansion remount. Public so a caller (and the GUT suite) can step the menu
 ## tick the way the mode loop does.
-## retail: Menu_UpdateFrame @ 0x5528a0 (the MainMenu mode descriptor @ 0x83b400, its
-## update slot @ 0x83b424).
-func update_menu_frame(delta: float = 0.0) -> void:
-	# Covered by a screen that is its own mode (the join screen), the menu's frame
-	# does not run: its pump, its clock and the deferred remount wait for it.
-	var menu_runs := not _is_covered()
+## retail: Menu_UpdateFrame @ 0x5528a0 (the mode struct's update slot @ 0x83b404).
+func update_menu_frame(_delta: float = 0.0) -> void:
 	# The pump, once a frame after the input events (each taken as its message
 	# in _gui_input): hover, the click and the window sounds of the mouse as the
 	# events left it (engine/runtime/menu/menu_runtime.h, pump_mouse). Over a
@@ -220,9 +171,8 @@ func update_menu_frame(delta: float = 0.0) -> void:
 	# The one model runtime-frame driver outside a live mission: menu portraits
 	# (avatar previews) are ObjectModels, which no longer self-clock. The static
 	# advance is per-frame-guarded, so a mission's own driver takes precedence.
-	ObjectModel.advance_awake_frame(delta)
-	if menu_runs:
-		_consume_expansion_reload_request()
+	ObjectModel.advance_awake_frame(GameWorld.current_frame_clock_ms())
+	_consume_expansion_reload_request()
 
 
 ## The screen pass's mouse pump: hover, the click and the window sounds of the
@@ -284,8 +234,8 @@ func consume_video_process_us() -> int:
 
 # Install a companion that owns game-specific menus the generic shell does not handle
 # (the JO multiplayer menu — mp_menu_companion.gd; the PLAYER_INFO screen). The shell can
-# drive several: companions are tried in install order, and the first whose
-# owns_menu() claims the loaded menu drives it (see _wire_named_controls).
+# drive several: the first, in install order, whose owner_name() is the engine's owner
+# of the loaded document drives it (see _wire_named_controls).
 func add_companion(companion: MenuCompanion) -> void:
 	if companion != null and not _companions.has(companion):
 		_companions.append(companion)
@@ -485,8 +435,7 @@ func open_menu(file: String, target_screen: String) -> bool:
 	# Shipped same-file screen jumps name their own file (mp.mnu does); the
 	# driver routes them as in-menu navigation by comparing against this
 	# basename.
-	if not _driver.open_document(doc, _root, _style, Strings.get_override_table(),
-			file.get_file(), target_screen):
+	if not _driver.open_document(doc, _root, _style, file.get_file(), target_screen):
 		push_warning("MenuShell: menu '%s' has no screens" % file)
 		# The driver may already have swapped its document: nothing parked on
 		# the shared frame by the previous companion can be rebuilt now.
@@ -523,7 +472,7 @@ func release_runtime_renderer_resources() -> void:
 		_underlay.stop()
 	if _frame != null:
 		# configure(null) wipes the retained texture/font sets.
-		_frame.configure(null, "", null, null, null)
+		_frame.configure(null, "", null, null)
 
 
 # Marks that the menu is now the in-game/pause overlay (a kept-loaded world sits
@@ -578,8 +527,8 @@ func _apply_update_gate() -> void:
 		return
 	var out_of_date: bool = RuntimeUpdates.available
 	var update_id := _driver.widget_id("UPDATE")
-	if update_id >= 0 and _driver.screen_command(_driver.widget_screen_of(update_id), "UPDATE",
-			_in_game) == "update":
+	if update_id >= 0 and _driver.screen_command(_driver.widget_screen_of(update_id),
+			"UPDATE") == "update":
 		_driver.set_widget_shown(update_id, out_of_date)
 		_driver.set_widget_disabled(update_id, not out_of_date)
 	if not out_of_date:
@@ -587,7 +536,7 @@ func _apply_update_gate() -> void:
 			_driver.set_widget_disabled(id, false)
 		_update_gated_ids.clear()
 		return
-	for names in [novaworld_control_names, lan_entry_control_names]:
+	for names in [MenuDriver.command_names("novaworld"), lan_entry_control_names]:
 		for n in names:
 			var id := _driver.widget_id(n)
 			if id >= 0 and not _update_gated_ids.has(id) and not _driver.is_widget_disabled(id):
@@ -595,44 +544,31 @@ func _apply_update_gate() -> void:
 				_update_gated_ids.append(id)
 
 
-# After each open, resolve the launch/quit controls and seed mission/mod lists.
-# The driver keeps per-document widget state, so this rescans names against the
-# freshly opened document.
-#
-# The "OK" control (named ACCEPT in JO) is overloaded: it launches on a play screen
-# but is a plain confirm on Options/loadout/etc. The original engine dispatches it
-# per-screen (CUIScene_RegisterControlCallback @0x63c060 registers callbacks keyed by screen+control), so the same
-# ACCEPT means different things on different screens. We can't hardcode JO's screen
-# names (this shell is game-agnostic), so we scope by the screen's ROLE inferred from
-# its content: a mission list -> launch screen (ACCEPT/START_GAME launch the mission);
-# else a mod list -> Mods screen (ACCEPT applies the highlighted expansion); else the
-# start controls are left to the menu's own actions. Binding them globally is what
-# made OK on Options launch the first mission.
+# After each open the engine wires the document's commands (menu::MenuCommands::wire:
+# the code's per-screen registrations, the delegate that owns the document, the
+# lists the game fills and the launch/quit controls: ACCEPT launches only on a
+# document holding a mission list, applies the Mods pick on one holding a mod
+# list, and is left to the menu's own rows on any other), and the shell seeds the
+# lists it names.
 func _wire_named_controls() -> void:
-	_named_handlers.clear()
+	_driver.wire_commands(_in_game)
 	_apply_update_gate()
 	_driver.clear_mission_rows()
-	_driver.set_mission_controls(sp_mission_list_names, briefing_pane_names,
-			sp_accept_control_names)
-	_driver.set_mod_descriptions(mod_desc_names)
-	# The single-player screen's inputs: the title's screen, and under dfx2.exe's campaign tabs
-	# the campaign reader's file, its menu table (the gameui table, Game.bin, not menutxt: engine
-	# MenuFlow::set_campaign_source) and the profile's progress (engine MenuFlow).
-	_driver.set_single_player_source(PlayerProfile.store(),
-			Strings.get_table(Strings.TABLE_GAMEUI))
 
-	# A companion (e.g. the multiplayer menu driver, or the PLAYER_INFO character screen)
-	# can own a whole menu: when one claims this one, hand it the named-control wiring and
-	# skip the generic launch/mission wiring, so e.g. START_GAME means "host a game" rather
-	# than "launch the first mission". The first claimant wins. The previously
-	# wired companion is RELEASED when it loses the document: mounts it parked
-	# on the persistent frame (the PLAYER_INFO avatar preview) would otherwise
-	# outlive their screen, since no later on_menu_built reaches it.
+	# A delegate (the multiplayer menu, the PLAYER_INFO character screen) owns a
+	# whole document by the controls it holds (the engine's command_owner): the
+	# companion of that name gets the named-control wiring, and the shell's
+	# generic launch/mission wiring stays out. The previously wired companion is
+	# RELEASED when it loses the document: mounts it parked on the persistent
+	# frame (the PLAYER_INFO avatar preview) would otherwise outlive their screen,
+	# since no later on_menu_built reaches it.
+	var owner := _driver.command_owner()
 	var claimant: MenuCompanion = null
-	for companion in _companions:
-		if companion != null and companion.owns_menu(_driver):
-			claimant = companion
-			break
+	if not owner.is_empty():
+		for companion in _companions:
+			if companion != null and companion.owner_name() == owner:
+				claimant = companion
+				break
 	if _wired_companion != null and _wired_companion != claimant:
 		_wired_companion.on_menu_released()
 	_wired_companion = claimant
@@ -640,52 +576,35 @@ func _wire_named_controls() -> void:
 		claimant.on_menu_built(_driver, _current_file,
 				_driver.get_current_screen(), _root)
 		return
-	var has_mission_list := false
-	for list_name in mission_list_names:
-		var id := _driver.widget_id(list_name)
-		if id >= 0 and _driver.widget_kind_of(id) in _LIST_KINDS:
-			has_mission_list = true
-			_seed_mission_list(id)
-	var has_mod_list := false
-	for mod_name in mod_list_names:
-		var id := _driver.widget_id(mod_name)
-		if id >= 0 and _driver.widget_kind_of(id) in _LIST_KINDS:
-			has_mod_list = true
-			_seed_mod_list(id)
-
-	if has_mission_list:
-		_connect_named(start_control_names, _on_start_control)
-	elif has_mod_list:
-		_connect_named(start_control_names, _on_apply_selected_mod)
-	_connect_named(exit_control_names, _on_exit_control)
-	_connect_named(return_control_names, _on_return_control)
-	_connect_named(restart_control_names, _on_restart_control)
-	_connect_named(novaworld_control_names, _on_novaworld_control)
-	_connect_named(back_control_names, _on_quit_requested)
-
-
-const _LIST_KINDS := [MnuDocument.TYPE_LIST, MnuDocument.TYPE_LAN_LIST]
-
-
-func _connect_named(names: PackedStringArray, handler: Callable) -> void:
-	for n in names:
-		if _driver.has_widget(n) and not _named_handlers.has(n.to_upper()):
-			_named_handlers[n.to_upper()] = handler
+	for id in _driver.command_mission_lists():
+		_seed_mission_list(id)
+	for id in _driver.command_mod_lists():
+		_seed_mod_list(id)
 
 
 func _on_widget_activated(id: int, widget_name: String) -> void:
-	# The updater's buttons, by the screen that holds them (the game binds the
-	# command to the control), whatever file holds it and whoever owns its other
-	# controls (engine menu_commands.h MenuCommand::Update).
-	if _driver.screen_command(_driver.widget_screen_of(id), widget_name, _in_game) == "update":
-		_launch_update()
-		return
-	# The campaign tabs' radios refresh ACCEPT (engine MenuFlow::activate_tab).
-	if _driver.activate_single_player_tab(widget_name):
-		return
-	var handler: Callable = _named_handlers.get(widget_name.to_upper(), Callable())
-	if handler.is_valid():
-		handler.call()
+	# The command the game binds on the control, by the screen that holds it
+	# (engine menu_commands.h): the updater's buttons whatever file holds them
+	# and whoever owns the document's other controls, the shell's launch/quit
+	# controls on a document no delegate owns. A delegate's own commands are its
+	# companion's to run.
+	match _driver.screen_command(_driver.widget_screen_of(id), widget_name):
+		"update":
+			_launch_update()
+		"start_mission":
+			_on_start_control()
+		"apply_expansion":
+			_on_apply_selected_mod()
+		"exit":
+			_on_exit_control()
+		"return_to_menu":
+			return_to_menu_requested.emit()
+		"restart":
+			restart_requested.emit()
+		"novaworld":
+			_on_novaworld_control()
+		"back":
+			_on_quit_requested()
 
 
 func _on_app_command_requested(command: String) -> void:
@@ -719,8 +638,7 @@ func _on_list_activated(id: int, row: int) -> void:
 	# Double-click activation launches on the mission list. The Mods list's
 	# double click does nothing: the game takes its select alone (engine
 	# menu::ModList::select).
-	var widget_name := _driver.widget_name_of(id)
-	if _is_mission_list(widget_name):
+	if _driver.command_mission_lists().has(id):
 		_driver.activate_mission(id, row)
 		_on_start_control()
 
@@ -735,12 +653,12 @@ func _seed_mod_list(id: int) -> void:
 
 
 # OK/ACCEPT on a Mods screen: switch the game to the highlighted row's game
-# rather than launching a mission. Wired (instead of the launch handler) by
-# _wire_named_controls when the screen has a mod list but no mission list.
+# rather than launching a mission (the engine binds it so on a document holding
+# a mod list but no mission list).
 func _on_apply_selected_mod() -> void:
-	var id := _find_mod_list()
-	if id >= 0:
-		_apply_expansion(_driver.mod_list_pick(id))
+	var lists := _driver.command_mod_lists()
+	if not lists.is_empty():
+		_apply_expansion(_driver.mod_list_pick(lists[0]))
 
 
 # The engine queues the pick ("" the base game); the shell applies its resource
@@ -875,13 +793,13 @@ func _on_quit_requested() -> void:
 
 
 func _on_widget_value_changed(widget_name: String, kind: String, index: int, value: String) -> void:
-	# The campaign list's pick is the engine's (MenuFlow::select_campaign).
-	if kind == "list" and _driver.select_campaign(_driver.widget_id(widget_name), index):
+	if kind != "list":
 		return
-	if kind == "list" and _is_mission_list(widget_name):
-		_driver.select_mission(_driver.widget_id(widget_name), index, value)
-	elif kind == "list" and _is_mod_list(widget_name):
-		_driver.select_mod(_driver.widget_id(widget_name), index)
+	var id := _driver.widget_id(widget_name)
+	if _driver.command_mission_lists().has(id):
+		_driver.select_mission(id, index, value)
+	elif _driver.command_mod_lists().has(id):
+		_driver.select_mod(id, index)
 
 
 func _on_url_requested(url: String, external: bool) -> void:
@@ -917,26 +835,6 @@ func _on_start_control() -> void:
 
 func _on_exit_control() -> void:
 	exit_to_desktop_requested.emit("the main menu's EXIT")
-
-
-func _on_return_control() -> void:
-	# CONFIRM_YES is registered per (screen, control) in retail — the INGAME,
-	# STAT and DEATH screens each bind their own exit handler
-	# (docs/mnu/menu-re.md "The in-game exit confirmation"). The shell binds
-	# the name, so it answers only while a mission is running; a front-end
-	# document that happened to author the name never leaves a mission that
-	# is not there.
-	if not _in_game:
-		return
-	return_to_menu_requested.emit()
-
-
-# RESTART is the in-game screen's own command; like CONFIRM_YES it answers only
-# while a mission is running.
-func _on_restart_control() -> void:
-	if not _in_game:
-		return
-	restart_requested.emit()
 
 
 func _on_novaworld_control() -> void:
@@ -995,28 +893,6 @@ func _load_text(file: String) -> RtxtStringFile:
 
 
 # --- Misc helpers / accessors -------------------------------------------------
-
-func _is_mission_list(widget_name: String) -> bool:
-	for n in mission_list_names:
-		if n.nocasecmp_to(widget_name) == 0:
-			return true
-	return false
-
-
-func _is_mod_list(widget_name: String) -> bool:
-	for n in mod_list_names:
-		if n.nocasecmp_to(widget_name) == 0:
-			return true
-	return false
-
-
-func _find_mod_list() -> int:
-	for n in mod_list_names:
-		var id := _driver.widget_id(n)
-		if id >= 0 and _driver.widget_kind_of(id) in _LIST_KINDS:
-			return id
-	return -1
-
 
 # Accessors for owners / tests.
 func get_driver() -> MenuDriver:

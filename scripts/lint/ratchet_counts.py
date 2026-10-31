@@ -29,14 +29,37 @@ in maturity_baseline.json:
                         An allowlist row that exempts no uncited file is
                         stale and fails --enforce (delete it): a file it
                         names that loses its cites must be counted.
-  godot_orig_cites     "[orig:" citations across the whole Godot side --
-                        godot/src C++ plus the godot/game, godot/editor and godot/probes GDScript -- as ONE count (ADR 0043 merged
-                        the former adapter_cpp_orig_cites / gd_orig_cites
-                        pair). A cite moves freely between the two Godot-side
-                        languages; the gauge falls only when witnessed code
-                        reaches its engine/ home or dies as verified dead
-                        code -- bank it with --write-baseline. The one cite
-                        marker is `[orig: Name @0xADDR]` (ADR 0042 d7).
+  godot_orig_cites:<area>
+                        "[orig:" citations on the Godot side, one counter per
+                        area: godot/src/<dir>, godot/game/<dir>, godot/editor/<dir>,
+                        godot/probes/<dir> (a file directly under one of the four
+                        roots counts as the root's own area, "src", "game", ...).
+                        ADR 0077: Godot is a backend, so a witness cite on its
+                        side is engine behavior still to move; it never moves
+                        between Godot areas, only out to engine/ (or dies as
+                        verified dead code). Each area is non-increasing; an
+                        area that reaches 0 drops out of the baseline, and a
+                        cite in an area with no baseline key fails --enforce.
+                        The one cite marker is `[orig: Name @0xADDR]` (ADR 0042 d7).
+  godot_shipping_gd_lines
+                        code lines (not blank, not a `#` comment) of the
+                        shipping GDScript: godot/game/**/*.gd outside the dev
+                        tooling (DEV_TOOLING_GAME_DIRS, DEV_TOOLING_GAME_FILES).
+                        ADR 0077: no shipping GDScript; the game flow, menus,
+                        HUD session and boot move to engine/ C++.
+                        Non-increasing to 0.
+  godot_high_level_class_includes
+                        godot/src files (bindings and the editor seam alike)
+                        that include the godot-cpp header of a Godot class
+                        doing an engine's job (GODOT_HIGH_LEVEL_CLASSES:
+                        scene nodes, cameras, skeletons, viewports, Godot
+                        materials and meshes, Control UI, audio players,
+                        Tween/Animation, HTTPRequest, ...), one count per
+                        (file, class). ADR 0077: the backend reaches Godot
+                        through its platform and GPU servers; a class the
+                        backend genuinely needs is named in
+                        BACKEND_ALLOWED_CLASSES for godot/src/backend only.
+                        Non-increasing.
   gd_foreign_private_accesses
                         lines in the shipping GDScript (godot/game, godot/editor) that access an _underscore member of
                         ANOTHER object (self._ excluded, and a local the file's
@@ -315,30 +338,111 @@ def engine_uncited_src_files(allowlist: set[str]) -> tuple[int, list[str]]:
 # moving between GDScript and binding C++ leaves the count unchanged; the
 # count falls only when witnessed code reaches its engine/ home or dies as
 # verified dead code, and that decrease is banked with --write-baseline.
-def count_godot_orig_cites() -> int:
-    count = 0
-    adapter = REPO / "godot" / "src"
-    for path in adapter.rglob("*"):
-        if path.suffix.lower() not in (".c", ".cc", ".cpp", ".h", ".hpp"):
-            continue
-        rel_parts = path.relative_to(REPO).parts
-        if _in_build_dir(rel_parts):  # generated CMake tree (godot-cpp), not source
-            continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        count += text.count("[orig:")
-    for sub in ("game", "editor", "probes"):
-        for path in (REPO / "godot" / sub).rglob("*.gd"):
-            parts = path.relative_to(REPO).parts
-            if "addons" in parts or _in_build_dir(parts):
+GODOT_CITE_ROOTS = (
+    ("src", (".c", ".cc", ".cpp", ".h", ".hpp")),
+    ("game", (".gd",)),
+    ("editor", (".gd",)),
+    ("probes", (".gd",)),
+)
+
+
+def _godot_area(rel_parts: tuple[str, ...]) -> str:
+    """The cite area of a path under godot/: `<root>/<dir>`, or `<root>` for a file
+    directly under the root (godot/src/register_types.cpp is "src")."""
+    root = rel_parts[1]
+    return f"{root}/{rel_parts[2]}" if len(rel_parts) > 3 else root
+
+
+def count_godot_orig_cites_by_area() -> dict[str, int]:
+    """`godot_orig_cites:<area>` -> the `[orig:` count of that area, for areas with
+    cites only: a cleared area has no key, so a cite coming back fails unbaselined."""
+    counts: dict[str, int] = {}
+    for root, suffixes in GODOT_CITE_ROOTS:
+        for path in (REPO / "godot" / root).rglob("*"):
+            if path.suffix.lower() not in suffixes:
+                continue
+            rel_parts = path.relative_to(REPO).parts
+            if "addons" in rel_parts or _in_build_dir(rel_parts):  # godot-cpp's generated tree
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            count += text.count("[orig:")
+            n = text.count("[orig:")
+            if n:
+                key = f"godot_orig_cites:{_godot_area(rel_parts)}"
+                counts[key] = counts.get(key, 0) + n
+    return dict(sorted(counts.items()))
+
+
+# Dev tooling under godot/game: the MCP service, the probe model, the debug
+# instruments and the developer camera. Everything else under godot/game ships.
+DEV_TOOLING_GAME_DIRS = ("mcp", "probe", "debug")
+DEV_TOOLING_GAME_FILES = ("fly_camera.gd", "game_debug_adapter.gd", "perf_probe_switches.gd")
+
+
+def count_godot_shipping_gd_lines() -> int:
+    count = 0
+    game = REPO / "godot" / "game"
+    for path in game.rglob("*.gd"):
+        rel = path.relative_to(game).parts
+        if rel[0] in DEV_TOOLING_GAME_DIRS or (len(rel) == 1 and rel[0] in DEV_TOOLING_GAME_FILES):
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        count += sum(1 for line in text.splitlines()
+                     if line.strip() and not line.strip().startswith("#"))
+    return count
+
+
+# Godot classes doing a job the engine owns (ADR 0077): the scene graph and its
+# nodes, Godot's cameras, lights, environment, skeletons and occluders, viewports
+# as pass routing, Godot meshes, materials and shaders (the engine's GPU API draws
+# its own buffers with its own GLSL), Control UI and Godot text layout, audio
+# players (the engine mixes; the backend streams one PCM buffer), the animation
+# and timer systems, physics, and HTTPRequest. Named by godot-cpp header stem.
+# CodeEdit, the editor's script device (ADR 0046 d11), is the named exception.
+GODOT_HIGH_LEVEL_CLASSES = frozenset((
+    "node3d", "visual_instance3d", "geometry_instance3d", "mesh_instance3d",
+    "multi_mesh_instance3d", "skeleton3d", "skin", "skin_reference", "camera3d",
+    "camera_attributes", "light3d", "directional_light3d", "environment",
+    "world_environment", "sky", "decal", "occluder3d", "array_occluder3d",
+    "occluder_instance3d", "visible_on_screen_notifier3d", "world3d", "sub_viewport",
+    "viewport_texture", "compositor", "compositor_effect", "xr_interface",
+    "xr_interface_extension", "xr_server", "mesh", "array_mesh", "multi_mesh",
+    "primitive_mesh", "quad_mesh", "plane_mesh", "shader", "shader_material",
+    "material", "base_material3d", "standard_material3d", "canvas_item_material",
+    "image_texture", "packed_scene", "control", "container", "box_container",
+    "v_box_container", "panel", "label", "label_settings", "button", "line_edit",
+    "item_list", "tree", "texture_rect", "color_rect", "theme", "style_box",
+    "font", "font_file", "text_server", "accept_dialog", "confirmation_dialog",
+    "file_dialog", "popup", "popup_menu", "audio_stream_player",
+    "audio_stream_player3d", "audio_listener3d", "audio_stream_wav", "tween",
+    "animation", "scene_tree_timer", "static_body3d", "physics_server3d",
+    "http_request",
+))
+
+# High-level classes the backend implementation may include, under
+# godot/src/backend only: each row is a class the backend genuinely needs to
+# reach the platform or the GPU. Empty until the backend lands.
+BACKEND_DIR = Path("godot") / "src" / "backend"
+BACKEND_ALLOWED_CLASSES: frozenset[str] = frozenset()
+
+GODOT_CLASS_INCLUDE = re.compile(r'#\s*include\s*[<"]godot_cpp/classes/([a-z0-9_]+)\.hpp[>"]')
+
+
+def count_godot_high_level_class_includes() -> int:
+    count = 0
+    for path in (REPO / "godot" / "src").rglob("*"):
+        if path.suffix.lower() not in (".c", ".cc", ".cpp", ".h", ".hpp"):
+            continue
+        rel = path.relative_to(REPO)
+        if _in_build_dir(rel.parts):
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        stems = set(GODOT_CLASS_INCLUDE.findall(text)) & GODOT_HIGH_LEVEL_CLASSES
+        if BACKEND_DIR in rel.parents:
+            stems -= BACKEND_ALLOWED_CLASSES
+        count += len(stems)
     return count
 
 
@@ -753,7 +857,9 @@ def main() -> int:
         "test_private_pokes": count_test_private_pokes(),
         "gd_test_production_subclasses": count_gd_test_production_subclasses(),
         "engine_uncited_src_files": uncited,
-        "godot_orig_cites": count_godot_orig_cites(),
+        **count_godot_orig_cites_by_area(),
+        "godot_shipping_gd_lines": count_godot_shipping_gd_lines(),
+        "godot_high_level_class_includes": count_godot_high_level_class_includes(),
         "engine_stdout_prints": count_engine_stdout_prints(),
         "gd_prints_outside_debug": count_gd_prints_outside_debug(),
         "cpp_binding_console_writes": count_cpp_binding_console_writes(),

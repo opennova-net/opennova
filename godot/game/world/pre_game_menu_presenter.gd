@@ -190,8 +190,7 @@ func _process(_delta: float) -> void:
 	var status: JoinScreenStatus = _world.get_join_screen_status()
 	if status == null:
 		return
-	_set_message(status.message_text(Strings.get_override_table(),
-			Strings.get_table(Strings.TABLE_GAMEERR)))
+	_set_message(status.message_text(Strings.get_table(Strings.TABLE_GAMEERR)))
 	_starting_shown = status.get_stage() == JoinScreenStatus.STAGE_STARTING
 
 

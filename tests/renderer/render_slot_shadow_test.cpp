@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 
 static int failures = 0;
 
@@ -489,6 +490,49 @@ int main() {
 		SlotCandidateState riding = near_front;
 		riding.on_vehicle = true;
 		CHECK(slot_priority_score(cam, view, riding) == kSlotScoreExcluded);
+		// The ride word and its two rules [orig: RenderSlot_UpdateEntityLight
+		// @ 0x5d6dfa (bit 0); RenderSlot_SortAndAssign @ 0x5d6604..0x5d661a;
+		// RenderSlot_RenderEntityAndChildren @ 0x5d796a..0x5d79a9].
+		CHECK(slot_ride_bits(1, 1, true) ==
+				(kSlotRideVehicle | kSlotRideGroundVehicle | kSlotRideGroundRefChild));
+		CHECK(slot_ride_bits(3, 1, false) == kSlotRideGroundVehicle);
+		CHECK(slot_ride_bits(1, -1, false) == kSlotRideVehicle);
+		CHECK(slot_ride_bits(-1, 5, true) == kSlotRideGroundRefChild);
+		CHECK(slot_rides_vehicle(slot_ride_bits(1, 1, false)));
+		CHECK(!slot_rides_vehicle(slot_ride_bits(1, 5, true)));   // a deck, not a vehicle
+		CHECK(!slot_rides_vehicle(slot_ride_bits(3, 1, true)));   // a person aboard
+		CHECK(!slot_rides_vehicle(slot_ride_bits(1, -1, false))); // on the terrain
+		CHECK(slot_ride_walk_child(slot_ride_bits(3, 1, true)));  // any member on a vehicle
+		CHECK(slot_ride_walk_child(slot_ride_bits(1, 1, true)));
+		CHECK(!slot_ride_walk_child(slot_ride_bits(1, 1, false))); // not in the group
+		CHECK(!slot_ride_walk_child(slot_ride_bits(1, 5, true)));  // the carrier no vehicle
+		// The seat word and its two rules: the exclusion only for the person
+		// bit, the pool-0 walk only for pool 0 [orig: RenderSlot_UpdateEntityLight
+		// @ 0x5d6dbf..0x5d6ddf (bit 1); RenderSlot_SortAndAssign @ 0x5d6593..0x5d65ff;
+		// RenderSlot_RenderEntityAndChildren @ 0x5d78ea..0x5d7968].
+		CHECK(slot_seat_bits(true, true, 5, true) ==
+				(kSlotSeatPersonClass | kSlotSeatPool0 | kSlotSeatParentRefNum | (5u << 8)));
+		CHECK(slot_seat_parent_slot(slot_seat_bits(false, false, 3, false)) == 3);
+		for (const int seat : {1, 2, 5}) {
+			CHECK(slot_seat_parented(slot_seat_bits(true, true, seat, false)));
+			CHECK(slot_seat_walk(slot_seat_bits(true, true, seat, false)) == SlotSeatWalk::kParent);
+			// Not the person bit: a slot of its own whatever its parentSlot.
+			CHECK(!slot_seat_parented(slot_seat_bits(false, false, seat, true)));
+			// The person bit without pool 0 (a Player-class entity elsewhere):
+			// excluded, and drawn by no pool-0 walk.
+			CHECK(slot_seat_parented(slot_seat_bits(true, false, seat, false)));
+			CHECK(slot_seat_walk(slot_seat_bits(true, false, seat, false)) == SlotSeatWalk::kNone);
+		}
+		// UseGun: excluded and walked into the gun's carrier only under a refNum gun.
+		CHECK(slot_seat_parented(slot_seat_bits(true, true, 3, true)));
+		CHECK(slot_seat_walk(slot_seat_bits(true, true, 3, true)) == SlotSeatWalk::kParentGround);
+		CHECK(!slot_seat_parented(slot_seat_bits(true, true, 3, false)));
+		CHECK(slot_seat_walk(slot_seat_bits(true, true, 3, false)) == SlotSeatWalk::kNone);
+		// On foot, or the armory label (no seat).
+		CHECK(!slot_seat_parented(slot_seat_bits(true, true, 0, true)));
+		CHECK(slot_seat_walk(slot_seat_bits(true, true, 0, true)) == SlotSeatWalk::kNone);
+		CHECK(!slot_seat_parented(slot_seat_bits(true, true, 4, true)));
+		CHECK(slot_seat_walk(slot_seat_bits(true, true, 4, true)) == SlotSeatWalk::kNone);
 		// The 320 u bind horizon [orig: @ 0x5d66b2].
 		SlotCandidateState distant = near_front;
 		distant.pos2d = {0.0f, 321.0f};
@@ -620,6 +664,54 @@ int main() {
 		}
 		CHECK(!plan.register_entity(999));
 		CHECK(plan.register_entity(37));  // idempotent re-register
+	}
+
+	// One caster surface's PROJSHAD draw (slot_capture_surface).
+	{
+		ObjectMaterialClassification ffp;
+		ffp.known_shader = true;
+		ffp.family = ObjectShaderFamily::FixedFunction;
+		ffp.has_detail = true;
+		// The _MT block: Diffuse1.a x AlphaGenValue x Diffuse2.a.
+		const SlotCaptureSurface detailed = slot_capture_surface(ffp, true, false);
+		CHECK(detailed.draws);
+		CHECK(detailed.policy == ObjectProjectedShadowPolicy::MaterialBlend);
+		CHECK(detailed.coverage == ObjectProjectedShadowCoverage::DiffuseDetailAlphaFfp);
+		CHECK(detailed.flags == (kSlotCaptureAlphaMod | kSlotCaptureDetailAlpha));
+		CHECK(!detailed.state.blend.enabled && detailed.state.cull == CullMode::CCW);
+		// An unresolved secondary composes the no-detail technique.
+		const SlotCaptureSurface downgraded = slot_capture_surface(ffp, false, false);
+		CHECK(downgraded.draws &&
+				downgraded.coverage == ObjectProjectedShadowCoverage::DiffuseAlphaFfp);
+		CHECK(downgraded.flags == kSlotCaptureAlphaMod);
+		// The alpha test, its inversion, skinning and two-sidedness.
+		ObjectMaterialClassification tested = ffp;
+		tested.has_detail = false;
+		tested.alpha_test = true;
+		tested.alpha_test_invert = true;
+		tested.alpha_test_value = 0.5f;
+		tested.is_two_sided = true;
+		const SlotCaptureSurface cut = slot_capture_surface(tested, true, true);
+		CHECK(cut.draws && cut.state.cull == CullMode::None && cut.alpha_test_value == 0.5f);
+		CHECK((cut.flags & kSlotCaptureAlphaTest) != 0 && (cut.flags & kSlotCaptureAlphaInvert) != 0);
+		CHECK((cut.flags & kSlotCaptureSkinned) != 0);
+		// The _FFP BLEND_ALPHA variant blends its coverage; BLEND_ADD draws nothing.
+		ObjectMaterialClassification blended = tested;
+		blended.alpha_test = false;
+		blended.alpha_test_invert = false;
+		blended.blend = ObjectBlendMode::AlphaBlend;
+		const SlotCaptureSurface translucent = slot_capture_surface(blended, true, false);
+		CHECK(translucent.draws && translucent.state.blend.enabled);
+		CHECK((translucent.flags & kSlotCaptureBlendCoverage) != 0);
+		blended.blend = ObjectBlendMode::Additive;
+		CHECK(!slot_capture_surface(blended, true, false).draws);
+		// Glass declares no PROJSHAD pass.
+		ObjectMaterialClassification glass;
+		glass.known_shader = true;
+		glass.family = ObjectShaderFamily::Glass;
+		const SlotCaptureSurface clear = slot_capture_surface(glass, true, false);
+		CHECK(!clear.draws && clear.policy == ObjectProjectedShadowPolicy::NoPass);
+		CHECK(clear.flags == 0);
 	}
 
 	if (failures != 0) {

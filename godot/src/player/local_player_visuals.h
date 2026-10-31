@@ -91,7 +91,8 @@ public:
 	// (`p_body_drawn`: a view collected it, or a render slot captured it).
 	void present_local_player_person_overlays(PersonOverlayModels &p_overlays,
 			const opennova::world::PersonOverlays &p_state, ObjectModel *p_avatar,
-			bool p_body_drawn, PersonOverlayModels::Presentation p_presentation);
+			const Transform3D &p_avatar_world, bool p_body_drawn,
+			PersonOverlayModels::Presentation p_presentation);
 	// Build a GameWorld-managed avatar model for the local player (which has
 	// no BMS placement of its own). The caller (LocalPlayerPresenter)
 	// positions it and swaps its visual/shadow policy per first/third person.

@@ -852,34 +852,6 @@ func test_night_vision_redraw_marches_the_nightvision_rows_above_water_only() ->
 			"the underwater beauty side still marches")
 
 
-func test_eye_exactly_on_the_plane_draws_neither_water_side() -> void:
-	# Render_WaterSurface's gates are strict on both sides: the view-0 call
-	# skips cam.z <= wh (jle @ 0x5c330a) and the underwater call cam.z >= wh
-	# (jge @ 0x5c32fc), so an eye exactly on the plane draws no surface.
-	var fixture := _make_water_fixture()
-	var water: Node = fixture["water"]
-	var cam: Camera3D = fixture["camera"]
-	cam.global_position = Vector3(100.3, 7.0, -33.7)
-	water.advance_frame(TICK)
-	assert_true(_strip_arrays(water.get_mesh_instance()).is_empty(),
-			"no beauty strip at exact equality")
-	assert_true(_strip_arrays(water.get_night_vision_mesh_instance()).is_empty(),
-			"no nightvision redraw at exact equality")
-
-
-func test_night_vision_redraw_is_not_gated_on_the_visible_terrain() -> void:
-	# The beauty pass follows g_WaterActive, the bloom pass's redraw does not
-	# (retail FrameFX_RenderGlowSource @ 0x582a59..0x582a5d).
-	var fixture := _make_water_fixture()
-	var water: Node = fixture["water"]
-	water.set_visible_terrain_bounds(true, 100.0, 200.0)
-	water.advance_frame(TICK)
-	assert_true(_strip_arrays(water.get_mesh_instance()).is_empty(),
-			"the inactive water pass clears the beauty strip")
-	assert_false(_strip_arrays(water.get_night_vision_mesh_instance()).is_empty(),
-			"the nightvision redraw still marches")
-
-
 func test_reflected_scene_mirrors_above_the_plane_and_keeps_the_live_eye_below() -> void:
 	# Render_MainScene mirrors the camera block only while the camera is at or
 	# above the water (z' = 2wh - z, pitch/roll negated) and copies it

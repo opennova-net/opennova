@@ -1206,24 +1206,31 @@ void tick_item_event_pool(World &world, int pool) {
         }
         if (entity->squib.motor) {
             tick_squib(world, *entity);
-            continue;
+        } else {
+            // The water word, 0 when none is authored (no dry sentinel; D-NET-507)
+            // [orig: g_EnvWaterHeightFixed @0x26C6454].
+            tick_item_death_motion(world, *entity, world.tables.terrain, world.env.water_z,
+                    world.out.destruction);
+            // A genx row's own update, its parent follow, on the same cohort
+            // [orig: Entity_UpdateParentTransform @0x4A88B0 through @0x4C22E7 /
+            //  @0x4C2393].
+            entity = world.registry.get(handle);
+            if (entity != nullptr && entity->registry_spawn_id == lifetime &&
+                    entity->drop_motion != DropMotion::None)
+                update_dropped_object(world, *entity);
+            // An ele0 def's own mover, on the same cohort [orig: Entity_UpdateFallAndLandState
+            //  @0x4A20E0 through @0x4C22E7 / @0x4C2393].
+            entity = world.registry.get(handle);
+            if (entity != nullptr && entity->registry_spawn_id == lifetime && entity->elevator_motion)
+                update_item_elevator(world, *entity);
         }
-        // The water word, 0 when none is authored (no dry sentinel; D-NET-507)
-        // [orig: g_EnvWaterHeightFixed @0x26C6454].
-        tick_item_death_motion(world, *entity, world.tables.terrain, world.env.water_z,
-                world.out.destruction);
-        // A genx row's own update, its parent follow, on the same cohort
-        // [orig: Entity_UpdateParentTransform @0x4A88B0 through @0x4C22E7 /
-        //  @0x4C2393].
+        // Pool 2's +0x1CC emitter re-pose follows the update callback, past its null-row test;
+        // the pool-3 walk runs none [orig: Entity_UpdateAllEntities @0x4C22D5..0x4C22E4, the
+        //  update @0x4C22EC..0x4C22FA; pool 3's visit ends at its call @0x4C2393].
         entity = world.registry.get(handle);
-        if (entity != nullptr && entity->registry_spawn_id == lifetime &&
-                entity->drop_motion != DropMotion::None)
-            update_dropped_object(world, *entity);
-        // An ele0 def's own mover, on the same cohort [orig: Entity_UpdateFallAndLandState
-        //  @0x4A20E0 through @0x4C22E7 / @0x4C2393].
-        entity = world.registry.get(handle);
-        if (entity != nullptr && entity->registry_spawn_id == lifetime && entity->elevator_motion)
-            update_item_elevator(world, *entity);
+        if (pool == 2 && entity != nullptr && entity->registry_spawn_id == lifetime &&
+                emitter_update_runs(world, *entity))
+            world.item_emitters.update_emitter_transform(world, *entity);
     }
 }
 

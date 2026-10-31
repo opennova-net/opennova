@@ -198,9 +198,12 @@ func test_shell_exit_releases_runtime_texture_caches_before_renderer_shutdown() 
 	# explicitly, observed here through the idempotent leg EXIT_TREE runs.
 	var world := _shell.get_node("World") as GameWorld
 	var dispatcher: FoliageDispatcher = world.get_foliage_dispatcher()
-	# A graphic lookup lists the root's *veg*.3di graphics into the caches
-	# (the listing is cached even when the name resolves to nothing).
-	dispatcher.load_mesh(resource_root, "veg_lifecycle")
+	# The load's foliage stage looks a definition's graphic up: it lists the
+	# root's *veg*.3di graphics into the caches and caches the answer (both
+	# even when the name resolves to nothing).
+	var definition := TerrainFoliageDef.new()
+	definition.graphic = "veg_lifecycle"
+	dispatcher.configure_slots_from_defs(resource_root, [definition])
 	var weak_texture: WeakRef = weakref(texture)
 	texture = null
 	assert_not_null(weak_texture.get_ref(),

@@ -61,8 +61,8 @@ private:
 	EFFECT_EMITTER_REPORT_FIELDS(EFFECT_REPORT_MEMBER)
 };
 
-// id = the native group id; name = the interned effect; owner_key = the
-// spawn's owner key (null for unowned groups); source = the defining
+// id = the native group id; name = the interned effect; slot_key = the
+// spawn's slot key (null for a group spawned under none); source = the defining
 // document's file name; forever = an attached group carrying a FOREVEREMIT
 // emitter; admission / binding / render_domain = EffectScene's enums;
 // detached = stopped and draining; transform = the group pose; source_tick /
@@ -87,8 +87,8 @@ class EffectGroupReport : public RefCounted {
 
 public:
 	EFFECT_GROUP_REPORT_FIELDS(EFFECT_REPORT_ACCESSORS)
-	Variant get_owner_key() const { return owner_key_; }
-	void set_owner_key(const Variant &p_value) { owner_key_ = p_value; }
+	Variant get_slot_key() const { return slot_key_; }
+	void set_slot_key(const Variant &p_value) { slot_key_ = p_value; }
 	TypedArray<EffectEmitterReport> get_emitters() const { return emitters_; }
 	void set_emitters(const TypedArray<EffectEmitterReport> &p_value) { emitters_ = p_value; }
 	void add_emitter(const Ref<EffectEmitterReport> &p_row) { emitters_.push_back(p_row); }
@@ -98,7 +98,7 @@ protected:
 
 private:
 	EFFECT_GROUP_REPORT_FIELDS(EFFECT_REPORT_MEMBER)
-	Variant owner_key_;
+	Variant slot_key_;
 	TypedArray<EffectEmitterReport> emitters_;
 };
 

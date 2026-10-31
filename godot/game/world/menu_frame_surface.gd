@@ -117,7 +117,7 @@ static func build(root: ResourceRoot, ui_parent: Node, layout_control: Control,
 static func open_document(driver: MenuDriver, doc: MnuDocument, root: ResourceRoot,
 		menu_file: String, screen: String, owner_name: String) -> bool:
 	var style: MnsStyleSheet = MnsStyleSheet.load_shell(root)
-	if driver.open_document(doc, root, style, Strings.get_override_table(), menu_file, screen):
+	if driver.open_document(doc, root, style, menu_file, screen):
 		return true
 	push_warning("%s: %s has no screens" % [owner_name, menu_file])
 	return false

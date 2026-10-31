@@ -72,6 +72,53 @@ inline constexpr float kHeldWeaponAttachNudgeZ = 0.051f;
 inline constexpr double kHeldWeaponHandFrameZRad = 0.5759761961496483;
 inline constexpr double kHeldWeaponHandFrameYRad = -1.3613982818082597;
 
+// --- the attach frames, from the engine's own bone matrices ---------------------
+//
+// Every rigid model a person carries (the third-person gun, the goggles, the binoculars, the
+// canopy, the carried object) and the action points a posed model's userpoints give hang off one
+// posed bone's two frames: its JOINT (the bone's posed global carrying its pivot) and its
+// MODEL->WORLD matrix (the posed global over the bone's rest global, the deformation a model-space
+// point riding that bone takes). Both come from the body's composed pose (anim::BodyChannel::pose(),
+// the pose the device skeleton draws; empty = the rig at its rest) through the rig's FK, placed by
+// the body's world transform: the matrices the bone builder makes, never a device skeleton read
+// back [orig: Entity_BuildBoneTransformMatrices @0x4B1290 - each row's pivot through its parent's
+// final row @0x4B201E..0x4B20C3, the row stored @0x4B2162]. The frames are the render frame's
+// (rows in column-vector convention, the x-negated model axes the skeleton is built in).
+using PoseTransform = anim::SkeletalClips::RestTransform;
+
+struct PosedBoneFrames {
+	PoseTransform joint_world;    // body_world * the bone's posed global
+	PoseTransform model_to_world; // joint_world * the bone's rest global^-1
+};
+
+// False when the rig has no such bone.
+bool posed_bone_frames(const anim::SkeletalClips &rig, const std::vector<anim::PoseBone> &pose,
+		const PoseTransform &body_world, int bone, PosedBoneFrames &r_frames);
+
+// A posed model's userpoint part frame: the model->world matrix of the bone a part (subobject)
+// rides, a model-space point and direction on it carried by it [orig: Entity_ComputeActionTransform
+// @0x401310 -> ActionSlot_SpawnEffect @0x401F20, the action bone's matrix]. False for no such bone.
+bool posed_part_to_world(const anim::SkeletalClips &rig, const std::vector<anim::PoseBone> &pose,
+		const PoseTransform &model_world, int part, PoseTransform &r_part);
+
+// The rigid gun on bone 16 (the calibration above): `hand_frame` the bone's own matrix turned by
+// the fixed Rz * Ry calibration, else the weapon's attach triple through the placement builder;
+// at the joint plus the nudge carried by the bone's model->world rotation.
+PoseTransform held_weapon_attach(const PosedBoneFrames &hand, bool hand_frame,
+		const float attach_bms_deg[3]);
+// The goggles on the head bone (world/person_overlays.h kNightVision*): the bone's matrix, the
+// nudged joint.
+PoseTransform night_vision_attach(const PosedBoneFrames &head);
+// The binoculars on the left hand (kBinoculars*): the bone's matrix turned by Rz * Rx * Ry, the
+// nudged joint.
+PoseTransform binoculars_attach(const PosedBoneFrames &left_hand);
+// The canopy: the up-axis turn alone, at bone 0's model->world translation (the model origin under
+// that bone, not the hip joint).
+PoseTransform canopy_attach(const PosedBoneFrames &root, float canopy_yaw_deg);
+// The carried object: the carrier's own orientation after the fixed render-Z turn, at the
+// binocular frame's point.
+PoseTransform carried_attach(const PosedBoneFrames &left_hand, const float carrier_bms_deg[3]);
+
 // The model's bone table for a skeletal rig: parent-relative pivots and parent
 // indices from the canonical first RLOD's render objects (raw, engine frame).
 // The same rows anim::SkeletalClips::load_from_adm consumes; public so a test can

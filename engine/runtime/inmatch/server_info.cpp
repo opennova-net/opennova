@@ -75,6 +75,11 @@ void read_session_listing_columns(
 	// The round init's draw (Server_InitNewRoundState).
 	// [orig: g_GameServerBaffleKey, read @0x4FF1CC]
 	r.game_server_baffle_key = ctx.game_server_baffle_key;
+	// GCC: the install's CC.BIN as the session create's tick init read it
+	// (NapiNPServerCtx::cc_bin).
+	// [orig: byte_C87044 pushed @0x4FF29C; Server_InitServerTicks @0x5018C0 - Game_ReadCCBinFile
+	//  @0x5018E8 into byte_C87044]
+	r.gcc = ctx.cc_bin;
 }
 
 void apply_mission_start_columns(HostRegistration &r, const std::string &mission_text_title,

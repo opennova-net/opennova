@@ -18,6 +18,7 @@
 #include <unordered_map>
 
 #include <base/resource_index/resource_index.h>
+#include <base/vfs/dir_case_index.h>
 #include <base/vfs/file_source.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/renderer/device_texture.h>
@@ -80,13 +81,14 @@ private:
 	opennova::assets::AssetStore assets_{&index_};
 	MountKind mount_kind_ = MountKind::None;
 
-	// resolve_file memo: lowercased flat name -> on-disk path (empty = case-variant
-	// duplicates, an error per the resolve contract). Built from ONE directory walk
+	// resolve_file memo: the root's files by name without case (the engine's
+	// DirCaseIndex; a name in two cases is ambiguous, an error per the resolve contract).
+	// Built from ONE directory walk
 	// per cache epoch; resolve_file used to walk the whole root per call, and mission
 	// loads resolve thousands of texture names against multi-thousand-file roots.
 	// Snapshot-at-epoch matches the index_-backed listings: on-disk edits surface via
 	// scan/mount or bump_cache_epoch(), exactly as documented above cache_epoch().
-	mutable std::unordered_map<std::string, String> resolve_memo_;
+	mutable opennova::DirCaseIndex resolve_memo_;
 	mutable uint64_t resolve_memo_epoch_ = 0;
 	mutable bool resolve_memo_built_ = false;
 

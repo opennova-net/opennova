@@ -695,7 +695,7 @@ bool EnvironmentState::build_light_values(const Vec3 &default_dir,
 		out.ceiling = kThermalHemi;
 		out.floor_color = kThermalHemi;
 	}
-	out.gain = color_src_gain();
+	out.gain = light_gain();
 	out.fog_enabled = true;
 	out.fog_color = fog_color();
 	// The primary device fog block as Environment_ApplyFogAndAmbient sets it:

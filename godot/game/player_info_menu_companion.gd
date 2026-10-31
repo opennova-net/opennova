@@ -70,11 +70,10 @@ func set_persisted_profile(profile: Dictionary) -> void:
 	_character_state.set_persisted_profile(profile)
 
 
-# True for a document holding the PLAYER_INFO screen, whatever controls it holds.
-func owns_menu(driver: MenuDriver) -> bool:
-	if driver == null:
-		return false
-	return driver.is_player_info_document()
+# The PLAYER_INFO screen's delegate: the engine gives it a document holding
+# NATIONALITY and COMBO_LIST (menu::MenuCommands::wire).
+func owner_name() -> String:
+	return "player_info"
 
 
 # Losing the document to another (or no) companion is the only teardown edge

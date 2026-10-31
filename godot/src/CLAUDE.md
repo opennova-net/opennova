@@ -1,33 +1,33 @@
-# godot/src/ — pure C++ GDExtension bindings (part of the core engine)
+# godot/src/ — the Godot GDExtension (a backend, ADR 0077)
 
-The Godot layer's native half (ADR 0016/0028/0034 d6): C++ only — the
-GDExtension classes binding `engine/` to Godot. Register new classes in
-`register_types.cpp`. ADR 0043 d9 (which superseded ADR 0033's callback bus and ADR 0035) rules: a
-line here earns its place only as a device leg (marshalling, nodes, servers,
-input, audio, draw-list appliers), the typed bridge from `inmatch::Session` to
-the `GameWorld` frame-leg table, or a documented seam bridge — format/runtime logic
-and every witnessed behavior belong in `engine/`. The engine's formats never touch
-Godot's resource system
+The engine owns everything above platform and GPU (ADR 0077); Godot is the platform and GPU
+backend. This tree is the shipped game's binding and it only shrinks: no new behavior lands
+here. Every behavior, render and audio policy included (what to draw, order,
+state, culling, skinning, transforms, mixing, panning, text layout, the game flow), belongs in
+`engine/`, shaped like the retail runtime. A Godot class doing an engine's job (scene nodes,
+Camera3D, Skeleton3D, SubViewport, Godot meshes/materials/shaders, Control UI, audio players,
+Tween, HTTPRequest; `GODOT_HIGH_LEVEL_CLASSES` in `scripts/lint/ratchet_counts.py`) is never
+added. A change here moves logic out to an engine home and leaves a thin call behind. Register
+classes in `register_types.cpp`. The engine's formats never touch Godot's resource system
 (documents self-read/write via `load_from_path`/`save_to_path`).
 Names and includes (ADR 0040): there is no "Nova layer" — a file is named after the
 type it declares, no `nova_`/`Nova` prefix anywhere (`NovaWorld*` is the service's
 proper noun and stays); a binding may share its class name and directory with the
-engine concept it exposes (`AmbientMixer` in `audio/ambient_mixer.h` wraps
-`opennova::audio::AmbientMixer` from `<runtime/audio/ambient_mixer.h>`). Binding
-includes are quoted and root-relative (`#include "audio/ambient_mixer.h"`, this
+engine concept it exposes (`ScriptedInput` in `devtools/scripted_input.h` wraps
+`opennova::devtools::ScriptedInput` from `<runtime/devtools/scripted_input.h>`). Binding
+includes are quoted and root-relative (`#include "devtools/scripted_input.h"`, this
 directory is the include root); engine includes are `<group/lib/file.h>`; no
 subdirectory here may be named `base`, `formats`, `runtime` or `net`
 (`include_graph_check.py` enforces all three).
 
-Citations (ADR 0042 d7, ADR 0043): a witness citation is `[orig: Name @ 0xADDR]`
-everywhere — there is no second marker form. `godot_orig_cites` is ONE
-non-increasing count over the whole Godot side (`godot/src` plus the
-`godot/game`, `godot/editor` and `godot/probes` GDScript): a cite moves freely
-between GDScript and binding C++; the count shrinks only when witnessed code
-moves to its engine home (or dies as verified dead code) and may never grow.
-Genuinely witnessed engine behavior still belongs in `engine/` (ADR 0042's
-boundary rule). `scripts/lint/cite_census.py` keeps the SET of cited addresses
-from losing a member silently.
+Citations (ADR 0042 d7, ADR 0077): a witness citation is `[orig: Name @ 0xADDR]`
+everywhere — there is no second marker form. A cite on the Godot side is engine
+behavior still to move: `godot_orig_cites:<area>` is one non-increasing counter
+per area (`src/<dir>`, `game/<dir>`, `editor/<dir>`, `probes/<dir>`), so a cite
+never moves between Godot areas, only out to its engine home (or dies as
+verified dead code); bank the decrease with `--write-baseline`.
+`scripts/lint/cite_census.py` keeps the SET of cited addresses from losing a
+member silently.
 
 Size ratchet: no `.cpp`/`.h` here past 2500 lines — split by responsibility
 (one type per TU pair), never by "leg"; `scripts/lint/ratchet_counts.py` fails
@@ -36,9 +36,10 @@ on any increase. Shipping GDScript has no size ratchet; it has
 object's `_privates` is a method annex, not a class, and the count is an
 absolute zero floor.
 
-The game-level GDScript runtime (world, debug, ui, avatar, probe,
-mcp, resource_index, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything
-there that is really engine behavior is the C++ rewrite queue. The debug-control
+The game-level GDScript (world, ui, avatar, resource_index, strings, util and the
+root scripts) lives in `godot/game/`; ADR 0077 ends shipping GDScript: every such
+script moves to engine C++ (`godot_shipping_gd_lines` only falls), and only the dev
+tooling (`mcp/`, `probe/`, `debug/`, the fly camera) stays GDScript. The debug-control
 table itself is C++ here (`devtools/debug_control_table`, ADR 0043 d12): the Insert
 dev tools' `ControlRequest`s and MCP's `game_debug` drive the one instance.
 

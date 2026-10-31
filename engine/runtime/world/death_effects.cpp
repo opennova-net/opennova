@@ -174,6 +174,8 @@ void update_dead_wreck_effects(World &world, Entity &e, const ItemDeathTraits *t
 		if ((e.death_effect_active[0] & (1u << slot)) == 0)
 			continue;
 		slot_position(e, traits->effect_banks[0], slot, matrix, position);
+		// The live handle follows its point, ahead of the water test [orig: @0x49321E].
+		world.destruction_emitters.move_bank(world, e, 1, slot, position);
 		if (e.death_effect_underwater ? position.z >= water : position.z < water)
 			stop_slot(e, 1, slot, events);
 	}
@@ -187,6 +189,8 @@ void update_dead_wreck_effects(World &world, Entity &e, const ItemDeathTraits *t
 			++events.crackles;
 		}
 		if ((e.death_effect_active[1] & (1u << slot)) != 0) {
+			// [orig: @0x4932FD]
+			world.destruction_emitters.move_bank(world, e, 2, slot, position);
 			if (position.z < water) {
 				stop_slot(e, 2, slot, events);
 				events.effects.push_back({ "Effect_Boat01Steam", position, {} });
@@ -206,6 +210,8 @@ void update_dead_wreck_effects(World &world, Entity &e, const ItemDeathTraits *t
 		if ((e.death_effect_active[2] & (1u << slot)) == 0)
 			continue;
 		slot_position(e, traits->effect_banks[2], slot, matrix, position);
+		// [orig: @0x4933BF]
+		world.destruction_emitters.move_bank(world, e, 3, slot, position);
 		if (position.z < water)
 			stop_slot(e, 3, slot, events);
 	}

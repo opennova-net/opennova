@@ -153,4 +153,22 @@ bool terrain_raycast_refined(const TerrainRaycastSampler &sampler,
 bool terrain_raycast_los_clear(const TerrainRaycastSampler &sampler,
                                const int32_t start[3], const int32_t end[3]);
 
+struct TerrainHeightField;
+
+// The game's boolean terrain ray over the loaded terrain: the coarse march
+// with no hit out, as the sun glare's two jittered rays and the water glint's
+// two rays take it, over the runtime height field (the atlas routing's grid
+// clamp and .trn wrap, so a ray past the authored extent keeps meeting the
+// edge terrain retail clamps to; the point sample the nearest atlas texel of
+// the biased coordinate, the confirm the bilinear sampler). start/end are
+// mission 16.16 (x, y, z = height). With no terrain loaded (a null or empty
+// field) the ray HITS: retail's null-atlas test returns 0 = HIT before the
+// march. Returns true = HIT.
+// [orig: Terrain_RaycastLoResNoNormal @ 0x610860 -> Terrain_RaycastHeightmapLoRes
+//  @ 0x60cb80 (hit out NULL); the null atlas `test eax, eax; jz` @ 0x60cce8..0x60ccf7
+//  to the HIT return @ 0x60cc58..0x60cc5b; the point tap at the remapped
+//  (x + 0x8000, 0x8000 - y) @ 0x60cb9c..0x60cbb2]
+bool terrain_field_ray_hit(const TerrainHeightField *field, const int32_t start[3],
+                           const int32_t end[3]);
+
 } // namespace opennova::terrain

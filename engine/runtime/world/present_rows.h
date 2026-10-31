@@ -320,6 +320,23 @@ enum PresentField : int {
 	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 (the test @0x4B1F1D)]
 	PF_CUT_SECTIONS_LO,
 	PF_CUT_SECTIONS_HI,
+	// The render-slot ride facts (the renderer::SlotRideBit word: the row's own
+	// ItemDef type 1, its groundEntity's, and its membership in that ground
+	// entity's refNum group list) and that ground entity's wire handle (-1 for
+	// none). The slot sort excludes a vehicle standing on a vehicle and the
+	// carrier's capture walks its group's riders [orig: RenderSlot_SortAndAssign
+	// @0x5d6604..0x5d6627; RenderSlot_RenderEntityAndChildren @0x5d796a..0x5d79dc].
+	// Unlike PF_CARRIER_HANDLE no seat link replaces the ground entity here.
+	PF_SLOT_RIDE_BITS,
+	PF_SLOT_GROUND_HANDLE,
+	// The render-slot seat facts (the renderer::SlotSeatBit word: the slot
+	// record's person bit, pool 0, the parentSlot, the parentEntity's refNum)
+	// and the wire handle of the entity whose capture's pool-0 child walk draws
+	// this row (world::slot_seat_facts; -1 for none). The slot sort excludes a
+	// seated person and its carrier's capture draws it [orig: RenderSlot_SortAndAssign
+	// @0x5d6593..0x5d65ff; RenderSlot_RenderEntityAndChildren @0x5d78ea..0x5d7968].
+	PF_SLOT_SEAT_BITS,
+	PF_SLOT_SEAT_WALK_HANDLE,
 	PF_STRIDE
 };
 

@@ -28,8 +28,6 @@ func after_each() -> void:
 
 func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 	_stage_runtime_fixture()
-	var resource_root := ResourceRoot.new()
-	assert_eq(resource_root.set_root_dir(_fixture_root()), OK)
 
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	assert_not_null(packed)
@@ -105,13 +103,13 @@ func test_game_world_resolves_both_tmap_models_and_emits_foliage() -> void:
 
 	var defs: Array = data.get_foliage_defs()
 	assert_eq(defs.size(), 2, "Tmap should retain both authored foliage definitions.")
-	var meshes := dispatcher.resolve_slot_meshes(resource_root, defs)
-	assert_eq(meshes.size(), defs.size())
+	# The load configured every slot from its model (WorldScene.configure_foliage).
+	var diagnostics: Array = dispatcher.get_slot_diagnostics()
 	for slot in range(defs.size()):
-		var mesh := meshes[slot] as Mesh
-		assert_not_null(mesh, "Authored foliage slot %d should resolve staged 3DI geometry." % slot)
-		if mesh != null:
-			assert_gt(mesh.get_surface_count(), 0)
+		var diagnostic: Dictionary = diagnostics[slot]
+		assert_eq(String(diagnostic.status), "enabled",
+			"Authored foliage slot %d should resolve staged 3DI geometry." % slot)
+		assert_gt(int(diagnostic.source_vertices), 0)
 
 	# From the flat-only witness the production detail gate finds no grass:
 	# its atlas samples are the routed, negative pixels.

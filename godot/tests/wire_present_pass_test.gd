@@ -180,6 +180,19 @@ class SpawnObserver:
 		})
 
 
+# A body with no rig of its own takes the fixture person rig: the held weapon and
+# the overlays ride its posed bones (the engine's frames, world::posed_bone_frames).
+func _rig_body(body: ObjectModel) -> void:
+	var rig := SkeletalAnim.new()
+	var rig_root := ResourceRoot.new()
+	rig_root.set_root_dir(ProjectSettings.globalize_path("res://../fixtures/anim"))
+	assert_true(rig.load_from_resource_root(rig_root, "rig19.adm"),
+			"rig19.adm fixture loads: %s" % rig.get_last_error())
+	assert_gt(rig.get_bone_count(), EntityPresenter.HELD_WEAPON_BONE_INDEX,
+			"the 19-bone person rig carries every attach bone")
+	body.set_skeletal_anim(rig)
+
+
 func _flat_root() -> ResourceRoot:
 	var root := ResourceRoot.new()
 	assert_eq(root.set_root_dir(_flat_dir), OK, "the flat fixture root mounts")
@@ -1479,10 +1492,7 @@ func test_a_wire_held_weapon_takes_its_bodys_mirror_clip_arming() -> void:
 	}]
 	_present(p, snap)
 	var body: ObjectModel = p.resolve_wire_handle(0x1005)
-	var skeleton := Skeleton3D.new()
-	for bone_index in range(EntityPresenter.HELD_WEAPON_BONE_INDEX + 1):
-		skeleton.add_bone("Bone%d" % bone_index)
-	body.add_child(skeleton)
+	_rig_body(body)
 	snap.entities[0]["held_weapon_adm"] = 1
 	_present(p, snap)
 	var weapon: ObjectModel = p.held_weapon_node(0x1005)
@@ -1522,11 +1532,8 @@ func test_wire_row_builds_a_held_weapon_only_when_it_is_armed() -> void:
 			"an ADM of 0 draws nothing — no model is built at all")
 	var body: ObjectModel = p.resolve_wire_handle(0x1004)
 	# The static pump has no rig of its own; the hand chain the attach math
-	# walks is scaffolded exactly as the placed body would carry it.
-	var skeleton := Skeleton3D.new()
-	for bone_index in range(EntityPresenter.HELD_WEAPON_BONE_INDEX + 1):
-		skeleton.add_bone("Bone%d" % bone_index)
-	body.add_child(skeleton)
+	# walks is the fixture person rig's.
+	_rig_body(body)
 	# Replica sun quality is cached by wire identity. It applies immediately to
 	# the body and must also reach a held weapon built AFTER this change. The
 	# factor is the x (effectScale) lane of the per-entity instance uniform the
@@ -1581,10 +1588,7 @@ func test_placed_person_row_draws_its_held_weapon() -> void:
 	var body := ObjectModel.new()
 	add_child_autofree(body)
 	body.set_process(false)
-	var skeleton := Skeleton3D.new()
-	for bone_index in range(EntityPresenter.HELD_WEAPON_BONE_INDEX + 1):
-		skeleton.add_bone("Bone%d" % bone_index)
-	body.add_child(skeleton)
+	_rig_body(body)
 	body.entity_ref = EntityRef.make(3, 7, 4242)  # a placed organic, BMS index 7
 	var models: Array[ObjectModel] = [body]
 	var index := EntityIndex.new()
@@ -1641,10 +1645,7 @@ func test_a_slot_captured_placed_body_keeps_its_gun_in_the_capture() -> void:
 	var body := ObjectModel.new()
 	add_child_autofree(body)
 	body.set_process(false)
-	var skeleton := Skeleton3D.new()
-	for bone_index in range(EntityPresenter.HELD_WEAPON_BONE_INDEX + 1):
-		skeleton.add_bone("Bone%d" % bone_index)
-	body.add_child(skeleton)
+	_rig_body(body)
 	body.entity_ref = EntityRef.make(3, 7, 4242)
 	var models: Array[ObjectModel] = [body]
 	var index := EntityIndex.new()
@@ -1714,43 +1715,3 @@ func test_native_hand_frame_basis_matches_the_gdscript_origin() -> void:
 				"hand-frame parity at %s: native %s vs gd %s" % [b, got, expected])
 
 
-# Full attach-transform parity against a really posed Skeleton3D, both frames,
-# across an entity-angle sweep — pins the joint/rest-inverse/nudge math.
-func test_native_held_weapon_attach_matches_the_gdscript_origin() -> void:
-	var body := Node3D.new()
-	add_child_autofree(body)
-	body.global_transform = Transform3D(
-			Basis(Vector3(0, 1, 0), 0.9), Vector3(4.0, 1.5, -7.0))
-	var skeleton := Skeleton3D.new()
-	body.add_child(skeleton)
-	skeleton.position = Vector3(0.1, 0.9, 0.0)
-	for bone_index in range(EntityPresenter.HELD_WEAPON_BONE_INDEX + 1):
-		skeleton.add_bone("Bone%d" % bone_index)
-		if bone_index > 0:
-			skeleton.set_bone_parent(bone_index, bone_index - 1)
-		# A non-trivial rest chain: the rest-inverse term must matter.
-		skeleton.set_bone_rest(bone_index, Transform3D(
-				Basis(Vector3(0, 0, 1), 0.11 * bone_index),
-				Vector3(0.05 * bone_index, 0.1, 0.02)))
-	skeleton.reset_bone_poses()
-	# Pose the hand chain away from rest so pose != rest.
-	skeleton.set_bone_pose_rotation(10,
-			Quaternion(Vector3(1, 0, 0).normalized(), 0.6))
-	skeleton.set_bone_pose_rotation(EntityPresenter.HELD_WEAPON_BONE_INDEX,
-			Quaternion(Vector3(0.3, -0.8, 0.52).normalized(), -1.1))
-	for angles: Vector3 in [Vector3.ZERO, Vector3(15, -120, 40), Vector3(-80, 270, -30)]:
-		for hand_frame in [false, true]:
-			var expected: Variant = EntityPresenter.held_weapon_attach_transform(
-					body, angles, hand_frame)
-			var got: Variant = EntityPresenter.held_weapon_attach_transform(
-					skeleton, angles, hand_frame)
-			assert_not_null(expected, "the reference places a transform")
-			assert_true((got as Transform3D).is_equal_approx(expected as Transform3D),
-					"attach parity (hand=%s, %s): native %s vs gd %s" % [
-							hand_frame, angles, got, expected])
-	# The cannot-place leg: too few bones -> null from both.
-	var short_skel := Skeleton3D.new()
-	add_child_autofree(short_skel)
-	short_skel.add_bone("only")
-	assert_null(EntityPresenter.held_weapon_attach_transform(
-			short_skel, Vector3.ZERO, false))

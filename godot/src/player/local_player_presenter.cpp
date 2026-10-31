@@ -21,7 +21,6 @@
 #include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/os.hpp>
-#include <godot_cpp/classes/skeleton3d.hpp>
 #include <godot_cpp/classes/texture_rect.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
@@ -355,6 +354,7 @@ void LocalPlayerPresenter::refresh_camera_mode() {
 // the avatar's whole subtree (ROBJ nodes, mesh instances, the skeleton) into
 // the deferred flush's transform notifications. A still player writes nothing.
 void LocalPlayerPresenter::set_avatar_transform(ObjectModel *p_avatar, const Transform3D &p_next) {
+	avatar_world_ = p_next;
 	if (p_avatar->get_global_transform() != p_next) {
 		p_avatar->set_global_transform(p_next);
 	}
@@ -715,32 +715,24 @@ Vector3 LocalPlayerPresenter::eye_position(const Vector3 &p_pos) const {
 
 Vector3 LocalPlayerPresenter::avatar_root_world() const {
 	ObjectModel *body = avatar();
-	if (body == nullptr) {
+	if (body == nullptr || !body->has_skeleton()) {
 		return kNoSample;
 	}
-	Skeleton3D *skel = Object::cast_to<Skeleton3D>(EntityPresenter::find_skeleton(body));
-	if (skel == nullptr) {
-		return kNoSample;
-	}
-	// The SKELETON's own origin - the exact frame avatar_head_world() expresses
-	// the bone in, so head-minus-root is a pure body-relative delta. The avatar
-	// node's transform is not it: for the first-person local player that node
-	// sits at the world origin, which turned the delta into an absolute point
-	// again.
-	return skel->get_global_transform().origin;
+	// The avatar's own world frame, as update_avatar composed it: the frame
+	// avatar_head_world() expresses the bone in, so head-minus-root is a pure
+	// body-relative delta.
+	return avatar_world_.origin;
 }
 
 Vector3 LocalPlayerPresenter::avatar_head_world() const {
 	ObjectModel *body = avatar();
-	if (body == nullptr) {
+	opennova::world::PosedBoneFrames head;
+	if (body == nullptr ||
+			!body->get_posed_bone_frames(Simulation::player_head_bone_index(), avatar_world_, head)) {
 		return kNoSample;
 	}
-	Skeleton3D *skel = Object::cast_to<Skeleton3D>(EntityPresenter::find_skeleton(body));
-	const int head_bone = Simulation::player_head_bone_index();
-	if (skel == nullptr || skel->get_bone_count() <= head_bone) {
-		return kNoSample;
-	}
-	return skel->get_global_transform().xform(skel->get_bone_global_pose(head_bone).origin);
+	// The head bone's posed joint from the engine's own bone matrices.
+	return ObjectModel::from_pose_transform(head.joint_world).origin;
 }
 
 // The soldier's third-person gun: retail's draw 5. The model is the equipped
@@ -797,8 +789,8 @@ void LocalPlayerPresenter::update_held_weapon(const Ref<PlayerAimOverlay> &p_ove
 		}
 	}
 	const Variant attach = body != nullptr
-			? EntityPresenter::held_weapon_attach_transform(body, p_overlay->get_weapon_attach_angles(),
-					  p_overlay->get_weapon_hand_frame())
+			? EntityPresenter::held_weapon_attach_transform(body, avatar_world_,
+					  p_overlay->get_weapon_attach_angles(), p_overlay->get_weapon_hand_frame())
 			: Variant();
 	if (attach.get_type() == Variant::NIL) {
 		weapon->set_visible(false);
@@ -1355,38 +1347,54 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	if (body == nullptr || node == nullptr) {
 		return;
 	}
-	// MATCHTERRAIN follows the simulation's exact MoveOrder stance latch. The
-	// body stays submitted as a shadow source in first person, so keep this
-	// independent of the camera-visible layer verdict below.
-	const Ref<Simulation> stance_sim = sim();
-	body->set_match_terrain_enabled(stance_sim.is_valid() &&
-			stance_sim->get_local_player_stance_latch() != Simulation::STANCE_STAND);
-	// The avatar node carries the BODY frame (the lagged body heading), not
-	// the aim yaw: the aim/body split is what the per-segment overlay renders
-	// as the torso twist, and the body-class delta is identity by construction
-	// so the hips stay glued to the node.
-	// [orig: Entity_BuildBoneTransformMatrices @0x4b1290 -- every overlay
-	// blends toward bodyHeading/bodyPitch; docs/world/world-wac-ai-re.md §14
-	// (D-INF-11)]
+	// The avatar's present row is the engine's (world::local_avatar_present):
+	// the MATCHTERRAIN gate off the stance latch (independent of the
+	// camera-visible layer below: the body stays a shadow source in first
+	// person) and the body clip request.
+	const Ref<Simulation> avatar_sim = sim();
+	const opennova::world::LocalAvatarPresent present = avatar_sim.is_valid()
+			? avatar_sim->local_avatar_present()
+			: opennova::world::LocalAvatarPresent();
+	body->set_match_terrain_enabled(present.match_terrain);
+	// The avatar node carries the BODY frame; the overlay's class deltas
+	// (world::aim_overlay_deltas) are relative to it.
 	MissionRoot *runtime = world_access::runtime(node);
+	// The row's render-slot seat: seated, the body takes no slot of its own and
+	// rides its carrier's capture (engine world::slot_seat_facts).
+	EntityPresenter *entities = runtime != nullptr ? runtime->get_entity_presenter() : nullptr;
+	body->set_slot_seat(present.slot_seat.bits,
+			entities != nullptr && present.slot_seat.walk.valid()
+					? entities->resolve_present_handle(present.slot_seat.walk.packed)
+					: nullptr);
 	const Ref<PlayerAimOverlay> overlay = runtime != nullptr ? runtime->local_player_aim_overlay()
 															 : Ref<PlayerAimOverlay>();
+	const PackedVector3Array segments =
+			overlay.is_valid() ? overlay->get_segment_angles() : PackedVector3Array();
 	if (overlay.is_valid()) {
-		const Basis body_basis = MissionObjectPlacer::bms_to_godot_basis(overlay->get_body_angles());
-		set_avatar_transform(body, body->compose_entity_transform(body_basis, p_pos));
-		const Basis inv = body_basis.inverse();
-		Array deltas;
-		const PackedVector3Array segments = overlay->get_segment_angles();
-		for (int64_t i = 0; i < segments.size(); ++i) {
-			deltas.push_back(inv * MissionObjectPlacer::bms_to_godot_basis(segments[i]));
-		}
-		body->set_aim_overlay(deltas);
+		const Vector3 body_angles = overlay->get_body_angles();
+		set_avatar_transform(body, body->compose_entity_transform(
+						MissionObjectPlacer::bms_to_godot_basis(body_angles), p_pos));
 	} else {
-		const Ref<Simulation> yaw_sim = sim();
 		const Basis body_basis = MissionObjectPlacer::bms_to_godot_basis(
-				Vector3(0.0f, yaw_sim.is_valid() ? yaw_sim->get_local_player_yaw_deg() : 0.0f, 0.0f));
+				Vector3(0.0f, avatar_sim.is_valid() ? avatar_sim->get_local_player_yaw_deg() : 0.0f, 0.0f));
 		set_avatar_transform(body, body->compose_entity_transform(body_basis, p_pos));
-		body->set_aim_overlay(Array());
+	}
+	if (overlay.is_valid() && segments.size() >= ObjectModel::kAimOverlayClasses) {
+		const Vector3 body_angles = overlay->get_body_angles();
+		const float body_deg[3] = {static_cast<float>(body_angles.x),
+				static_cast<float>(body_angles.y), static_cast<float>(body_angles.z)};
+		float class_deg[ObjectModel::kAimOverlayClasses][3];
+		for (int c = 0; c < ObjectModel::kAimOverlayClasses; ++c) {
+			const Vector3 angles = segments[c];
+			class_deg[c][0] = static_cast<float>(angles.x);
+			class_deg[c][1] = static_cast<float>(angles.y);
+			class_deg[c][2] = static_cast<float>(angles.z);
+		}
+		opennova::anim::Quat deltas[ObjectModel::kAimOverlayClasses];
+		opennova::world::aim_overlay_deltas(body_deg, class_deg, deltas);
+		body->set_aim_overlay_quats(deltas);
+	} else {
+		body->clear_aim_overlay();
 	}
 	// The body renders only in third person; first person hides it from every
 	// camera by LAYER, not by visible = false, so it stays a live shadow
@@ -1415,24 +1423,9 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	const bool draw_avatar = third_person_ || debug_body_in_first_person_;
 	body->set_presentation_layer(draw_avatar ? ObjectModel::PRESENTATION_LAYER_LOCAL_BODY
 											 : ObjectModel::PRESENTATION_LAYER_LOCAL_BODY_HIDDEN);
-	const Ref<Simulation> anim_sim = sim();
-	const String anim_key = anim_sim.is_valid() ? anim_sim->get_local_player_anim_key() : String();
-	const int anim_phase = anim_sim.is_valid() ? anim_sim->get_local_player_anim_phase_ticks() : 0;
-	const String anim_source_key = anim_sim.is_valid() ? anim_sim->get_local_player_anim_source_key() : String();
-	const int anim_source_phase = anim_sim.is_valid() ? anim_sim->get_local_player_anim_source_phase_ticks() : 0;
-	const float anim_blend_weight = anim_sim.is_valid() ? anim_sim->get_local_player_anim_blend_weight() : 1.0f;
-	const int anim_variant = anim_sim.is_valid() ? anim_sim->get_local_player_anim_variant() : 0;
-	const int anim_source_variant = anim_sim.is_valid() ? anim_sim->get_local_player_anim_source_variant() : 0;
-	// Each channel's armed end-notify park: on such a tick the clip samples its
-	// last frame at the phase, not the wrapped start, as every other body's
-	// presenter reads it off PF_ANIM_PHASE_PARKED / PF_WPN_PHASE_PARKED.
-	const bool anim_parked = anim_sim.is_valid() && anim_sim->get_local_player_anim_phase_parked();
-	// The upper-body weapon channel: the sim's secondary-channel clip (reload
-	// etc.) posed at its own playhead onto the mask bones, composed under the
-	// aim overlay. Equal state ids still carry the secondary playhead; an empty
-	// key means the gate is off.
-	// [orig: producer @0x4b5dad, override @0x4b14db; the park
-	// AnimChannel_AdvancePlayback @0x40B19E..0x40B1B1; world-wac-ai-re.md §14.8]
+	// The upper-body weapon channel (anim::WeaponChannel): the sim's
+	// secondary-channel clip at its own playhead, composed under the aim
+	// overlay; an empty key means the gate is off.
 	const Ref<PlayerWeaponView> weapon_view = weapon_effects_.is_valid() ? weapon_effects_->weapon_view()
 																		 : Ref<PlayerWeaponView>();
 	if (weapon_view.is_valid()) {
@@ -1443,15 +1436,8 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	} else {
 		body->set_weapon_channel(String(), 0);
 	}
-	if (!anim_source_key.is_empty() && !anim_key.is_empty() && anim_blend_weight < 1.0f) {
-		body->play_body_blend_at(anim_source_key, anim_source_phase, anim_key, anim_phase, anim_blend_weight,
-				anim_source_variant, anim_variant);
-	} else if (!anim_key.is_empty()) {
-		body->play_body_clip_at(anim_key, anim_phase, anim_variant, anim_parked);
-	} else {
-		body->play_body_anim_at(anim_sim.is_valid() ? anim_sim->get_local_player_body_anim_slot() : -1, anim_phase,
-				anim_parked);
-	}
+	ObjectModel::BodyTarget body_target(*body);
+	opennova::world::play_body_clip_request(body_target, present.body);
 	// Attach only after this frame's body clip and weapon layer have been posed.
 	update_held_weapon(overlay);
 	update_person_overlays();
@@ -1476,7 +1462,7 @@ void LocalPlayerPresenter::update_person_overlays() {
 	const bool draw_body = third_person_ || debug_body_in_first_person_;
 	ObjectModel *body = avatar();
 	visuals_->present_local_player_person_overlays(*person_overlays_.ptr(), state, body,
-			avatar_drawn(body),
+			avatar_world_, avatar_drawn(body),
 			draw_body ? PersonOverlayModels::PRESENT_LOCAL_THIRD_PERSON
 					  : PersonOverlayModels::PRESENT_LOCAL_FIRST_PERSON);
 }
@@ -1538,11 +1524,13 @@ void LocalPlayerPresenter::_bind_methods() {
 								 "menu_open"),
 			&LocalPlayerPresenter::before_world_tick, DEFVAL(false), DEFVAL(true), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("after_world_tick"), &LocalPlayerPresenter::after_world_tick);
+	ClassDB::bind_method(D_METHOD("present_fixed_weapon_tick", "events"),
+			&LocalPlayerPresenter::present_fixed_weapon_tick);
 	ClassDB::bind_method(D_METHOD("fixed_weapon_batches_consumed"),
 			&LocalPlayerPresenter::fixed_weapon_batches_consumed);
 	ClassDB::bind_method(D_METHOD("consume_use_hold"), &LocalPlayerPresenter::consume_use_hold);
 	ClassDB::bind_method(D_METHOD("is_use_held"), &LocalPlayerPresenter::is_use_held);
-	ClassDB::bind_method(D_METHOD("special_key", "session", "vk", "yes_vk", "no_vk", "restart_vk"),
+	ClassDB::bind_method(D_METHOD("special_key", "session", "vk"),
 			&LocalPlayerPresenter::special_key);
 	ClassDB::bind_method(D_METHOD("queue_pick_event", "param"), &LocalPlayerPresenter::queue_pick_event);
 	ClassDB::bind_method(D_METHOD("set_record_leg", "leg"), &LocalPlayerPresenter::set_record_leg);

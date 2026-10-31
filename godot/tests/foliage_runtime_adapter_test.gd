@@ -1,16 +1,18 @@
 extends GutTest
 
 # Contract tests for the fresh Godot adapter. Literal PRNG, placement, ground-
-# fit, fade, alpha-reference, and :fd vectors live in the portable core tests;
-# these checks pin which authored map drives each render tier. They drive the
-# dispatcher's runtime frame (render_frame). The detail tier takes its cells
-# from a staged terrain: the synthetic Tmap terrain (TestFs.staged_tmap)
-# collects them around the eye (Terrain::get_foliage_detail_patches_native, the
-# retail collector), its tile cache settled so every detail patch finds its page
-# (retail skips a patch whose page lookup fails; foliage_tile_cache_runtime_test
-# pins that). No TerrainData is bound to the dispatcher, so its GDScript
-# samplers keep supplying the heights and the foliage-map indices the tiers
-# read. The MODEL-tier tests bind no terrain, as a mission without one draws.
+# fit, fade, alpha-reference, and :fd vectors live in the portable core tests
+# (the tiers' map routing too: foliage_runtime_vectors, foliage_mask_raster);
+# these checks pin the backend's draws. They drive the dispatcher's runtime
+# frame (render_frame) over the synthetic Tmap terrain configured as a
+# mission's load configures it (configure_for_terrain): its two definitions'
+# models staged beside it and its foliage map painted with bush1's code on
+# every texel (TestFs.staged_foliage_tmap), so every candidate matches. The
+# detail tier takes its cells from the terrain node, which collects them around
+# the eye (Terrain::get_foliage_detail_patches_native, the retail collector),
+# its tile cache settled so every detail patch finds its page (retail skips a
+# patch whose page lookup fails; foliage_tile_cache_runtime_test pins that).
+# The MODEL-tier tests hand the frame its anchors and give it no terrain node.
 
 const TMAP_STAGE := "foliage_runtime_adapter"
 # A point on the Tmap ramp (the ground rises 1 unit per 16 toward +z there, 30
@@ -18,11 +20,9 @@ const TMAP_STAGE := "foliage_runtime_adapter"
 const GROUND_POINT := Vector2(-64.0, -64.0)
 
 var _dispatcher: FoliageDispatcher
-var _foliage_index := 1
-var _detail_sampler_calls := 0
-var _model_sampler_calls := 0
 
 var _viewport: SubViewport
+var _resource_root: ResourceRoot
 var _terrain_data: TerrainData
 var _terrain: Terrain
 var _camera: Camera3D
@@ -33,8 +33,9 @@ func before_all() -> void:
 	_viewport.size = Vector2i(320, 180)
 	add_child(_viewport)
 	_terrain_data = TerrainData.new()
-	_terrain_data.set_trn_path(TestFs.staged_tmap(TMAP_STAGE))
+	_terrain_data.set_trn_path(TestFs.staged_foliage_tmap(TMAP_STAGE))
 	assert_eq(_terrain_data.load(), OK, "the Tmap fixture terrain must load")
+	_resource_root = TestFs.staged_tmap_root(TMAP_STAGE)
 	_terrain = Terrain.new()
 	_viewport.add_child(_terrain)
 	_terrain.set_terrain_data(_terrain_data)
@@ -53,44 +54,10 @@ func after_all() -> void:
 
 
 func before_each() -> void:
-	_foliage_index = 1
-	_detail_sampler_calls = 0
-	_model_sampler_calls = 0
 	_dispatcher = FoliageDispatcher.new()
 	autofree(_dispatcher)
 	_viewport.add_child(_dispatcher)
-
-	var def := TerrainFoliageDef.new()
-	def.graphic = "adapter_test"
-	def.match = PackedInt32Array([1])
-
-	var mesh := BoxMesh.new()
-	mesh.size = Vector3(2.0, 6.0, 2.0)
-	_dispatcher.configure_slots([def], [mesh], [])
-	_dispatcher.height_sampler = Callable(self, "_sample_height")
-	_dispatcher.foliage_sampler = Callable(self, "_sample_foliage")
-
-
-func _sample_height(world_x: float, world_z: float) -> float:
-	return 0.08 * world_x - 0.05 * world_z + 0.004 * world_x * world_z
-
-
-func _sample_flat_height(_world_x: float, _world_z: float) -> float:
-	return 10.0
-
-
-func _sample_foliage(_world_x: float, _world_z: float) -> int:
-	return _foliage_index
-
-
-func _sample_detail_only(_world_x: float, _world_z: float) -> int:
-	_detail_sampler_calls += 1
-	return 1
-
-
-func _sample_model_only(_world_x: float, _world_z: float) -> int:
-	_model_sampler_calls += 1
-	return 1
+	_dispatcher.configure_for_terrain(_resource_root, _terrain_data, null)
 
 
 func _camera_xform() -> Transform3D:
@@ -263,7 +230,6 @@ func test_backend_visibility_tracks_dispatcher_without_dropping_bindings() -> vo
 func test_detail_pass_gate_hides_only_the_detail_tier() -> void:
 	var eye := _staged_xform()
 	await _stage(eye)
-	_foliage_index = 1
 	_dispatcher.silhouette_anchors = PackedVector3Array([_anchor(eye, 64.0)])
 	_frame(eye)
 	_frame(eye)
@@ -311,7 +277,6 @@ func test_inset_frame_draws_its_own_anchors_on_the_inset_layer() -> void:
 	autofree(inset_camera)
 	_viewport.add_child(inset_camera)
 	inset_camera.global_transform = Transform3D(Basis(), eye.origin + Vector3(0.0, 0.5, 0.0))
-	_foliage_index = 1
 	_dispatcher.silhouette_anchors = PackedVector3Array()
 	_frame(eye, 1000)
 	var main_detail := _backend_draws("detail").size()
@@ -365,7 +330,6 @@ func test_inset_frame_draws_its_own_anchors_on_the_inset_layer() -> void:
 func test_mirror_frame_draws_its_own_anchors_on_the_mirror_layer() -> void:
 	var eye := _staged_xform()
 	await _stage(eye)
-	_foliage_index = 1
 	_dispatcher.silhouette_anchors = PackedVector3Array()
 	_frame(eye, 1000)
 	var main_detail := _backend_draws("detail").size()
@@ -413,35 +377,7 @@ func test_backend_recreates_retained_instances_after_world_exit() -> void:
 	assert_gt(int(rebound.instance_creates), 0)
 
 
-func test_render_tiers_use_distinct_foliage_sampler_callbacks() -> void:
-	_dispatcher.detail_foliage_sampler = Callable(self, "_sample_detail_only")
-	_dispatcher.foliage_sampler = Callable(self, "_sample_model_only")
-
-	var eye := _staged_xform()
-	_collect(eye)
-	_frame(eye)
-	_frame(eye)
-	assert_gt(_detail_sampler_calls, 0,
-		"DETAIL candidates must use the flat-map callback.")
-	assert_eq(_model_sampler_calls, 0,
-		"DETAIL cells must not route through the MODEL callback.")
-
-	_dispatcher.reset()
-	_dispatcher.set_terrain(null)
-	_detail_sampler_calls = 0
-	_model_sampler_calls = 0
-	_dispatcher.silhouette_anchors = PackedVector3Array([
-		Vector3(0.0, 0.0, -64.0),
-	])
-	_frame(_camera_xform())
-	assert_eq(_detail_sampler_calls, 0,
-		"MODEL-only rendering must not invoke the DETAIL callback.")
-	assert_gt(_model_sampler_calls, 0,
-		"MODEL anchors must use the sector-routed callback.")
-
-
 func test_terrain_detail_cells_use_foliage_map() -> void:
-	_foliage_index = 1
 	var eye := _staged_xform()
 	await _stage(eye)
 	_frame(eye)
@@ -485,8 +421,6 @@ func test_terrain_detail_cells_use_foliage_map() -> void:
 		)
 		assert_false(bool(draw.casts_shadows),
 			"Fresh retail audit confirms both foliage tiers are absent from shadow passes.")
-		assert_eq(int(draw.layer_mask) & Water.VISUAL_LAYER_TERRAIN_SHADOW_RECEIVER, 0,
-			"an alpha-blind catcher must not darken whole foliage cards")
 		assert_eq(int(draw.layer_mask), Water.VISUAL_LAYER_TERRAIN_FOLIAGE,
 			"foliage rides its own bit alone: the beauty camera admits it and " +
 			"the water mirror excludes it (the witnessed reflection context " +
@@ -523,7 +457,6 @@ func test_aerial_eye_collects_no_detail_cells() -> void:
 # within 0.025 there. (The fade law at an exact distance is the
 # foliage_runtime_vectors ctest's: 31 -> 0.5 on both submissions.)
 func test_eye_altitude_drives_detail_alpha_fade() -> void:
-	_dispatcher.height_sampler = Callable(self, "_sample_flat_height")
 	var elevated := _staged_xform(31.0, GROUND_POINT + Vector2(8.0, 8.0))
 	await _stage(elevated)
 	_frame(elevated)
@@ -624,7 +557,6 @@ func test_mission_tile_info_blocks_covering_detail_candidates() -> void:
 
 func test_mission_tile_info_uses_decoded_terrain_plane_z() -> void:
 	const BLOCKER_RADIUS := 2.0
-	_dispatcher.height_sampler = Callable(self, "_sample_flat_height")
 	# The exact 00TRa spawn on the Godot plane, the eye 10 over the Tmap ground there.
 	var spawn_position := Vector3(297.805573, 10.0, 409.123169)
 	var spawn_camera := _staged_xform(10.0, Vector2(spawn_position.x, spawn_position.z))
@@ -680,7 +612,6 @@ func test_mission_tile_info_uses_decoded_terrain_plane_z() -> void:
 
 
 func test_silhouette_uses_foliage_map_and_view_depth() -> void:
-	_foliage_index = 1
 	_dispatcher.silhouette_anchors = PackedVector3Array([Vector3(0.0, 0.0, -64.0)])
 	_dispatcher.render_frame(_camera_xform(), GameWorld.current_frame_clock_ms())
 	var far_stats := _dispatcher.get_frame_stats()
@@ -709,7 +640,6 @@ func test_silhouette_uses_foliage_map_and_view_depth() -> void:
 
 
 func test_terrain_cells_do_not_manufacture_silhouette_anchors() -> void:
-	_foliage_index = 1
 	_dispatcher.silhouette_anchors = PackedVector3Array()
 	var eye := _staged_xform()
 	_collect(eye)
@@ -757,7 +687,6 @@ func test_detail_mesh_cache_reuses_resident_geometry() -> void:
 
 
 func test_duplicate_silhouette_anchors_submit_twice() -> void:
-	_foliage_index = 1
 	var anchor := Vector3(0.0, 0.0, -64.0)
 	_dispatcher.silhouette_anchors = PackedVector3Array([anchor, anchor])
 	_dispatcher.render_frame(_camera_xform(), GameWorld.current_frame_clock_ms())
@@ -785,7 +714,6 @@ func test_duplicate_silhouette_anchors_submit_twice() -> void:
 # wave's take the rung just before the far-side alpha, the camera wave's the
 # rung just before the scars, with no sorting offset.
 func test_model_masks_lead_their_side_rung() -> void:
-	_foliage_index = 1
 	_dispatcher.silhouette_anchors = PackedVector3Array([Vector3(0.0, 0.0, -64.0)])
 	# Camera at 10 over water at 0: the anchor's z - 1 is below the water.
 	_dispatcher.set_water_height(0.0)
@@ -848,7 +776,6 @@ func test_detail_passes_take_their_side_rungs_and_order_the_secondary() -> void:
 	# ground stays within a few units of the eye's across the detail reach.
 	var high_camera := _staged_xform(30.0)
 	_dispatcher.set_water_height(high_camera.origin.y - 10.0)
-	_dispatcher.height_sampler = Callable(self, "_sample_flat_height")
 	await _stage(high_camera)
 	_frame(high_camera)
 	_frame(high_camera)
@@ -877,9 +804,13 @@ func test_thermal_view_draws_one_faint_low_pass_per_patch() -> void:
 		assert_lte(float(draw.fade), 0.1 + 0.000001)
 
 
+# The dispatcher samples a terrain of its own here, the same staged Tmap loaded
+# again, so its edit leaves the shared terrain node alone.
 func test_terrain_change_invalidates_resident_geometry() -> void:
 	var data := TerrainData.new()
-	_dispatcher.colormap_source = data
+	data.set_trn_path(TestFs.staged_foliage_tmap(TMAP_STAGE))
+	assert_eq(data.load(), OK)
+	_dispatcher.terrain_data = data
 	var eye := _staged_xform()
 	_collect(eye)
 	_frame(eye)
@@ -891,64 +822,3 @@ func test_terrain_change_invalidates_resident_geometry() -> void:
 		"In-place terrain edits must invalidate foliage render meshes.")
 	assert_eq(int(_dispatcher.get_frame_stats().terrain_scene_counter), 0,
 		"In-place terrain edits must restart the retail cache cadence.")
-
-
-func test_non_triangle_array_mesh_disables_slot() -> void:
-	var line_mesh := ArrayMesh.new()
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([
-		Vector3.ZERO,
-		Vector3.ONE,
-	])
-	line_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)
-
-	var def := TerrainFoliageDef.new()
-	def.graphic = "line_mesh"
-	def.match = PackedInt32Array([1])
-	_dispatcher.configure_slots([def], [line_mesh], [])
-	var eye := _staged_xform()
-	_collect(eye)
-	_frame(eye)
-	_frame(eye)
-	var stats := _dispatcher.get_frame_stats()
-	assert_gt(int(stats.detail_cells), 0, "the terrain handed the frame its cells")
-	assert_eq(int(stats.detail_cache_regenerations), 0,
-		"Non-triangle public meshes must not enter the triangle expansion path.")
-	assert_eq(_dispatcher.get_total_instances(), 0)
-
-
-func test_slot_diagnostics_explain_every_authored_slot_that_cannot_render() -> void:
-	var enabled := TerrainFoliageDef.new()
-	enabled.graphic = 'enabled_veg'
-	enabled.match = PackedInt32Array([1])
-	var missing := TerrainFoliageDef.new()
-	missing.graphic = 'missing_veg'
-	missing.match = PackedInt32Array([2])
-	var invalid := TerrainFoliageDef.new()
-	invalid.graphic = 'invalid_veg'
-	invalid.match = PackedInt32Array([3])
-
-	var line_mesh := ArrayMesh.new()
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = PackedVector3Array([Vector3.ZERO, Vector3.ONE])
-	line_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)
-
-	_dispatcher.configure_slots(
-		[enabled, missing, invalid, null],
-		[BoxMesh.new(), null, line_mesh, null],
-		[null, null, null, null])
-
-	var diagnostics: Array = _dispatcher.get_slot_diagnostics()
-	assert_eq(diagnostics.size(), 4)
-	assert_eq(String(diagnostics[0].status), 'enabled')
-	assert_eq(String(diagnostics[1].status), 'missing_mesh')
-	assert_eq(String(diagnostics[2].status), 'invalid_mesh')
-	assert_eq(String(diagnostics[3].status), 'missing_definition')
-	assert_eq(String(diagnostics[1].graphic), 'missing_veg')
-
-	var stats := _dispatcher.get_frame_stats()
-	assert_eq(stats.authored_slots, 3)
-	assert_eq(stats.enabled_slots, 1)
-	assert_eq(stats.disabled_slots, 2)

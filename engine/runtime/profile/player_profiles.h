@@ -21,6 +21,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -131,6 +132,30 @@ bool name_char_allowed(char c);
 int voice_override(const playersav::ProfileRecord &record, int side);
 void set_voice_override(playersav::ProfileRecord &record, int side, int value);
 
+// PLAYER_INFO's dialog as its save reads it back (the ACCEPT, a side radio, a class pick): the
+// PLAYERCLASS value, the shown side, that side's character when the screen's lists hold one, and
+// the shown side's kit page when a weapon table is loaded. Values are the lists' as read; the
+// save checks them (PlayerProfiles::apply_character_selection).
+struct CharacterSelection {
+	int player_class = -1;  // PLAYERCLASS, 5..9
+	int team = -1;          // the shown side (g_PlayerInfoTeamIndex): 0 blue, 1 red
+	// The shown side's character, the side block's +1, +2 and +4: absent with no character table.
+	struct Character {
+		int avatar_a = -1;       // 0..255
+		int avatar_b = -1;       // 0..255
+		int avatar_packed = -1;  // 0..0xFFFF, its bit 15 the shown side
+	};
+	std::optional<Character> character;
+	// The shown side's kit page as the screen serializes it: absent with no weapon table.
+	struct Kit {
+		// The class whose page the screen's populate restored; outside 5..9 (a class byte
+		// that picks no page, or none given) the page of `player_class` (D-PLAYERINFO-26).
+		int page_class = -1;
+		std::vector<playersav::KitEntry> entries;  // each one named
+	};
+	std::optional<Kit> kit;
+};
+
 class PlayerProfiles {
 public:
 	// The profile of `title`, the title the process runs as (CONTEXT.md "Title"):
@@ -221,6 +246,21 @@ public:
 	// empty one or one that starts or ends with white space empties the name
 	// and raises the no-name flag.
 	void commit_name(const std::string &text);
+
+	// The PLAYER_INFO dialog save's character leg into the current weapon record
+	// [orig: PlayerInfo_SaveFromDialog @0x55EE10 - PLAYERCLASS into both side blocks
+	// @0x55EE3F..0x55EE6D; NATIONALITY, DIVISION and COMBO_LIST into the shown side's alone
+	// @0x55EE93..0x55EF38, by g_PlayerInfoTeamIndex; the kit into the page the populate pointed
+	// g_PlayerInfoLoadoutPtr at, PlayerInfo_SerializeWeaponLoadout @0x55E4B0 called @0x55F1D2]:
+	// the class to both sides, the character to the shown side alone (the side not shown keeps
+	// its bytes, as does a shown side with no character), the kit to the shown side's page of
+	// its `page_class`. A class byte outside 5..9 picks no page for the populate, and its kit
+	// goes into the page of the class the save writes, so one save makes the record usable
+	// again where retail writes outside the side's pages (D-PLAYERINFO-26, PERMANENT). Every
+	// input is checked before the record changes: false, the record untouched, for a class
+	// outside 5..9, a side other than 0 or 1, a character byte out of its range or whose
+	// packed id's bit 15 is not the shown side, or a kit entry with no name.
+	bool apply_character_selection(const CharacterSelection &selection);
 
 	// The QUERY_YES of the PLAYER_INFO delete query: the current record seeded
 	// again and flagged nameless [orig: PlayerInfo_OnDeleteQueryYes @0x561400 — @0x561435,

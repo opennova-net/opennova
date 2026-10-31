@@ -117,6 +117,27 @@ inline bool mount_collapses_right_hand_row(const Entity &entity) {
             (entity.engine_flags & kEntityFlagPlayer) == 0;
 }
 
+// The render-slot seat facts of an entity (the renderer::SlotSeatBit word) and
+// the entity whose capture's pool-0 child walk draws it (renderer::slot_seat_walk:
+// its parentEntity for a seat 1, 2 or 5, its parentEntity's groundEntity for
+// a UseGun seat under a refNum parent; kInvalid for none). The word's person
+// bit is the Player class bit 0x100 or a pool-0 entity, its parentSlot the
+// mount's seat type (SeatType's values are retail's slot numbers)
+// [orig: RenderSlot_UpdateEntityLight @0x5d6dbf..0x5d6ddf; RenderSlot_SortAndAssign
+//  @0x5d6593..0x5d65ff; RenderSlot_RenderEntityAndChildren @0x5d78ea..0x5d7968].
+struct SlotSeatFacts {
+    uint32_t bits = 0;
+    EntityHandle walk;
+};
+// From the facts as a row holds them: the Player class bit, pool 0, the seat
+// held (SeatType::None for none), whether the parentEntity holds a refNum, and
+// the two handles the walk may name.
+SlotSeatFacts slot_seat_facts(bool player_class, bool pool0, SeatType seat,
+        bool parent_ref_num, EntityHandle parent, EntityHandle parent_ground);
+// From the authoritative entity: its mount (mount_target, mount_type) and that
+// carrier's own groundEntity (+0x28).
+SlotSeatFacts slot_seat_facts(const World &world, const Entity &entity);
+
 // Point a non-local entity's EquippedSlot at its +0x308 on a seat-2/3 detach
 // (borrowed or not) and clear any NPC's, whatever its seat, matching the
 // post-restore retail player-classifier branch. The vehicle's MountSlot keeps

@@ -2,39 +2,25 @@ extends GutTest
 
 # STR-2, the maturity program's string-encoding audit (see git history of
 # docs/oned/workspace-maturity-program.md, removed 2026-09-28): pin the
-# retail code-page behavior end to end, table bytes -> glyphs.
+# retail code-page behavior of the string tables, table bytes <-> Unicode.
 #
 # The pipeline under audit:
 #   .bin table bytes (cp1252, raw in engine/formats/rtxt — no transcoding)
 #     -> RtxtStringFile decode (cp1252-aware, D-RTXT-8 in
 #        docs/interface/rtxt-strings-re.md; the strings editor's read path)
 #     -> Godot String (Unicode)
-#     -> FntResource.to_font_file() FontFile (the runtime's .fnt view;
-#        glyph slots keyed at their decoded cp1252 codepoints)
-#     -> the runtime HUD, menu, and credits draws.
+#     -> the runtime HUD, menu, and credits draws, which encode the text back
+#        to the code page's bytes (cp1252_encode_codepoint) for the engine's
+#        byte-indexed glyph walk (hud::GameFont; its glyph stage, D-FNT-4, is
+#        ctest hud_game_font).
 #
 # cp1252 zones pinned here:
 #   0x20..0x7E  ASCII        — identity through every stage.
 #   0xA0..0xFF  Latin-1      — cp1252 == Unicode; identity through every stage.
 #   0x82..0x9F  specials     — decode maps to the cp1252 punctuation codepoints
-#               (0x93 -> U+201C etc.); encode maps back losslessly, and the
-#               FontFile exposes each byte's retail glyph under that codepoint.
+#               (0x93 -> U+201C etc.); encode maps back losslessly.
 #   0x8D/0x8F/0x90/0x9D      — cp1252 holes: decode passes the byte through as
-#               its own codepoint, encode returns it; glyph stage matches
-#               (whenever the font draws that slot at all).
-#
-# Intentional exclusions (format facts, not gaps):
-#   - bytes < 0x20 never map to glyphs: the .fnt format carries 224 glyphs for
-#     chars 32..255 only (engine/formats/fnt fnt.h, FNT_FIRST_CHAR/FNT_GLYPH_COUNT).
-#   - byte 0x20 (space) is advance-only in the FontFile view (no drawn rect).
-#   - retail's text drawer and measurer skip bytes 0x7F, 0x80, and 0x81 as
-#     non-printing controls; the FontFile omits those slots and disables system-font
-#     fallback so decoded U+20AC does not become a system-font Euro glyph.
-#
-# D-FNT-4 closed the audited 0x80..0x9F glyph-stage divergence: decoded text
-# now selects the same bitmap slot and metric that retail selects by byte.
-
-const FNT_PATH := "res://../fixtures/fnt/synth_1page.fnt"
+#               its own codepoint, encode returns it.
 
 # One section, two entries: text blob starts right after the 16-byte header and
 # the two 16-byte entry rows [docs/interface/rtxt-strings-re.md, on-disk format].
@@ -43,10 +29,6 @@ const E_ACUTE := 0xE9        # cp1252 'é' — Latin-1 zone (cp1252 == Unicode)
 const LEFT_QUOTE_BYTE := 0x93  # cp1252 left curly quote — specials zone
 const LEFT_QUOTE_CODEPOINT := 0x201C  # what 0x93 decodes to
 const HOLE_BYTE := 0x9D      # unmapped in cp1252 — passes through by byte value
-                             # (0x9D rather than 0x81: the fixture draws 0x9D)
-const DELETE_CONTROL_CODEPOINT := 0x7F
-const EURO_CODEPOINT := 0x20AC
-const UNDEFINED_81_CONTROL_CODEPOINT := 0x81
 
 
 func _two_entry_table() -> RtxtStringFile:
@@ -93,66 +75,3 @@ func test_cp1252_bytes_decode_to_the_code_pages_unicode() -> void:
 	assert_eq(rewritten[e1_text], LEFT_QUOTE_BYTE, "U+201C re-encodes to the cp1252 byte 0x93")
 	assert_eq(rewritten[e1_text + 1], HOLE_BYTE, "the hole byte survives the String round trip")
 	assert_eq(rewritten, bytes, "the whole patched table survives a decode/encode cycle byte-for-byte")
-
-
-func _fixture_font() -> FontFile:
-	var fnt_bytes := FileAccess.get_file_as_bytes(FNT_PATH)
-	var res: FntResource = FntResource.new()
-	if fnt_bytes.is_empty() or res.load_from_bytes(fnt_bytes) != OK:
-		res = null
-	assert_not_null(res, "synth_1page.fnt fixture should load as FntResource.")
-	if res == null:
-		return null
-	var font := res.to_font_file()
-	assert_not_null(font, "the runtime FontFile view should build")
-	return font
-
-
-func test_identity_zones_key_fnt_slots_at_matching_codepoints() -> void:
-	# For ASCII, Latin-1, and pass-through holes, the decoded codepoint IS the
-	# table byte, so the engine draw picks the same glyph slot retail indexes.
-	var font := _fixture_font()
-	if font == null:
-		return
-	var fs := font.get_fixed_size()
-	assert_gt(fs, 0, "the .fnt view carries its fixed pixel size")
-	var glyphs := font.get_glyph_list(0, Vector2i(fs, 0))
-	assert_true(glyphs.has(0x41), "ASCII: 'A' has its glyph")
-	assert_true(glyphs.has(E_ACUTE),
-		"Latin-1 zone: the decoded U+00E9 finds the glyph the retail engine draws for byte 0xE9")
-	assert_true(glyphs.has(HOLE_BYTE),
-		"cp1252 holes pass through decode by byte value, so they find their slots too")
-	assert_gt(font.get_string_size(String.chr(E_ACUTE), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x, 0.0,
-		"the engine draw advances for the Latin-1 glyph — it renders")
-
-
-func test_specials_zone_glyphs_follow_decoded_cp1252_codepoints() -> void:
-	# Retail indexes the .fnt slot by the TABLE BYTE (glyph = byte - 32)
-	# [orig: CGameFont_DrawText @ 0x6752c0]. OpenNova decodes table text to a
-	# Unicode Godot String first, so the FontFile boundary must expose that same
-	# slot under the byte's decoded cp1252 codepoint. Otherwise Godot substitutes
-	# a system-font glyph for shipped curly quotes and dashes (D-FNT-4).
-	var font := _fixture_font()
-	if font == null:
-		return
-	var fs := font.get_fixed_size()
-	var glyphs := font.get_glyph_list(0, Vector2i(fs, 0))
-	assert_false(glyphs.has(LEFT_QUOTE_BYTE),
-		"a defined cp1252 special is not exposed as the raw C1-control codepoint")
-	assert_true(glyphs.has(LEFT_QUOTE_CODEPOINT),
-		"byte 0x93's .fnt slot is exposed at its decoded U+201C codepoint")
-	assert_false(glyphs.has(DELETE_CONTROL_CODEPOINT),
-		"retail control byte 0x7F remains non-printing")
-	assert_false(glyphs.has(EURO_CODEPOINT),
-		"retail control byte 0x80 does not expose a Euro glyph")
-	assert_false(glyphs.has(UNDEFINED_81_CONTROL_CODEPOINT),
-		"retail control byte 0x81 remains non-printing")
-	assert_false(font.is_allow_system_fallback(),
-		"retail bitmap fonts never substitute glyphs from a system-font face")
-
-	# The decoded codepoint must retain the source slot's own metric (advance =
-	# rect width + glyph_spacing - 1: the synthetic font's 12 px cell + 0 - 1).
-	# This proves the engine draw resolves the bitmap font, not a system
-	# fallback face.
-	assert_eq(font.get_string_size(String.chr(LEFT_QUOTE_CODEPOINT), HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x, 11.0,
-		"decoded U+201C renders with byte 0x93's own .fnt metric")

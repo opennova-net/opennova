@@ -54,13 +54,6 @@ std::vector<opennova::menu::MissionChoice> mission_choices(const TypedArray<Miss
 	return choices;
 }
 
-std::vector<std::string> to_std_strings(const PackedStringArray &p_values) {
-	std::vector<std::string> out;
-	out.reserve(static_cast<size_t>(p_values.size()));
-	for (int i = 0; i < p_values.size(); ++i) out.push_back(to_std(p_values[i]));
-	return out;
-}
-
 PackedStringArray to_gd_strings(const std::vector<std::string> &p_values) {
 	PackedStringArray out;
 	for (const std::string &value : p_values) out.push_back(to_gd(value));
@@ -122,8 +115,7 @@ public:
 	}
 	void configure_screen(const std::string &screen) override {
 		if (MenuFrame *f = frame())
-			f->configure(owner_->doc_, to_gd(screen), owner_->root_, owner_->style_,
-					owner_->override_text_);
+			f->configure(owner_->doc_, to_gd(screen), owner_->root_, owner_->style_);
 	}
 	void screen_configured() override {
 		owner_->seed_marquee_widgets_();
@@ -330,6 +322,12 @@ MenuDriver::MenuDriver() : seam_(std::make_unique<FrameSeam>(this)) {
 	runtime_.set_sink([this](const opennova::menu::MenuEvent &p_event) {
 		on_runtime_event_(p_event);
 	});
+	// The single-player screen's controls and the Mods list's descriptions, the engine's name
+	// sets (menu_commands.h), as the editor's Try mode sets them (editor/preview/menu_try.cpp).
+	flow_.set_mission_controls(opennova::menu::menu_name_set(opennova::menu::MenuNameSet::SinglePlayerLists),
+			opennova::menu::menu_name_set(opennova::menu::MenuNameSet::Briefings),
+			opennova::menu::menu_name_set(opennova::menu::MenuNameSet::SinglePlayerAccepts));
+	mods_.set_descriptions(opennova::menu::menu_name_set(opennova::menu::MenuNameSet::ModDescriptions));
 }
 
 MenuDriver::~MenuDriver() = default;
@@ -396,12 +394,13 @@ String MenuDriver::widget_screen_of(int p_id) const {
 }
 
 bool MenuDriver::open_document(const Ref<MnuDocument> &p_doc, const Ref<ResourceRoot> &p_root,
-		const Ref<MnsStyleSheet> &p_style, const Ref<RtxtStringFile> &p_override_text,
-		const String &p_menu_file, const String &p_target_screen) {
+		const Ref<MnsStyleSheet> &p_style, const String &p_menu_file,
+		const String &p_target_screen) {
 	doc_ = p_doc;
 	root_ = p_root;
 	style_ = p_style;
-	override_text_ = p_override_text;
+	// The previous document's commands go with it: nothing is bound until the next wire.
+	commands_ = opennova::menu::MenuCommands();
 	// The STARTUP label's line (D-MNU-76): the launch's game and its installed release, ONE's
 	// build and the protocol it speaks (LaunchFlags::version_line).
 	runtime_.set_version_line(to_std(LaunchFlags::version_line()));
@@ -945,12 +944,6 @@ void MenuDriver::tick(int64_t p_time_ms) {
 	if (MenuFrame *frame = frame_()) frame->set_time_ms(p_time_ms);
 }
 
-void MenuDriver::set_mission_controls(const PackedStringArray &p_lists,
-		const PackedStringArray &p_briefings, const PackedStringArray &p_accepts) {
-	flow_.set_mission_controls(to_std_strings(p_lists), to_std_strings(p_briefings),
-			to_std_strings(p_accepts));
-}
-
 void MenuDriver::seed_mission_list(int p_id, const TypedArray<MissionCatalogRow> &p_rows) {
 	flow_.seed_missions(runtime_, p_id, mission_choices(p_rows));
 }
@@ -960,41 +953,6 @@ void MenuDriver::select_mission(int p_id, int p_row, const String &p_fallback) {
 }
 
 String MenuDriver::get_selected_mission() const { return to_gd(flow_.selected_mission()); }
-
-Vector2i MenuDriver::get_selected_campaign() const {
-	const opennova::mission_catalog::CampaignWords &words = flow_.selected_campaign();
-	return Vector2i(words.campaign, words.campaign_mission);
-}
-
-bool MenuDriver::activate_single_player_tab(const String &p_name) {
-	return flow_.activate_tab(runtime_, to_std(p_name));
-}
-
-void MenuDriver::set_single_player_source(const Ref<PlayerProfiles> &p_profiles,
-		const Ref<RtxtStringFile> &p_menu_text) {
-	const opennova::Title &title = ResourceRoot::session_title(root_);
-	flow_.set_title(&title);
-	if (!title.sp_campaign_tabs) return;
-	sp_menu_text_ = p_menu_text;
-	std::string def;
-	if (root_.is_valid()) {
-		const PackedByteArray bytes = root_->read_file(to_gd(opennova::campaign::kCampaignFile));
-		def.assign(reinterpret_cast<const char *>(bytes.ptr()), static_cast<size_t>(bytes.size()));
-	}
-	opennova::campaign::CompletionTable progress{};
-	if (p_profiles.is_valid()) {
-		const auto &table = p_profiles->native().current().campaign_complete;
-		for (size_t c = 0; c < progress.size() && c < table.size(); ++c)
-			for (size_t m = 0; m < progress[c].size() && m < table[c].size(); ++m)
-				progress[c][m] = table[c][m];
-	}
-	flow_.set_campaign_source(std::move(def),
-			sp_menu_text_.is_valid() ? &sp_menu_text_->get_native() : nullptr, progress);
-}
-
-void MenuDriver::set_mod_descriptions(const PackedStringArray &p_names) {
-	mods_.set_descriptions(to_std_strings(p_names));
-}
 
 void MenuDriver::seed_mod_list(int p_id) {
 	const String dir = root_.is_valid() ? root_->get_root_dir() : String();
@@ -1039,12 +997,21 @@ bool MenuDriver::is_front_options_screen(const String &p_screen) {
 	return opennova::menu::OptionsScreen::is_front_screen(to_std(p_screen));
 }
 
-String MenuDriver::screen_command(const String &p_screen, const String &p_name,
-		bool p_in_mission) const {
-	opennova::menu::MenuCommands commands;
-	commands.wire(runtime_, p_in_mission);
+String MenuDriver::screen_command(const String &p_screen, const String &p_name) const {
 	return String(opennova::menu::menu_command_token(
-			commands.command_of(to_std(p_screen), to_std(p_name))));
+			commands_.command_of(to_std(p_screen), to_std(p_name))));
+}
+
+PackedInt32Array MenuDriver::command_mission_lists() const {
+	PackedInt32Array out;
+	for (const int id : commands_.mission_lists()) out.push_back(id);
+	return out;
+}
+
+PackedInt32Array MenuDriver::command_mod_lists() const {
+	PackedInt32Array out;
+	for (const int id : commands_.mod_lists()) out.push_back(id);
+	return out;
 }
 
 bool MenuDriver::is_player_info_document() const {
@@ -1231,7 +1198,6 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_static_method("MenuDriver", D_METHOD("vehicle_preview_clear_color"),
 			&MenuDriver::vehicle_preview_clear_color);
 	ClassDB::bind_method(D_METHOD("preview_player_info_voice", "db", "voice"), &MenuDriver::preview_player_info_voice);
-	ClassDB::bind_method(D_METHOD("set_mission_controls", "lists", "briefings", "accepts"), &MenuDriver::set_mission_controls);
 	ClassDB::bind_method(D_METHOD("clear_mission_rows"), &MenuDriver::clear_mission_rows);
 	ClassDB::bind_method(D_METHOD("seed_mission_list", "id", "rows"), &MenuDriver::seed_mission_list);
 	ClassDB::bind_method(D_METHOD("select_mission", "id", "row", "fallback"), &MenuDriver::select_mission);
@@ -1244,7 +1210,6 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("activate_single_player_tab", "name"),
 			&MenuDriver::activate_single_player_tab);
 	ClassDB::bind_method(D_METHOD("clear_selected_mission"), &MenuDriver::clear_selected_mission);
-	ClassDB::bind_method(D_METHOD("set_mod_descriptions", "names"), &MenuDriver::set_mod_descriptions);
 	ClassDB::bind_method(D_METHOD("seed_mod_list", "id"), &MenuDriver::seed_mod_list);
 	ClassDB::bind_method(D_METHOD("select_mod", "id", "row"), &MenuDriver::select_mod);
 	ClassDB::bind_method(D_METHOD("mod_list_pick", "id"), &MenuDriver::mod_list_pick);
@@ -1265,11 +1230,28 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_options_surface"), &MenuDriver::is_options_surface);
 	ClassDB::bind_method(D_METHOD("apply_options_policy", "profiles"), &MenuDriver::apply_options_policy);
 	ClassDB::bind_static_method("MenuDriver", D_METHOD("command_names", "set"), &MenuDriver::command_names);
-	ClassDB::bind_method(D_METHOD("screen_command", "screen", "name", "in_mission"),
-			&MenuDriver::screen_command);
-	ClassDB::bind_method(D_METHOD("is_player_info_document"), &MenuDriver::is_player_info_document);
+	ClassDB::bind_method(D_METHOD("wire_commands", "in_mission"), &MenuDriver::wire_commands);
+	ClassDB::bind_method(D_METHOD("screen_command", "screen", "name"), &MenuDriver::screen_command);
+	ClassDB::bind_method(D_METHOD("command_owner"), &MenuDriver::command_owner);
+	ClassDB::bind_method(D_METHOD("command_mission_lists"), &MenuDriver::command_mission_lists);
+	ClassDB::bind_method(D_METHOD("command_mod_lists"), &MenuDriver::command_mod_lists);
 	ClassDB::bind_static_method("MenuDriver", D_METHOD("is_front_options_screen", "screen"),
 			&MenuDriver::is_front_options_screen);
+	BIND_ENUM_CONSTANT(MISSION_SCREEN_NONE);
+	BIND_ENUM_CONSTANT(MISSION_SCREEN_INGAME);
+	BIND_ENUM_CONSTANT(MISSION_SCREEN_WEAPON);
+	BIND_ENUM_CONSTANT(MISSION_SCREEN_COMMAND_MAP);
+	BIND_ENUM_CONSTANT(MISSION_SCREEN_VEHICLE);
+	BIND_ENUM_CONSTANT(MISSION_SCREEN_STAT);
+	BIND_ENUM_CONSTANT(MISSION_SCREEN_DEATH);
+	ClassDB::bind_static_method("MenuDriver", D_METHOD("mission_screen_open", "screen"),
+			&MenuDriver::mission_screen_open);
+	ClassDB::bind_static_method("MenuDriver",
+			D_METHOD("mission_screen_passes_input", "screen", "pass_through_word"),
+			&MenuDriver::mission_screen_passes_input);
+	ClassDB::bind_static_method("MenuDriver",
+			D_METHOD("mission_screen_holds_input", "screen", "pass_through_word"),
+			&MenuDriver::mission_screen_holds_input);
 	ClassDB::bind_method(D_METHOD("activate_options", "profiles", "id"), &MenuDriver::activate_options);
 	ClassDB::bind_method(D_METHOD("arm_options_remap", "id", "row"), &MenuDriver::arm_options_remap);
 	ClassDB::bind_method(D_METHOD("press_options_row", "id", "row"),
@@ -1314,8 +1296,8 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_current_screen"), &MenuDriver::get_current_screen);
 	ClassDB::bind_method(D_METHOD("get_applied_pointer"), &MenuDriver::get_applied_pointer);
 	ClassDB::bind_method(D_METHOD("widget_screen_of", "id"), &MenuDriver::widget_screen_of);
-	ClassDB::bind_method(D_METHOD("open_document", "doc", "root", "style", "override_text",
-								 "menu_file", "target_screen"),
+	ClassDB::bind_method(D_METHOD("open_document", "doc", "root", "style", "menu_file",
+								 "target_screen"),
 			&MenuDriver::open_document, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("document"), &MenuDriver::document);
 	ClassDB::bind_method(D_METHOD("get_screen_names"), &MenuDriver::get_screen_names);

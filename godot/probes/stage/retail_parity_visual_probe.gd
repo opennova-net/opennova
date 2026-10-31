@@ -182,8 +182,8 @@ end
 	return true
 
 
-# The overlay's read of the sim's attach labels through the play camera
-# (at the probe player, looking down +X so every candidate projects).
+# The overlay's read of the sim's attach labels through a view block at
+# mission (-2, 0, 0) looking down +X, so every candidate projects.
 class AttachLabels:
 	var count := 0
 	var selected := -1
@@ -191,9 +191,8 @@ class AttachLabels:
 
 func _attach_labels(sim: Simulation) -> AttachLabels:
 	var hud := HudOverlay.new()
-	hud.set_attach_labels(
-			Transform3D(Basis.looking_at(Vector3.RIGHT), Vector3(-2.0, 0.0, 0.0)),
-			Projection.create_perspective(70.0, 1.0, 0.05, 4000.0), null, sim)
+	hud.set_view_block(Vector3(-2.0, 0.0, 0.0), 0, 0, 0, 90.0)
+	hud.set_attach_labels(null, sim)
 	var read := AttachLabels.new()
 	read.count = hud.get_attach_label_count()
 	read.selected = hud.get_attach_label_selected()
@@ -220,20 +219,16 @@ func _build_debris_stage() -> bool:
 				0.85 + row * 1.33, -2.48)
 		var foliage := index in [1, 7, 12, 16]
 		var direction := (point - blast).normalized()
-		effects.append(DestructionEffectEvent.make(
-				"Effect_TreeFoliageExp" if foliage else "Effect_TreeWoodExp", point,
-				0, direction))
+		effects.append(["Effect_TreeFoliageExp" if foliage else "Effect_TreeWoodExp",
+				point, direction])
 		_add_centroid_marker(point,
 				Color("57e58c") if foliage else Color("ffb55e"))
 		_add_direction_line(point, point + direction * 1.25,
 				Color("8fffb0") if foliage else Color("ffd39a"))
-	# The destruction pass's data leg (EntityPresenter's member) over the
-	# stage's effect world: the resolved rows spawn verbatim.
-	var presenter := EntityPresenter.new()
-	_scene.add_child(presenter)
-	presenter.setup_passes(null, null, null, null, _fx, null, null, null)
-	presenter.present_destruction_drained(
-			DestructionDrain.make([], effects, effects.size()), [])
+	# The resolved rows spawn verbatim as the transient submits the engine's
+	# destruction rows make (world::DestructionEmitters).
+	for row in effects:
+		_fx.spawn_effect(row[0], row[1], row[2])
 	_add_legend([
 		{"color": Color("57e58c"), "text": "material 17  →  Effect_TreeFoliageExp"},
 		{"color": Color("ffb55e"), "text": "all other materials  →  Effect_TreeWoodExp"},

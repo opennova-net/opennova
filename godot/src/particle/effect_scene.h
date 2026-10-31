@@ -8,7 +8,6 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
-#include <godot_cpp/variant/plane.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -16,6 +15,7 @@
 #include <vector>
 
 #include <runtime/particle/effect_scene.h>
+#include <runtime/renderer/view_frustum.h>
 
 #include "particle/particle_file.h"
 
@@ -24,24 +24,6 @@ namespace godot {
 class EffectLoadReport;
 class EffectSpawnReceipt;
 class EffectSpawnRequest;
-
-// A reusable batch of owner pose updates for EffectScene::apply_owner_poses:
-// EffectWorld clears and refills one per frame, so the per-frame path
-// allocates nothing once warm. add_absent retires the owner (every group
-// following it detaches). A plain C++ scratch, not a ClassDB class.
-class EffectOwnerPoseBatch {
-public:
-	void clear() { updates_.clear(); }
-	void add(int64_t p_owner_token, const Transform3D &p_transform);
-	void add_absent(int64_t p_owner_token);
-	int get_count() const { return static_cast<int>(updates_.size()); }
-	const std::vector<opennova::particle::EffectOwnerPoseUpdate> &updates() const {
-		return updates_;
-	}
-
-private:
-	std::vector<opennova::particle::EffectOwnerPoseUpdate> updates_;
-};
 
 // Godot adapter for the portable EffectScene module. This class owns no
 // Nodes and performs no simulation or rendering of its own: it only converts
@@ -117,10 +99,6 @@ public:
 	// answers an invalid-request receipt naming the failing field.
 	Ref<EffectSpawnReceipt> spawn(const Ref<EffectSpawnRequest> &p_request);
 
-	// Applies every update in the batch; an absent owner detaches all of its
-	// following groups. The non-in-place form also refreshes the snapshot.
-	void apply_owner_poses_in_place(const EffectOwnerPoseBatch &p_batch);
-	void apply_owner_poses(const EffectOwnerPoseBatch &p_batch);
 	void detach(int64_t p_group_id);
 	void detach_slot(int64_t p_slot_token);
 	// The hard destroy (engine particle::EffectScene::destroy_slot): the group goes now.
@@ -142,11 +120,10 @@ public:
 			double p_delta_seconds, const opennova::particle::ParticleForceField *forces);
 	// The two per-advance environment inputs retail reads off globals: the
 	// mission wind (GLOBALWIND drift, effect-frame units per second) and the
-	// camera's clip planes (the NOVISNOUPDATE gate). `p_inside_probe` is a
-	// point known to be inside the view (the planes are re-oriented so it is);
+	// camera's view frustum (the NOVISNOUPDATE gate; renderer/view_frustum.h);
 	// clearing the frustum advances every emitter.
 	void set_global_wind(const Vector3 &p_wind);
-	void set_view_frustum(const TypedArray<Plane> &p_planes, const Vector3 &p_inside_probe);
+	void set_view_frustum(const opennova::renderer::ViewFrustum &p_frustum);
 	// The building section masks the group gate reads on the next advances
 	// (particle::EffectSectionMasks, borrowed); null leaves every group visible.
 	void set_section_masks(const opennova::particle::EffectSectionMasks *p_masks) {

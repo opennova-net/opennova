@@ -3,13 +3,13 @@ extends GutTest
 # The destruction present pass (EntityPresenter's DestructionPresenter member,
 # ADR 0043 d9) on the typed surfaces (ADR 0034): event/piece rows are pure
 # data through the public present_destruction_drained data leg (production
-# present_passes() drains the typed Simulation), the collaborators are a real
-# MissionObjectPlacer plus a REAL EffectWorld over an in-memory catalog and a
-# REAL ItemEffectDirector (ADR 0043 rule 11: the group report, the anchor
-# registry and the owner-pose resolve are the read seams), the entity index is
-# a real EntityIndex over real ObjectModels, the runtime-only resolver is the
-# presenter's own wire registry with injected nodes, and the item database is
-# the real fixture items.def (item 1291 = the dune buggy with husk Dbuggy1X).
+# present_passes() drains the typed Simulation), the collaborator is a real
+# MissionObjectPlacer, the entity index is a real EntityIndex over real
+# ObjectModels, the runtime-only resolver is the presenter's own wire registry
+# with injected nodes, and the item database is the real fixture items.def
+# (item 1291 = the dune buggy with husk Dbuggy1X). The effect rows, the wreck
+# banks and the piece trails are the engine's (world::DestructionEmitters; ctest
+# destruction_emitters).
 #
 # The live settling-pose follow (a REAL sim's present-effect state feeding the
 # node-less graft) is exercised by the real-sim test at the bottom; the
@@ -21,13 +21,6 @@ extends GutTest
 const BUGGY_ITEM_ID := 1291  # fixture items.def 101291, husk Dbuggy1X
 const POSITION_EPS := Vector3(0.001, 0.001, 0.001)
 
-# Every effect name the drained rows below spawn: the piece-type trails, the
-# wreck families, and the resolved debris/glass transients.
-const CATALOG_EFFECTS: PackedStringArray = [
-	'Effect_VexpM', 'Effect_VexpS', 'Effect_VehExplode',
-	'Effect_Family1', 'Effect_Family2', 'Effect_Family3', 'Effect_Transient',
-	'Effect_TreeFoliageExp', 'Effect_BldGlassExp']
-
 static var _item_db: ItemDatabase = null
 
 
@@ -38,40 +31,21 @@ func before_all() -> void:
 			'the fixture items.def loads (101291 carries husk Dbuggy1X)')
 
 
-# One synthetic in-memory particle catalog authoring every effect the rows
-# name (the effect_world_test recipe): one FOREVEREMIT definition shared by
-# one effect per name, so the real EffectWorld interns and spawns them without
-# a resource root and an owned group stays live until its owner is retired.
-func _catalog_file(effect_names: PackedStringArray) -> ParticleFile:
-	return ParticleFixture.catalog(self, "wreck dots",
-			"emit_dur = 0.1;\nemit_rate = 50;\nemit_burst = 4;\nage = 0.2;\nalpha = 1;\nscale = 1;\nflags = FOREVEREMIT;\n", effect_names)
-
-
-# Every unowned (transient) group report row.
-func _transient_rows(fx: EffectWorld) -> Array:
-	var out: Array = []
-	for row_v in fx.get_debug_group_report():
-		var row := row_v as EffectGroupReport
-		if row.owner_key == null:
-			out.append(row)
-	return out
-
-
 # A REAL EntityPresenter with its destruction pass wired: `sim` (nullable) is
 # the live pose source, `container` hosts the node-less husk grafts, `index`
-# resolves authored entities, `placer`/`item_db` build the husk models,
-# `anchors` is the owner-anchor registry, `fx` the effect world; `wire_nodes`
-# are injected per-handle avatars for the runtime-only resolve (native
-# methods cannot be intercepted from GDScript; register_wire_node is the seam).
+# resolves authored entities, `placer`/`item_db` build the husk models;
+# `wire_nodes` are injected per-handle avatars for the runtime-only resolve
+# (native methods cannot be intercepted from GDScript; register_wire_node is
+# the seam).
 func _make_presenter(sim: Simulation, container: Node3D, index: EntityIndex,
-		placer: MissionObjectPlacer, item_db: ItemDatabase, anchors: ItemEffectDirector,
-		fx: EffectWorld, wire_nodes: Dictionary = {}) -> EntityPresenter:
+		placer: MissionObjectPlacer, item_db: ItemDatabase,
+		wire_nodes: Dictionary = {}) -> EntityPresenter:
 	var presenter := EntityPresenter.new()
 	add_child_autofree(presenter)
 	presenter.setup(sim, index, placer)
 	for handle in wire_nodes:
 		presenter.register_wire_node(int(handle), wire_nodes[handle])
-	presenter.setup_passes(container, item_db, null, null, fx, null, null, anchors)
+	presenter.setup_passes(container, item_db, null, null, null, null, null)
 	return presenter
 
 
@@ -120,94 +94,6 @@ func _entry(model: ObjectModel, bms_id: int, kind: int = -1,
 	return model
 
 
-func _piece(slot: int, generation: int, type_index: int, pos: Vector3,
-		settled: bool = false) -> DeathPieceRow:
-	# The rows resolve the type's trail through the ONE native table
-	# (world/destruction death_piece_trail_effect, S12b): types 1 and 2 of
-	# these tests author Effect_VexpM / Effect_VexpS, type 0 none
-	# [orig: g_DeathPieceTypes @ 0x8404f0 +0x2C].
-	return DeathPieceRow.make(slot, generation, type_index, pos, settled)
-
-
-func _make_pass(fx: EffectWorld, anchors: ItemEffectDirector) -> EntityPresenter:
-	return _make_presenter(null, null, null, null, null, anchors, fx)
-
-
-# Ring-slot lifecycle regressions. A reused ring slot destroys its trail outright, its particles
-# with it, before the new piece's (engine world/destruction DeathPieceSim::alloc carries the
-# witness): the old incarnation leaves no draining group behind.
-func test_active_slot_reuse_replaces_the_presented_incarnation() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
-	var presenter := _make_pass(fx, anchors)
-	var key := 'piece:7'
-	presenter.present_destruction_drained(null, [_piece(7, 11, 1, Vector3(1, 2, 3))])
-	var first := PresentPassFixture.live_owned_row(fx, key)
-	assert_not_null(first, 'a new piece spawns its trail as one owned group')
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1)
-	assert_eq(first.name, 'Effect_VexpM')
-	var first_id := int(first.id)
-	presenter.present_destruction_drained(null, [_piece(7, 11, 1, Vector3(4, 5, 6))])
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1, 'the same generation never respawns')
-	assert_eq(anchors.resolve_owner_transform(key), Vector3(4, 5, 6))
-	fx.advance_fixed_tick(0.0)
-	assert_almost_eq(PresentPassFixture.emitter_position(PresentPassFixture.live_owned_row(fx, key)), Vector3(4, 5, 6),
-			POSITION_EPS, 'the presented incarnation follows the live piece pose')
-	presenter.present_destruction_drained(null, [_piece(7, 12, 2, Vector3(8, 9, 10))])
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1, 'a new generation spawns a fresh incarnation')
-	var replacement := PresentPassFixture.live_owned_row(fx, key)
-	assert_not_null(replacement)
-	assert_eq(replacement.name, 'Effect_VexpS')
-	assert_ne(int(replacement.id), first_id)
-	assert_null(PresentPassFixture.row_by_id(fx, first_id),
-			'the replaced incarnation is destroyed outright, never re-posed nor drained')
-	assert_eq(anchors.resolve_owner_transform(key), Vector3(8, 9, 10))
-	presenter.teardown()
-
-
-func test_slot_reuse_to_a_no_trail_type_detaches_the_old_owner() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
-	var presenter := _make_pass(fx, anchors)
-	var key := 'piece:3'
-	presenter.present_destruction_drained(null, [_piece(3, 30, 1, Vector3(2, 3, 4))])
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1)
-	assert_true(anchors.has_effect_anchor(key))
-	presenter.present_destruction_drained(null, [_piece(3, 31, 0, Vector3(8, 8, 8))])
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 0,
-			'the reused slot destroys the old trail outright, and a no-trail type spawns nothing')
-	assert_false(anchors.has_effect_anchor(key), 'the outgoing owner retires its anchor')
-	fx.advance_fixed_tick(0.0)
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 0,
-			'nothing rides the reused slot')
-	presenter.teardown()
-
-
-func test_settled_slot_reuse_replaces_the_presented_incarnation() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
-	var presenter := _make_pass(fx, anchors)
-	var key := 'piece:13'
-	presenter.present_destruction_drained(null, [_piece(13, 20, 1, Vector3(1, 4, 2))])
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1)
-	var first_id := int(PresentPassFixture.live_owned_row(fx, key).id)
-	presenter.present_destruction_drained(null, [_piece(13, 20, 1, Vector3(1, 0, 2), true)])
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1, 'settling never respawns the incarnation')
-	assert_eq(anchors.resolve_owner_transform(key), Vector3(1, 0, 2))
-	fx.advance_fixed_tick(0.0)
-	assert_almost_eq(PresentPassFixture.emitter_position(PresentPassFixture.live_owned_row(fx, key)), Vector3(1, 0, 2),
-			POSITION_EPS, 'the settled piece keeps presenting at its rest pose')
-	presenter.present_destruction_drained(null, [_piece(13, 21, 2, Vector3(9, 3, 5))])
-	assert_eq(PresentPassFixture.owned_rows(fx, key).size(), 1)
-	var replacement := PresentPassFixture.live_owned_row(fx, key)
-	assert_not_null(replacement)
-	assert_eq(replacement.name, 'Effect_VexpS')
-	assert_null(PresentPassFixture.row_by_id(fx, first_id),
-			'the settled incarnation is destroyed outright, not revived')
-	assert_eq(anchors.resolve_owner_transform(key), Vector3(9, 3, 5))
-	presenter.teardown()
-
-
 # The death-piece draw: a piece row builds its own model of the wreck's piece
 # graphic (huskfinal first, the fixture buggy authors only its husk), hidden
 # until the frame draws it; the draw shows ONE section with every other section
@@ -217,12 +103,10 @@ func test_settled_slot_reuse_replaces_the_presented_incarnation() -> void:
 # EulerScale(pose) * T(-centre) @ 0x57b6f6..0x57b759, the collapse
 # @ 0x57b7d4..0x57b7e7).
 func test_piece_draw_shows_one_section_at_the_piece_position() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var presenter := _make_presenter(null, container, _index_of([]), _husk_placer(),
-			_item_db, anchors, fx)
+			_item_db)
 	var pos := Vector3(12, 3, -7)
 	presenter.present_destruction_drained(null, [DeathPieceRow.make(9, 40, 1, pos, false,
 			BUGGY_ITEM_ID, 1)])
@@ -267,9 +151,7 @@ func test_piece_draw_shows_one_section_at_the_piece_position() -> void:
 	presenter.teardown()
 
 
-func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
+func test_reset_runtime_state_restores_individual_visuals() -> void:
 	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -286,24 +168,16 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	# A non-default occlusion mask the husk must start with (simulation/husk_swap.cpp).
 	intact.set_occlusion_section_mask(0x5, 0x1)
 	var index := _index_of([_entry(intact, 41)])
-	var events := DestructionDrain.make(
-			[HuskSwapEvent.make(41, BUGGY_ITEM_ID)],
-			[DestructionEffectEvent.make('Effect_VehExplode', Vector3(3, 4, 5), 2, Vector3.ZERO, 91, 41)])
-	var presenter := _make_presenter(null, container, index, placer, _item_db, anchors, fx)
+	var events := DestructionDrain.make([HuskSwapEvent.make(41, BUGGY_ITEM_ID)])
+	var presenter := _make_presenter(null, container, index, placer, _item_db)
 
-	presenter.present_destruction_drained(events, [_piece(5, 70, 1, Vector3(6, 7, 8))])
+	presenter.present_destruction_drained(events, [])
 
 	assert_false(originally_visible.visible)
 	assert_false(originally_hidden.visible)
 	assert_false(static_caster.visible,
 			"the intact individual caster follows the visible model into the husk swap")
 	assert_eq(_husk_models(self).size(), 1)
-	assert_true(anchors.has_effect_anchor('wreck:91:2'))
-	assert_true(anchors.has_effect_anchor('piece:5'))
-	assert_not_null(PresentPassFixture.live_owned_row(fx, 'wreck:91:2'),
-			'the fire family spawned its owned wreck group')
-	assert_not_null(PresentPassFixture.live_owned_row(fx, 'piece:5'),
-			'the piece spawned its owned trail group')
 	var graft: ObjectModel = _husk_models(self)[0]
 	assert_eq(
 		graft.get_occlusion_section_mask(),
@@ -322,57 +196,15 @@ func test_reset_runtime_state_restores_individual_visuals_and_retires_anchors() 
 	assert_true(static_caster.visible,
 			"reset restores the intact caster with its visible model")
 	assert_true(graft.is_queued_for_deletion())
-	assert_false(anchors.has_effect_anchor('wreck:91:2'), 'reset retires the wreck anchor')
-	assert_false(anchors.has_effect_anchor('piece:5'), 'reset retires the piece anchor')
-	# Retired anchors resolve nothing: the next fixed-tick owner sync detaches
-	# both owned groups from the prior incarnation.
-	fx.advance_fixed_tick(0.0)
-	assert_null(PresentPassFixture.live_owned_row(fx, 'wreck:91:2'),
-			'the retired wreck group no longer follows an owner')
-	assert_null(PresentPassFixture.live_owned_row(fx, 'piece:5'),
-			'the retired piece group no longer follows an owner')
 	# The old call-count ledger has no public read; the idempotence pin is that
 	# a second reset leaves the restored state exactly as it was.
 	presenter.reset_wire_runtime_state()
 	assert_true(originally_visible.visible, 'reset is public and idempotent')
 	assert_false(originally_hidden.visible)
 	assert_true(static_caster.visible)
-	assert_false(anchors.has_effect_anchor('wreck:91:2'))
-	assert_false(anchors.has_effect_anchor('piece:5'))
-
-
-func test_reset_wire_runtime_state_clears_the_wreck_fire_registry() -> void:
-	# The Stop -> Play boundary reaches the destruction pass through the
-	# presenter's one reset (the restart signal's single connect): the burning
-	# wreck registry the crackle updates read through has_active_wreck_fire
-	# empties with the anchors.
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
-	var container := Node3D.new()
-	add_child_autofree(container)
-	var wreck := ObjectModel.new()
-	container.add_child(wreck)
-	var presenter := _make_presenter(null, container, _index_of([]), _husk_placer(),
-			_item_db, anchors, fx, { 0x1004: wreck })
-	var fire_key := 'wreck:wire:4100:2'
-	presenter.present_destruction_drained(DestructionDrain.make([], [
-			DestructionEffectEvent.make('Effect_Family2', Vector3(1, 1, 1),
-					2, Vector3.ZERO, 0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE)]), [])
-	assert_true(presenter.has_active_wreck_fire(fire_key),
-			'the presented fire family enters the wreck crackle set')
-	assert_true(anchors.has_effect_anchor(fire_key))
-
-	presenter.reset_wire_runtime_state()
-
-	assert_false(presenter.has_active_wreck_fire(fire_key),
-			'reset empties the wreck-fire registry')
-	assert_false(anchors.has_effect_anchor(fire_key), 'reset retires the wreck anchor')
-	presenter.teardown()
 
 
 func test_individual_husk_keeps_the_intact_models_mirror_population() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
 	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -381,7 +213,7 @@ func test_individual_husk_keeps_the_intact_models_mirror_population() -> void:
 	container.add_child(intact)
 	var index := _index_of([_entry(intact, 41)])
 	var events := DestructionDrain.make([HuskSwapEvent.make(41, BUGGY_ITEM_ID)])
-	var presenter := _make_presenter(null, container, index, placer, _item_db, anchors, fx)
+	var presenter := _make_presenter(null, container, index, placer, _item_db)
 
 	presenter.present_destruction_drained(events, [])
 
@@ -426,7 +258,7 @@ func test_husk_swap_does_not_rescan_or_rebind_authored_lght() -> void:
 			"the intact graphic contributes its one authored LGHT")
 
 	var presenter := _make_presenter(null, container, _index_of([_entry(intact, 41)]),
-			_husk_placer(), _item_db, ItemEffectDirector.new(), null)
+			_husk_placer(), _item_db)
 	presenter.present_destruction_drained(DestructionDrain.make([HuskSwapEvent.make(41, BUGGY_ITEM_ID)]), [])
 	assert_eq(_husk_models(world).size(), 1,
 			"the production destruction pass built the authored husk graft")
@@ -438,22 +270,26 @@ func test_husk_swap_does_not_rescan_or_rebind_authored_lght() -> void:
 	presenter.teardown()
 	intact.queue_free()
 	await get_tree().process_frame
+	assert_eq(director.get_report().live, 1,
+			"a scene node leaving is no entity destruction: the lease is the entity's")
+	# The entity's destruction (the presenter's wire retirement, routed by the
+	# world) clears exactly the lease its cached word holds
+	# (renderer::LightSpawner::destroy_entity) [orig: Entity_Destroy @0x43e903..0x43e916].
+	director.on_wire_entity_destroyed(73)
 	assert_eq(director.get_report().live, 0,
-			"actual entity retirement clears its one cached EffectWorld handle")
+			"the entity's destruction clears its one cached light lease")
 	world.queue_free()
 	await get_tree().process_frame
 
 
 func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
 	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var placed := Transform3D(Basis.IDENTITY, Vector3(9, 8, 7))
 	placer.register_static_instance(77, 'StaticProp', 0, placed, true, true)
 	var events := DestructionDrain.make([HuskSwapEvent.make(77, BUGGY_ITEM_ID)])
-	var presenter := _make_presenter(null, container, _index_of([]), placer, _item_db, anchors, fx)
+	var presenter := _make_presenter(null, container, _index_of([]), placer, _item_db)
 
 	var revision := placer.get_static_terrain_shadow_source_revision()
 	presenter.present_destruction_drained(events, [])
@@ -488,8 +324,6 @@ func test_reset_runtime_state_restores_batched_static_and_removes_husk_graft() -
 
 
 func test_failed_individual_husk_build_keeps_the_intact_visual_visible() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
 	var placer := _husk_placer(false)
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -499,7 +333,7 @@ func test_failed_individual_husk_build_keeps_the_intact_visual_visible() -> void
 	intact.add_child(visual)
 	var index := _index_of([_entry(intact, 41)])
 	var events := DestructionDrain.make([HuskSwapEvent.make(41, BUGGY_ITEM_ID)])
-	var presenter := _make_presenter(null, container, index, placer, _item_db, anchors, fx)
+	var presenter := _make_presenter(null, container, index, placer, _item_db)
 
 	presenter.present_destruction_drained(events, [])
 
@@ -519,8 +353,6 @@ const BARREL_ITEM_ID := 5002  # fixture items.def 105002: husk Barrel1X, huskfin
 # dropping the pending draw. A death of a promoted entity grafts the final husk
 # at once.
 func test_final_husk_overlay_and_promotion_regraft() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
 	var placer := MissionObjectPlacer.new()
 	var husk_data := ObjectData.new()
 	assert_eq(husk_data.open_file(ProjectSettings.globalize_path(HUSK_MODEL_3DI)), OK)
@@ -533,7 +365,7 @@ func test_final_husk_overlay_and_promotion_regraft() -> void:
 	var intact := ObjectModel.new()
 	container.add_child(intact)
 	var index := _index_of([_entry(intact, 41)])
-	var presenter := _make_presenter(null, container, index, placer, _item_db, anchors, fx)
+	var presenter := _make_presenter(null, container, index, placer, _item_db)
 	var none := Simulation.SPAWN_ORIGIN_NONE
 	var no_handle := 0xFFFF
 
@@ -581,16 +413,13 @@ func _final_overlays(root: Node) -> Array:
 
 
 func test_final_husk_overlay_draws_in_the_reflection_with_its_entity() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var intact := ObjectModel.new()
 	intact.mirror_reflected = true
 	container.add_child(intact)
 	var index := _index_of([_entry(intact, 41)])
-	var presenter := _make_presenter(null, container, index, _barrel_placer(), _item_db,
-			anchors, fx)
+	var presenter := _make_presenter(null, container, index, _barrel_placer(), _item_db)
 	var none := Simulation.SPAWN_ORIGIN_NONE
 
 	presenter.present_destruction_drained(
@@ -614,13 +443,10 @@ func test_final_husk_overlay_draws_in_the_reflection_with_its_entity() -> void:
 
 
 func test_final_husk_overlay_waits_for_a_node_that_has_not_materialized() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var index := _index_of([])
-	var presenter := _make_presenter(null, container, index, _barrel_placer(), _item_db,
-			anchors, fx)
+	var presenter := _make_presenter(null, container, index, _barrel_placer(), _item_db)
 	var none := Simulation.SPAWN_ORIGIN_NONE
 	var wire := 0x1006
 	var husk := HuskSwapEvent.make(0, BARREL_ITEM_ID, none, wire)
@@ -643,15 +469,13 @@ func test_final_husk_overlay_waits_for_a_node_that_has_not_materialized() -> voi
 
 
 func test_failed_batched_husk_build_does_not_carve_the_static_instance() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
 	var placer := _husk_placer(false)
 	placer.register_static_instance(77, 'StaticProp', 0,
 			Transform3D(Basis.IDENTITY, Vector3(9, 8, 7)), false)
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var events := DestructionDrain.make([HuskSwapEvent.make(77, BUGGY_ITEM_ID)])
-	var presenter := _make_presenter(null, container, _index_of([]), placer, _item_db, anchors, fx)
+	var presenter := _make_presenter(null, container, _index_of([]), placer, _item_db)
 
 	presenter.present_destruction_drained(events, [])
 
@@ -664,8 +488,6 @@ func test_failed_batched_husk_build_does_not_carve_the_static_instance() -> void
 
 
 func test_zero_bms_husks_use_distinct_spawn_origins_for_identity_and_lookup() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
 	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -684,7 +506,7 @@ func test_zero_bms_husks_use_distinct_spawn_origins_for_identity_and_lookup() ->
 			[
 					HuskSwapEvent.make(0, BUGGY_ITEM_ID, first_origin),
 					HuskSwapEvent.make(0, BUGGY_ITEM_ID, second_origin)])
-	var presenter := _make_presenter(null, container, index, placer, _item_db, anchors, fx)
+	var presenter := _make_presenter(null, container, index, placer, _item_db)
 
 	presenter.present_destruction_drained(events, [])
 
@@ -703,8 +525,6 @@ func test_zero_bms_husks_use_distinct_spawn_origins_for_identity_and_lookup() ->
 
 
 func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
 	var placer := _husk_placer()
 	var container := Node3D.new()
 	add_child_autofree(container)
@@ -723,7 +543,7 @@ func test_synthetic_husks_use_distinct_wire_handles_for_identity_and_lookup() ->
 			[
 					HuskSwapEvent.make(0, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 0x1004),
 					HuskSwapEvent.make(0, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 0x1005)])
-	var presenter := _make_presenter(null, container, index, placer, _item_db, anchors, fx,
+	var presenter := _make_presenter(null, container, index, placer, _item_db,
 			{ 0x1004: first, 0x1005: second })
 
 	presenter.present_destruction_drained(events, [])
@@ -750,8 +570,7 @@ func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> vo
 	add_child_autofree(authored_zero)
 	var index := _index_of([_entry(authored_zero, 0, 255, 16777215)])
 	var events := DestructionDrain.make([HuskSwapEvent.make(0, BUGGY_ITEM_ID, Simulation.SPAWN_ORIGIN_NONE, 0x1004)])
-	var presenter := _make_presenter(null, container, index, placer, _item_db,
-			ItemEffectDirector.new(), null)
+	var presenter := _make_presenter(null, container, index, placer, _item_db)
 
 	presenter.present_destruction_drained(events, [])
 
@@ -762,112 +581,15 @@ func test_missing_synthetic_husk_node_never_falls_back_to_static_zero_id() -> vo
 	assert_eq(presenter.get_destruction_present_stats().no_husk, 1)
 
 
-func test_synthetic_wreck_families_use_distinct_moving_wire_anchors() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
-	var container := Node3D.new()
-	add_child_autofree(container)
-	var first := ObjectModel.new()
-	var second := ObjectModel.new()
-	container.add_child(first)
-	container.add_child(second)
-	first.position = Vector3(1, 2, 3)
-	second.position = Vector3(7, 8, 9)
-	var effects: Array = []
-	for wire_handle in [0x1004, 0x1005]:
-		for family in [1, 2, 3]:
-			effects.append(DestructionEffectEvent.make(
-					'Effect_Family%d' % family, Vector3(100, 100, 100),
-					family, Vector3.ZERO, 0, 0, wire_handle, Simulation.SPAWN_ORIGIN_NONE))
-	# Even when a payload happens to carry a valid dynamic identity, family zero
-	# remains the one-shot transient path.
-	effects.append(DestructionEffectEvent.make(
-			'Effect_Transient', Vector3(20, 30, 40),
-			0, Vector3.ZERO, 0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE))
-	var presenter := _make_presenter(null, container, _index_of([]), _husk_placer(),
-			_item_db, anchors, fx, { 0x1004: first, 0x1005: second })
-
-	presenter.present_destruction_drained(DestructionDrain.make([], effects), [])
-
-	var owned := 0
-	for row_v in fx.get_debug_group_report():
-		if (row_v as EffectGroupReport).owner_key != null:
-			owned += 1
-	assert_eq(owned, 6,
-			'all attached death/fire/other banks stay owned for zero-net children')
-	var transients := _transient_rows(fx)
-	assert_eq(transients.size(), 1, 'family-zero effects remain transient')
-	if transients.size() == 1:
-		assert_eq((transients[0] as EffectGroupReport).name, 'Effect_Transient')
-		assert_almost_eq(PresentPassFixture.emitter_position(transients[0]), Vector3(20, 30, 40), POSITION_EPS)
-	for wire_handle in [0x1004, 0x1005]:
-		var node: Node3D = presenter.resolve_wire_handle(wire_handle)
-		for family in [1, 2, 3]:
-			var key := 'wreck:wire:%d:%d' % [wire_handle, family]
-			assert_true(anchors.has_effect_anchor(key),
-					'each sibling/family pair owns a distinct effect group')
-			assert_not_null(PresentPassFixture.live_owned_row(fx, key),
-					'%s holds its own live owned group' % key)
-			assert_eq(anchors.resolve_owner_transform(key), node.global_transform)
-		var fire_key := 'wreck:wire:%d:2' % wire_handle
-		assert_true(presenter.has_active_wreck_fire(fire_key),
-				'family 2 enters the per-owner wreck crackle set')
-	first.position = Vector3(-3, 4, 5)
-	second.position = Vector3(12, -2, 6)
-	assert_eq(anchors.resolve_owner_transform('wreck:wire:4100:1'), first.global_transform)
-	assert_eq(anchors.resolve_owner_transform('wreck:wire:4101:3'), second.global_transform,
-			'owned effects follow the live WirePresent nodes after they move')
-	# The fixed-tick owner sync carries the moved node poses into the scene.
-	fx.advance_fixed_tick(0.0)
-	assert_almost_eq(PresentPassFixture.emitter_position(PresentPassFixture.live_owned_row(fx, 'wreck:wire:4100:1')),
-			first.global_position, POSITION_EPS,
-			'the first sibling group rides its moved wire node')
-	assert_almost_eq(PresentPassFixture.emitter_position(PresentPassFixture.live_owned_row(fx, 'wreck:wire:4101:3')),
-			second.global_position, POSITION_EPS,
-			'the second sibling group rides its own moved wire node')
-	presenter.teardown()
-
-
-func test_wreck_bank_points_follow_rotation_and_release_independently() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
-	var container := Node3D.new()
-	add_child_autofree(container)
-	var node := ObjectModel.new()
-	container.add_child(node)
-	node.position = Vector3(4, 5, 6)
-	var presenter := _make_presenter(null, container, _index_of([]), _husk_placer(),
-			_item_db, anchors, fx, {0x1004: node})
-	var effects: Array = []
-	for slot in [0, 1]:
-		effects.append(DestructionEffectEvent.make('Effect_Family2', Vector3.ZERO,
-				2, Vector3.UP, 0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE, false,
-				slot, Vector3(2 * slot - 1, 0, 0)))
-	presenter.present_destruction_drained(DestructionDrain.make([], effects), [])
-	node.rotate_y(PI / 2)
-	node.position += Vector3(3, 0, 0)
-	fx.advance_fixed_tick(0.0)
-	for slot in [0, 1]:
-		var key := 'wreck:wire:4100:2' + (':1' if slot else '')
-		assert_almost_eq(PresentPassFixture.emitter_position(PresentPassFixture.live_owned_row(fx, key)),
-				node.global_transform * Vector3(2 * slot - 1, 0, 0), POSITION_EPS)
-	var release := DestructionEffectEvent.make('', Vector3.ZERO, 2, Vector3.ZERO,
-			0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE, true, 1)
-	presenter.present_destruction_drained(DestructionDrain.make([], [release]), [])
-	assert_false(anchors.has_effect_anchor('wreck:wire:4100:2:1'))
-	assert_true(anchors.has_effect_anchor('wreck:wire:4100:2'))
-	presenter.teardown()
-
-
-func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
+func test_batched_husk_follows_the_live_present_pose() -> void:
 	# The REAL pose chain: an authored building boots into a real Simulation
 	# (through MissionRoot, the production owner), and the node-less batched
-	# husk graft plus its owned wreck anchor land on the sim's authoritative
-	# present-effect pose — the origin-keyed leg — rather than the carved batch
-	# transform. The authored yaw-only entity pose additionally pins the
-	# tilt-retention rule: position comes live, while pitch/roll keep the exact
-	# carved basis (host/listen poses with real pitch/roll take the live-basis
-	# path; peer compact poses are yaw-only by construction).
+	# husk graft lands on the sim's authoritative present-effect pose (the
+	# origin-keyed leg) rather than the carved batch transform. The authored
+	# yaw-only entity pose additionally pins the tilt-retention rule: position
+	# comes live, while pitch/roll keep the exact carved basis (host/listen poses
+	# with real pitch/roll take the live-basis path; peer compact poses are
+	# yaw-only by construction).
 	var mission := MissionData.new()
 	assert_eq(mission.create_default(), OK)
 	# A real organic entity: organics boot without item defs and their live
@@ -894,8 +616,6 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	assert_almost_eq(state[1].x, 0.0, 0.001, 'the authored pose is yaw-only')
 	assert_almost_eq(state[1].z, 0.0, 0.001, 'the authored pose is yaw-only')
 
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
 	var placer := _husk_placer()
 	var authored_rot := Vector3(17, 40, -12)
 	var authored := Transform3D(
@@ -903,12 +623,8 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	placer.register_static_instance(0, 'StaticProp', 0, authored, false)
 	var container := Node3D.new()
 	add_child_autofree(container)
-	var events := DestructionDrain.make(
-			[HuskSwapEvent.make(0, BUGGY_ITEM_ID, spawn_origin)],
-			[DestructionEffectEvent.make(
-					'Effect_VehExplode', Vector3(100, 100, 100),
-					2, Vector3.ZERO, 91, 0, NetProtocol.WIRE_HANDLE_INVALID, spawn_origin)])
-	var presenter := _make_presenter(sim, container, _index_of([]), placer, _item_db, anchors, fx)
+	var events := DestructionDrain.make([HuskSwapEvent.make(0, BUGGY_ITEM_ID, spawn_origin)])
+	var presenter := _make_presenter(sim, container, _index_of([]), placer, _item_db)
 
 	presenter.present_destruction_drained(events, [])
 
@@ -921,132 +637,10 @@ func test_batched_husk_and_wreck_anchor_follow_the_live_present_pose() -> void:
 	var expected := Transform3D(authored.basis, state[0])
 	assert_true(graft.transform.is_equal_approx(expected),
 			'the graft takes the live present origin while keeping the authored tilt')
-	var anchor_pose: Variant = anchors.resolve_owner_transform('wreck:91:2')
-	assert_true(anchor_pose is Transform3D)
-	if anchor_pose is Transform3D:
-		assert_true((anchor_pose as Transform3D).is_equal_approx(expected),
-				'the owned wreck effect resolves the same live present pose')
-	# The fixed-tick owner sync lands the owned group on that pose too.
-	fx.advance_fixed_tick(0.0)
-	assert_almost_eq(PresentPassFixture.emitter_position(PresentPassFixture.live_owned_row(fx, 'wreck:91:2')),
-			expected.origin, POSITION_EPS,
-			'the wreck group emits from the live present origin')
 	presenter.teardown()
 
 
-func test_resolved_debris_and_glass_effects_present_verbatim() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
-	var presenter := _make_pass(fx, anchors)
-
-	presenter.present_destruction_drained(DestructionDrain.make(
-			[],
-			[
-					DestructionEffectEvent.make('Effect_TreeFoliageExp', Vector3.ZERO, 0, Vector3.RIGHT),
-					DestructionEffectEvent.make('Effect_BldGlassExp', Vector3(1, 2, 3), 0, Vector3.UP)],
-			1), [])
-
-	assert_eq(presenter.get_destruction_present_stats().debris_triangles, 1)
-	var transients := _transient_rows(fx)
-	assert_eq(transients.size(), 2)
-	assert_eq(fx.get_debug_group_report().size(), 2, 'both resolved rows spawn unowned transients')
-	if transients.size() == 2:
-		var foliage := transients[0] as EffectGroupReport
-		var glass := transients[1] as EffectGroupReport
-		assert_eq(foliage.name, 'Effect_TreeFoliageExp')
-		assert_almost_eq(PresentPassFixture.emitter_position(foliage), Vector3.ZERO, POSITION_EPS,
-				'world origin is a valid authored triangle centroid')
-		assert_almost_eq(PresentPassFixture.emitter_forward(foliage), Vector3.RIGHT, POSITION_EPS)
-		assert_eq(glass.name, 'Effect_BldGlassExp')
-		assert_almost_eq(PresentPassFixture.emitter_position(glass), Vector3(1, 2, 3), POSITION_EPS)
-		assert_almost_eq(PresentPassFixture.emitter_forward(glass), Vector3.UP, POSITION_EPS)
-	presenter.teardown()
-
-
-# A row's descriptor tag reaches its group: a tagged transient and a tagged
-# wreck family take the building-section gate, untagged rows do not (the
-# engine producers set the tag; runtime/world/destruction.h carries the
-# witness).
-func test_effect_rows_carry_their_section_tag_to_the_group() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
-	var container := Node3D.new()
-	add_child_autofree(container)
-	var node := ObjectModel.new()
-	container.add_child(node)
-	var presenter := _make_presenter(null, container, _index_of([]), _husk_placer(),
-			_item_db, anchors, fx, {0x1004: node})
-	var tagged_transient := DestructionEffectEvent.make('Effect_TreeFoliageExp', Vector3.ZERO,
-			0, Vector3.RIGHT, 0, 0, 0xFFFF, Simulation.SPAWN_ORIGIN_NONE, false, 0,
-			Vector3.ZERO, true)
-	assert_true(tagged_transient.section_tagged, 'the record carries the tag')
-	presenter.present_destruction_drained(DestructionDrain.make([], [
-			tagged_transient,
-			DestructionEffectEvent.make('Effect_BldGlassExp', Vector3(1, 2, 3), 0, Vector3.UP),
-			DestructionEffectEvent.make('Effect_Family2', Vector3.ZERO, 2, Vector3.UP,
-					0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE, false, 0, Vector3.ZERO, true),
-			DestructionEffectEvent.make('Effect_Family3', Vector3.ZERO, 3, Vector3.UP,
-					0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE)]), [])
-	var tags := {}
-	for row_v in fx.get_debug_group_report():
-		var row := row_v as EffectGroupReport
-		tags[row.name] = row.section_tagged
-	assert_eq(tags.size(), 4, 'every row spawned its group')
-	assert_true(bool(tags.get('Effect_TreeFoliageExp', false)), 'tagged transient')
-	assert_false(bool(tags.get('Effect_BldGlassExp', true)), 'untagged transient')
-	assert_true(bool(tags.get('Effect_Family2', false)), 'tagged wreck family')
-	assert_false(bool(tags.get('Effect_Family3', true)), 'untagged wreck family')
-	presenter.teardown()
-
-
-# A positioned slot row (a blast victim's hit emitter) holds its group for the
-# next release only: no anchor follows the victim, so the group stays where it
-# spawned; a later release still stops it (runtime/world/destruction.h
-# spawn_victim_hit_emitter carries the witness).
-func test_positioned_slot_rows_stay_where_they_spawn() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
-	var container := Node3D.new()
-	add_child_autofree(container)
-	var node := ObjectModel.new()
-	container.add_child(node)
-	node.position = Vector3(4, 5, 6)
-	var presenter := _make_presenter(null, container, _index_of([]), _husk_placer(),
-			_item_db, anchors, fx, {0x1004: node})
-	var spawn_at := Vector3(4, 5, 6)
-	presenter.present_destruction_drained(DestructionDrain.make([], [
-			DestructionEffectEvent.make('Effect_Family1', spawn_at, 1, Vector3.DOWN,
-					0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE, false, 0, Vector3.ZERO,
-					true, true)]), [])
-	var key := 'wreck:wire:4100:1'
-	assert_false(anchors.has_effect_anchor(key), 'no anchor follows the victim')
-	assert_false(fx.has_owner_binding(key), 'the group has no owner pose to follow')
-	node.position += Vector3(10, 0, 0)
-	fx.advance_fixed_tick(0.0)
-	var row := _live_row_named(fx, 'Effect_Family1')
-	assert_not_null(row, 'the slot holds a live group')
-	if row != null:
-		assert_true(row.section_tagged, 'the victim tags the group')
-		assert_almost_eq(PresentPassFixture.emitter_position(row), spawn_at, POSITION_EPS,
-				'the group stays at its spawn pose while the victim moves')
-	var release := DestructionEffectEvent.make('', Vector3.ZERO, 1, Vector3.ZERO,
-			0, 0, 0x1004, Simulation.SPAWN_ORIGIN_NONE, true)
-	presenter.present_destruction_drained(DestructionDrain.make([], [release]), [])
-	assert_null(_live_row_named(fx, 'Effect_Family1'), 'the next release stops it')
-	presenter.teardown()
-
-
-func _live_row_named(fx: EffectWorld, effect_name: String) -> EffectGroupReport:
-	for row_v in fx.get_debug_group_report():
-		var row := row_v as EffectGroupReport
-		if row.name == effect_name and not row.detached:
-			return row
-	return null
-
-
-func test_vehicle_respawn_restores_intact_model_and_releases_damage_effects() -> void:
-	var anchors := ItemEffectDirector.new()
-	var fx := PresentPassFixture.make_fx(self, anchors, _catalog_file(CATALOG_EFFECTS))
+func test_vehicle_respawn_restores_intact_model() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var intact := ObjectModel.new()
@@ -1054,21 +648,13 @@ func test_vehicle_respawn_restores_intact_model_and_releases_damage_effects() ->
 	var visual := Node3D.new()
 	intact.add_child(visual)
 	var presenter := _make_presenter(null, container, _index_of([_entry(intact, 41)]),
-			_husk_placer(), _item_db, anchors, fx)
-	var start := DestructionEffectEvent.make('Effect_Family1', Vector3.ZERO, 4,
-			Vector3.ZERO, 91, 41)
+			_husk_placer(), _item_db)
 	presenter.present_destruction_drained(DestructionDrain.make(
-			[HuskSwapEvent.make(41, BUGGY_ITEM_ID)], [start]), [])
+			[HuskSwapEvent.make(41, BUGGY_ITEM_ID)]), [])
 	assert_false(visual.visible)
-	var key := 'wreck:91:4'
-	assert_true(fx.has_owner_binding(key))
-	var stop := DestructionEffectEvent.make('', Vector3.ZERO, 4, Vector3.ZERO,
-			91, 41, 65535, 0, true)
 	var restored := HuskSwapEvent.make(41, BUGGY_ITEM_ID, 4294967295, 65535, true)
-	presenter.present_destruction_drained(DestructionDrain.make([restored], [stop]), [])
+	presenter.present_destruction_drained(DestructionDrain.make([restored]), [])
 	assert_true(visual.visible, 'respawn restores the intact visual')
-	assert_false(anchors.has_effect_anchor(key))
-	assert_false(fx.has_owner_binding(key))
 	presenter.teardown()
 
 
@@ -1078,8 +664,7 @@ func test_retained_husk_pick_retries_and_updates_only_the_husk_section_mask() ->
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var index := EntityIndex.new()
-	var presenter := _make_presenter(sim, container, index, placer, _item_db,
-			ItemEffectDirector.new(), null)
+	var presenter := _make_presenter(sim, container, index, placer, _item_db)
 	presenter.setup_wire(sim, placer, container, index)
 	# The death drain can precede the cold model build.
 	presenter.present_destruction_drained(DestructionDrain.make([
@@ -1164,7 +749,7 @@ func test_placed_wreck_hides_the_flown_off_section_and_the_respawn_draws_every_p
 	add_child_autofree(container)
 	var intact := _sectioned_intact(container)
 	var presenter := _make_presenter(null, container, _index_of([_entry(intact, 41)]),
-			_husk_placer(), _item_db, ItemEffectDirector.new(), null)
+			_husk_placer(), _item_db)
 	var row := PackedFloat32Array()
 	row.resize(Simulation.PF_STRIDE)
 	row[Simulation.PF_TYPE_ID] = BUGGY_ITEM_ID
@@ -1215,8 +800,7 @@ func test_wire_wreck_keeps_the_broken_section_and_the_respawn_draws_every_part()
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var index := EntityIndex.new()
-	var presenter := _make_presenter(sim, container, index, placer, _item_db,
-			ItemEffectDirector.new(), null)
+	var presenter := _make_presenter(sim, container, index, placer, _item_db)
 	presenter.setup_wire(sim, placer, container, index)
 	var intact := _sectioned_intact(container)
 	var ref := EntityRef.make(2, 16777215, 0, BUGGY_ITEM_ID + 100000, 0x2001)
@@ -1282,8 +866,7 @@ func test_wire_husk_pick_reaches_the_swap_on_its_edges() -> void:
 	var container := Node3D.new()
 	add_child_autofree(container)
 	var index := EntityIndex.new()
-	var presenter := _make_presenter(sim, container, index, placer, _item_db,
-			ItemEffectDirector.new(), null)
+	var presenter := _make_presenter(sim, container, index, placer, _item_db)
 	presenter.setup_wire(sim, placer, container, index)
 	var intact := _sectioned_intact(container)
 	var ref := EntityRef.make(2, 16777215, 0, BUGGY_ITEM_ID + 100000, 0x2001)
@@ -1364,7 +947,7 @@ end
 			1.0, 0.001, "the intact static row admits its owned light inside the entity cube")
 	var container := root.get_node("MissionObjects") as Node3D
 	var presenter := _make_presenter(null, container, _index_of([]), placer,
-			db, ItemEffectDirector.new(), null)
+			db)
 	presenter.present_destruction_drained(DestructionDrain.make([
 			HuskSwapEvent.make(bms_id, 5004)]), [])
 	var graft: ObjectModel = _husk_models(world)[0]

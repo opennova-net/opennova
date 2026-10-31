@@ -121,11 +121,6 @@ void Simulation::sync_class_attribute_flags() {
 			runtime_ ? runtime_->charattr_table() : nullptr, net_.charattr_table);
 }
 
-void Simulation::install_character_join_vars() {
-	if (!runtime_ || !net_.join_character_vars_set) return;
-	runtime_->set_character_join_vars(net_.join_character_vars);
-}
-
 void Simulation::install_auto_medic_preference() {
 	if (!runtime_ || !player_.profile_record_set) return;
 	// The record's +1660, raw (engine JoinerConnection::set_auto_medic_preference).
@@ -133,30 +128,16 @@ void Simulation::install_auto_medic_preference() {
 			static_cast<uint32_t>(player_.profile_record.auto_medic_off));
 }
 
-void Simulation::install_expansion_version_root() {
-	if (!runtime_) return;
-	runtime_->set_expansion_version_root(net_.join_expansion_version_root);
-}
-
-void Simulation::install_app_id() {
-	if (!runtime_) return;
-	runtime_->set_app_id(net_.app_id);
-}
-
-void Simulation::install_join_cd_cookie() {
-	if (!runtime_) return;
-	runtime_->set_join_cd_cookie(net_.join_cd_cookie);
-}
-
-void Simulation::install_join_glsvss_request() {
-	if (!runtime_) return;
-	runtime_->set_glsvss_request(net_.join_glsvss_request);
-}
-
-void Simulation::install_join_mission_start() {
-	if (!runtime_) return;
-	runtime_->set_sync_tail_loading(net_.join_sync_tail_loading);
-	runtime_->set_mission_data_loading(net_.join_mission_data_loading);
+opennova::inmatch::JoinerTables Simulation::joiner_tables() const {
+	opennova::inmatch::JoinerTables tables;
+	tables.charattr = &net_.charattr_table;
+	tables.item_catalog = assets_.item_replication_catalog;
+	tables.character_registry =
+			assets_.character_registry_mounted ? &assets_.character_registry : nullptr;
+	if (player_.profile_record_set)
+		tables.auto_medic_off = static_cast<uint32_t>(player_.profile_record.auto_medic_off);
+	tables.connect_log = net_.log_devices != nullptr ? net_.log_devices->logs().connect : nullptr;
+	return tables;
 }
 
 int Simulation::set_character_avatar_database(

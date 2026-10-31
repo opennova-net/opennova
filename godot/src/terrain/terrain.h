@@ -146,8 +146,6 @@ private:
 	// One id per page sweep: each traversal (main or Inset) is its own
 	// PolyTrn frame of the shared page cache.
 	uint64_t page_sweep_id = 0;
-	// The weather's time-set reset count this cache last answered (WeatherState::time_set_resets).
-	uint32_t seen_time_set_resets = 0;
 	void _create_pool_instances(PatchPool &r_pool, const RID &p_material);
 	void _free_pool_instances(PatchPool &r_pool);
 	void _hide_pool(PatchPool &r_pool);
@@ -255,9 +253,6 @@ private:
 	void _on_terrain_changed();
 	void _on_tile_info_changed();
 	Ref<Shader> _load_terrain_shader();
-
-	static void _strip_to_list(const std::vector<uint16_t>& strip,
-	                           PackedInt32Array& out);
 
 
 protected:

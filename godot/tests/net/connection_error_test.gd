@@ -4,18 +4,17 @@ extends GutTest
 # [orig: CNapiNetwork_GetDisconnectReasonString @0x4c7000].
 
 var _saved_gameerr: RtxtStringFile
-var _saved_override: RtxtStringFile
 
 
+# No expansion override table is installed (the engine's rtxt::text_override).
 func before_each() -> void:
 	_saved_gameerr = Strings.get_table(Strings.TABLE_GAMEERR)
-	_saved_override = Strings.get_override_table()
-	Strings.set_override_table(null)
+	RtxtStringFile.clear_text_override()
 
 
 func after_each() -> void:
 	Strings.register_table(Strings.TABLE_GAMEERR, _saved_gameerr)
-	Strings.set_override_table(_saved_override)
+	RtxtStringFile.clear_text_override()
 
 
 func _gameerr() -> RtxtStringFile:
@@ -34,7 +33,7 @@ func test_a_join_refusal_reads_its_gameerr_entry() -> void:
 	var error := ConnectionError.from_fields(7, 0, "", 0, 0, "")
 	assert_true(error.is_set())
 	assert_eq(error.reason_key(), "NCC007")
-	assert_eq(error.reason_text(null, _gameerr()),
+	assert_eq(error.reason_text(_gameerr()),
 			"Your game is incompatible with this server. (NCC007)")
 	assert_true(error.refuses_this_install(),
 			"a game-version refusal cannot be retried on the same server")
@@ -42,7 +41,7 @@ func test_a_join_refusal_reads_its_gameerr_entry() -> void:
 
 func test_a_disconnect_substitutes_its_text() -> void:
 	var error := ConnectionError.from_fields(0, 0, "", 2, 32, "Kicked by admin")
-	assert_eq(error.reason_text(null, _gameerr()), "Kicked by admin (GDC032)")
+	assert_eq(error.reason_text(_gameerr()), "Kicked by admin (GDC032)")
 	assert_false(error.refuses_this_install(), "a kick is not a refusal of this install")
 
 
@@ -50,7 +49,7 @@ func test_an_empty_record_has_no_reason() -> void:
 	var error := ConnectionError.from_fields(0, 0, "", 0, 0, "")
 	assert_false(error.is_set())
 	assert_eq(error.reason_key(), "")
-	assert_eq(error.reason_text(null, _gameerr()), "")
+	assert_eq(error.reason_text(_gameerr()), "")
 
 
 # D-NET-823 (the shell's route order): the shell closes the session before it routes

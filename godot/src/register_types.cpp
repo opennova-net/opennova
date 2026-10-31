@@ -33,7 +33,6 @@
 #include "mission/static_population_instance.h"
 #include "env/sky_dome.h"
 #include "env/slot_shadow.h"
-#include "env/sun_shadow.h"
 #include "env/water.h"
 #include "env/weather.h"
 #include "env/precipitation.h"
@@ -56,7 +55,6 @@
 #include "render/retained_array_mesh.h"
 #include "render/scene_overlay_compositor.h"
 #include "render/target_projection_xr_interface.h"
-#include "world/item_effect_director.h"
 #include "world/occlusion_frame.h"
 #include "world/game_world.h"
 #include "world/load_timeline.h"
@@ -66,6 +64,7 @@
 #include "world/runtime_perf_counters.h"
 #include "world/world_view.h"
 #include "world/scar_draw_list.h"
+#include "world/tick_accumulator.h"
 #include "world/scar_presenter.h"
 #include "object/entity_index.h"
 #include "object/entity_ref.h"
@@ -157,7 +156,6 @@
 #include "lwf/lwf_data.h"
 #include "lwf/wav_loader.h"
 #include "lwf/wave_stream.h"
-#include "audio/ambient_mixer.h"
 #include "audio/sound_selector.h"
 #include "audio/ambient_layer.h"
 #include "audio/sound_bank.h"
@@ -264,7 +262,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MissionPlacementRun);
 	GDREGISTER_CLASS(StaticPopulationInstance);
 	GDREGISTER_CLASS(MissionObjectPlacer);
-	GDREGISTER_CLASS(SunShadow);
 	GDREGISTER_CLASS(SlotCaptureCompositorEffect);
 	GDREGISTER_CLASS(SlotShadow);
 	GDREGISTER_CLASS(Weather);
@@ -320,7 +317,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(DeployStatus);
 	GDREGISTER_CLASS(DeployZoneRow);
 	GDREGISTER_CLASS(DeployListRow);
-	GDREGISTER_CLASS(DestructionEffectEvent);
 	GDREGISTER_CLASS(HuskSwapEvent);
 	GDREGISTER_CLASS(DestructionDrain);
 	GDREGISTER_CLASS(HitboxDebugEntity);
@@ -401,15 +397,10 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(LwfData);
 	GDREGISTER_CLASS(WavLoader);
 	GDREGISTER_CLASS(WaveStream);
-	GDREGISTER_CLASS(AmbientMixer);
 	GDREGISTER_CLASS(SoundSelector);
 	GDREGISTER_CLASS(DbfData);
 	GDREGISTER_CLASS(AmbientLayer);
 	GDREGISTER_CLASS(SoundBank);
-	GDREGISTER_CLASS(MissionAudioMarker);
-	GDREGISTER_CLASS(MissionAudioChannel);
-	GDREGISTER_CLASS(MissionAudioCandidateBinding);
-	GDREGISTER_CLASS(MissionAudioDynamicEmitter);
 	GDREGISTER_CLASS(MissionAudioStats);
 	GDREGISTER_CLASS(MissionAudioPerf);
 	GDREGISTER_CLASS(FiredSoundset);
@@ -437,8 +428,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(TargetProjectionXrInterface);
 	GDREGISTER_CLASS(ParticleRenderer);
 	GDREGISTER_CLASS(EffectWorld);
-	GDREGISTER_CLASS(ItemEffectDirectorStats);
-	GDREGISTER_CLASS(ItemEffectDirector);
 	GDREGISTER_CLASS(OcclusionFrame);
 	// The world (ADR 0043 slice G10): the world node, its two view interfaces
 	// (the live implementations are internal), the resource-root resolver
@@ -450,6 +439,8 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(LoadingScreenInfo);
 	GDREGISTER_CLASS(PostMissionRoute);
 	GDREGISTER_CLASS(RuntimePerfCounters);
+	// The engine's frame-time bank for the menu mode's own updates.
+	GDREGISTER_CLASS(TickAccumulator);
 	GDREGISTER_CLASS(WorldView);
 	GDREGISTER_CLASS(ArmoryWorldView);
 	GDREGISTER_INTERNAL_CLASS(LiveWorldView);
