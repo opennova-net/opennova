@@ -157,6 +157,7 @@ int test_layout() {
     TEST_EXPECT(u32_at(buf, base0 + 1424) == 128);
     TEST_EXPECT(u32_at(buf, base0 + 1468) == 127);
     TEST_EXPECT(u32_at(buf, base0 + 1524) == 1);
+    TEST_EXPECT(u32_at(buf, base0 + 1396) == 0);  // Jointops.exe's seeds leave it 0
     return 0;
 }
 
@@ -169,7 +170,9 @@ int test_round_trip() {
     f.slots[1].macros[3] = "Guard the base";
     f.slots[4].bindings = {sample_binding(500, "CycleSpectatorMode")};
     f.slots[4].word_1460 = 77;
+    f.slots[2].word_1396 = 1;  // dfx2.exe's fresh-record seed survives a read and a write
     const std::vector<uint8_t> buf = write(f, kJoMagic);
+    TEST_EXPECT(u32_at(buf, kHeaderBytes + 2 * kPlayerRecordBytes + 1396) == 1);
     PlayerSav back;
     TEST_EXPECT(read(buf.data(), buf.size(), kJoMagic, back));
     for (size_t s = 0; s < kProfileSlots; ++s) TEST_EXPECT(records_equal(f.slots[s], back.slots[s]));
@@ -179,7 +182,7 @@ int test_round_trip() {
     // tools use [orig: the reads @0x551500 and the seeds @0x54bb40].
     size_t count = 0;
     const RecordWord *words = record_words(&count);
-    TEST_EXPECT(count == 40);
+    TEST_EXPECT(count == 41);
     for (size_t i = 1; i < count; ++i) TEST_EXPECT(words[i - 1].offset < words[i].offset);
     TEST_EXPECT(find_record_word("sp_no_char_abilities") != nullptr &&
                 find_record_word("sp_no_char_abilities")->offset == 0x548);

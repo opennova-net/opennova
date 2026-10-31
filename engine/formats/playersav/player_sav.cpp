@@ -54,6 +54,7 @@ constexpr RecordWord kWords[] = {
 	{"sp_gps_icons", 1372, &ProfileRecord::sp_gps_icons},
 	{"sp_no_drop_weapons", 1376, &ProfileRecord::sp_no_drop_weapons},
 	{"sp_difficulty", 1380, &ProfileRecord::sp_difficulty},
+	{"word_1396", 1396, &ProfileRecord::word_1396},
 	{"intro_pending", 1412, &ProfileRecord::intro_pending},
 	{"word_1416", 1416, &ProfileRecord::word_1416},
 	{"mouse_enabled", 1420, &ProfileRecord::mouse_enabled},

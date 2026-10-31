@@ -118,6 +118,7 @@ int test_init_defaults() {
     TEST_EXPECT(record.intro_pending == -1 && record.mouse_sensitivity == 128);
     TEST_EXPECT(record.word_1468 == 127 && record.auto_reload == 1 && record.view_mode == 1);
     TEST_EXPECT(record.joystick_cap_1 == 1 && record.joystick_cap_4 == 1 && record.joystick_cap_2 == 0);
+    TEST_EXPECT(record.word_1396 == 0);  // Jointops.exe stores nothing at +1396
     TEST_EXPECT(record.bindings.size() == d.bindings.size());
     TEST_EXPECT(record.macros[0] == "??MACRO_0??");
     TEST_EXPECT(weapons.blue.player_class == 8 && weapons.red.player_class == 8);
@@ -860,14 +861,21 @@ int test_title_kit_pages() {
         TEST_EXPECT(side->player_class == 8);
     }
     TEST_EXPECT(weapons.blue.pages[2].entries[0].ammo_primary == -1);
-    // A DFX2 profile's load seeds every record so.
+    // dfx2.exe's record carries +1396 = 1 [orig: PlayerProfile_InitDefaults @0x548db0
+    // (@0x548ece) (dfx2.exe)].
+    TEST_EXPECT(record.word_1396 == 1);
+    // A DFX2 profile's load seeds every record so, and its fresh player.sav carries the word.
     PlayerProfiles p(games::dfx2_title());
     PlayerProfiles::LoadInput none;
     p.load(none, defaults());
     TEST_EXPECT(names(p.weapon_sav().slots[4].red.pages[3]) == m4);
     TEST_EXPECT(p.weapon_sav().slots[0].blue.pages[0].entries.empty());
+    const std::vector<uint8_t> dfx2_player = p.player_sav_bytes();
+    for (size_t s = 0; s < playersav::kProfileSlots; ++s)
+        TEST_EXPECT(dfx2_player[playersav::kHeaderBytes + s * playersav::kPlayerRecordBytes + 1396] == 1);
     // JO's stay the format's.
     profile::init_defaults(record, weapons, defaults(), kJo);
+    TEST_EXPECT(record.word_1396 == 0);
     TEST_EXPECT(weapons.red.pages[4].entries[0].name == "WPN_AK74AUTO");
     TEST_EXPECT(weapons.single_player.entries[2].name == "WPN_colt45");
     // A fresh weapon record (the session start's and the 0x2F's with no weapon.sav) is the same

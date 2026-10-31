@@ -214,6 +214,10 @@ struct Title {
 	// (runtime/profile/player_profiles.h): dfx2.exe's literal "Bravo 1"; null, the process's
 	// account name, as Jointops.exe reads it through GetUserNameA.
 	const char *profile_first_name = nullptr;
+	// The +1396 dword a fresh profile record carries (runtime/profile/player_profiles.h
+	// init_defaults, playersav::ProfileRecord::word_1396): dfx2.exe's defaults store 1, which no
+	// code of its reads; Jointops.exe's leave the memset's 0. A file-parity value.
+	int32_t profile_word_1396 = 0;
 	// Whether the executable's command line takes `/maxplayers N`, the cap a host file's
 	// MaxPlayers line yields to (inmatch::read_host_file's max_player_arg): Jointops.exe's does;
 	// dfx2.exe's walk knows no such switch, and its host file's MaxPlayers line stores its own

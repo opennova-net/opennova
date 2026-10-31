@@ -326,6 +326,10 @@ Title make() {
 	//  PlayerProfile_LoadAllFromDisk @0x54c720 - the eight bytes @0x7d2d84 copied over the name
 	//  @0x54c770..0x54c78a; no GetUserNameA call (dfx2.exe)].
 	t.profile_first_name = "Bravo 1";
+	// A fresh record's +1396 is 1 [orig: PlayerProfile_InitDefaults @0x548db0 - `mov [esi+574h],
+	//  ebp` @0x548ece, between the +1524 seed @0x548ec8 and the joystick test @0x548eda; the
+	//  word's one reference in the executable (dfx2.exe)].
+	t.profile_word_1396 = 1;
 	// No `/maxplayers` switch: the walk goes from "/noreload" to "/version" [orig:
 	//  Game_ParseCommandLineAndInit @0x4a7360 - @0x4a7727, @0x4a773f], and the host file's
 	//  MaxPlayers stores its atol alone [orig: ServerConfig_ApplyHostSetting @0x4a6060 -

@@ -159,6 +159,10 @@ void init_defaults(playersav::ProfileRecord &record, playersav::Record &weapons,
 		if ((defaults.joystick_caps & 2u) != 0) record.joystick_cap_2 = 1;
 	}
 	record.macros = defaults.macros;  // [orig: @0x54bc9a..0x54bcda]
+	// +1396, the title's seed: dfx2.exe stores 1 among the unconditional seeds
+	// [orig: PlayerProfile_InitDefaults @0x548db0 (@0x548ece) (dfx2.exe)]; Jointops.exe's
+	// run (@0x54bc58 -> @0x54bc64) stores nothing there.
+	record.word_1396 = title.profile_word_1396;
 	// The weapon record: both class bytes 8 [orig: @0x54bbe0, @0x54bbe3], each
 	// side's character [orig: @0x54bbea..0x54bc17], the single-player page
 	// [orig: @0x54bced] and each side's five class pages [orig:
