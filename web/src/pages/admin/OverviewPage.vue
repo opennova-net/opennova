@@ -4,7 +4,7 @@
 
     <Notice v-if="problems.length" tone="bad" role="alert" class="overview-problems">Could not read {{ problems.join('; ') }}.</Notice>
 
-    <Notice v-if="billing?.limits_hold" tone="bad" role="alert" class="limits-hold">
+    <Notice v-if="showBilling && billing?.limits_hold" tone="bad" role="alert" class="limits-hold">
       Server limits are on hold: {{ holdSummary }}.
       <RouterLink to="/admin/billing" class="link">Review</RouterLink>
     </Notice>
@@ -40,13 +40,14 @@
         :tone="status?.maintenance_enabled ? 'warn' : undefined"
       />
       <StatTile
+        v-if="showBilling"
         label="Subscribers"
         to="/admin/billing"
         :value="billing ? (billing.enabled ? formatCount(subscribers) : 'Billing off') : '…'"
         :detail="billing?.enabled ? (pastDue ? `${pastDue} past due` : revenue ? `About ${revenue} a month` : undefined) : undefined"
         :tone="billing?.enabled && pastDue > 0 ? 'warn' : undefined"
       />
-      <StatTile label="AWS this month" to="/admin/billing/costs" :value="awsValue" :detail="awsDetail" :tone="budget && budget.tone !== 'ok' ? budget.tone : undefined" />
+      <StatTile v-if="showBilling" label="AWS this month" to="/admin/billing/costs" :value="awsValue" :detail="awsDetail" :tone="budget && budget.tone !== 'ok' ? budget.tone : undefined" />
       <StatTile
         label="Jobs failed today"
         to="/admin/system/jobs"
@@ -70,6 +71,8 @@
 // /admin: the deployment at a glance, a tile a section, each opening the page
 // that holds what it counts, then what needs an admin. It reads every 30
 // seconds; each read stands alone, so one failing leaves the others shown.
+// The money (subscribers, AWS, the limits hold) shows, and is read, only for
+// the admin who sees billing (utils/billingAccess.ts).
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import AttentionList from '../../components/AttentionList.vue';
@@ -86,6 +89,7 @@ import { fetchJobsOverview } from '../../api/jobs';
 import { fetchOnline } from '../../api/online';
 import { useAttention } from '../../composables/useAttention';
 import { usePolling } from '../../composables/usePolling';
+import { useSession } from '../../composables/useSession';
 import type { ServerStatus } from '../../types/admin';
 import type { AdminBillingResponse, TiersResponse } from '../../types/billing';
 import type { Costs } from '../../types/costs';
@@ -93,6 +97,7 @@ import type { FleetResponse } from '../../types/hostedServer';
 import type { HostedStats } from '../../types/hostedStats';
 import type { JobsOverview } from '../../types/jobs';
 import type { OnlineResponse } from '../../types/online';
+import { seesBilling } from '../../utils/billingAccess';
 import { billingRevenue } from '../../utils/billingRevenue';
 import { costMoney, worstCostBudget } from '../../utils/costView';
 import { formatCount, formatMoney } from '../../utils/format';
@@ -101,6 +106,8 @@ import { playerValues } from '../../utils/statsView';
 const POLL_MS = 30_000;
 
 const attentionState = useAttention();
+const { user } = useSession();
+const showBilling = computed(() => seesBilling(user.value));
 
 const fleet = ref<FleetResponse | null>(null);
 const billing = ref<AdminBillingResponse | null>(null);
@@ -152,32 +159,33 @@ const awaiting = computed(() => attentionState.attention.value?.findings.filter(
 
 const poll = usePolling({
   async read(signal) {
+    const money = showBilling.value;
     const [f, b, s, o, st, j, co, t] = await Promise.all([
       fetchHostedFleet({ state: 'live' }, signal),
-      fetchAdminBilling(signal),
+      money ? fetchAdminBilling(signal) : Promise.resolve(null),
       fetchServerStatus(signal),
       fetchOnline(signal),
       fetchFleetStats('24h', signal),
       fetchJobsOverview(signal),
-      fetchCosts(signal),
+      money ? fetchCosts(signal) : Promise.resolve(null),
       // The prices change rarely: read once.
-      tiers.value ? Promise.resolve(null) : fetchTiers(signal),
+      !money || tiers.value ? Promise.resolve(null) : fetchTiers(signal),
     ]);
     if (signal.aborted) return false;
     now.value = Date.now();
     const out: string[] = [];
     if (f.ok) fleet.value = f.value;
     else out.push(`the fleet (${f.error.message})`);
-    if (b.ok) billing.value = b.value;
-    else out.push(`billing (${b.error.message})`);
+    if (b?.ok) billing.value = b.value;
+    else if (b) out.push(`billing (${b.error.message})`);
     if (s.ok) status.value = s.value;
     else out.push(`NovaWorld's sign-in (${s.error.message})`);
     if (o.ok) online.value = o.value;
     else out.push(`who is online (${o.error.message})`);
     if (j.ok) jobs.value = j.value;
     else out.push(`the background jobs (${j.error.message})`);
-    if (co.ok) costs.value = co.value;
-    else out.push(`AWS costs (${co.error.message})`);
+    if (co?.ok) costs.value = co.value;
+    else if (co) out.push(`AWS costs (${co.error.message})`);
     // The sparkline and the prices are niceties: their failure says nothing.
     if (st.ok) stats.value = st.value;
     if (t && t.ok) tiers.value = t.value;

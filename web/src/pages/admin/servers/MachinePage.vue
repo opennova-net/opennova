@@ -120,7 +120,10 @@
           <dd>
             <span class="font-mono text-xs">{{ machine.public_address || '—' }}</span>
             <template v-if="machine.address">
-              · static <RouterLink to="/admin/billing/addresses" class="entity-link font-mono text-xs">{{ machine.address.name }}</RouterLink>
+              · static <RouterLink v-if="showBilling" to="/admin/billing/addresses" class="entity-link font-mono text-xs">{{ machine.address.name }}</RouterLink><span
+                v-else
+                class="font-mono text-xs"
+              >{{ machine.address.name }}</span>
             </template>
           </dd>
           <dt class="text-ink-muted">Launched</dt>
@@ -159,7 +162,8 @@
 // servers in them (joined to the fleet's rows for their game, players and
 // owner), the games it holds, its facts against the release, its timeline,
 // usage and hostd log; drain and end while it lives. Polled every 10 s while
-// it lives.
+// it lives. Its static address links to the Billing section's page only for
+// the admin who sees billing (utils/billingAccess.ts).
 import { computed, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import LogViewer from '../../../components/LogViewer.vue';
@@ -177,10 +181,12 @@ import { fetchHostedFleet, fetchMachine, machineAction } from '../../../api/admi
 import { fetchProducts } from '../../../api/products';
 import { confirmAction } from '../../../composables/useConfirm';
 import { usePolling } from '../../../composables/usePolling';
+import { useSession } from '../../../composables/useSession';
 import type { FleetServer, MachineDetail } from '../../../types/hostedServer';
 import type { ProductsResponse } from '../../../types/products';
 import type { Crumb } from '../../../utils/adminNav';
 import { machineKindLabel, machineStateLabel } from '../../../utils/adminView';
+import { seesBilling } from '../../../utils/billingAccess';
 import { formatBytes } from '../../../utils/format';
 import { gameName } from '../../../utils/games';
 import { stateLabel } from '../../../utils/hostedState';
@@ -207,6 +213,8 @@ const TREE_STATES: Record<string, string> = { fetching: 'Fetching', ready: 'Read
 
 const route = useRoute();
 const id = computed(() => String(route.params.id ?? ''));
+const { user } = useSession();
+const showBilling = computed(() => seesBilling(user.value));
 
 const detail = ref<MachineDetail | null>(null);
 const servers = ref<FleetServer[]>([]);

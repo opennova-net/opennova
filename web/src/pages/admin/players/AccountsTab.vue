@@ -82,7 +82,7 @@
             <th scope="col">Account</th>
             <th scope="col">Role</th>
             <th scope="col">Support tier</th>
-            <th scope="col">Subscription</th>
+            <th v-if="showBilling" scope="col">Subscription</th>
             <th scope="col">Servers</th>
             <th scope="col">Last seen</th>
             <th scope="col">Online</th>
@@ -92,7 +92,7 @@
         <tbody>
           <TableState
             v-if="shown.length === 0"
-            :colspan="8"
+            :colspan="showBilling ? 8 : 7"
             :rows="users"
             :loading="loading"
             :empty="users?.length ? 'No account matches.' : 'No accounts yet.'"
@@ -108,7 +108,7 @@
             </th>
             <td><Badge :tone="u.role === 'admin' ? 'info' : 'muted'">{{ u.role === 'admin' ? 'Admin' : 'Player' }}</Badge></td>
             <td class="user-tier"><Badge :tone="tierTone(u)">{{ entitlementLabel(u.entitlement) }}</Badge></td>
-            <td class="whitespace-nowrap" :class="u.subscription_status === 'past_due' ? 'text-warn' : u.subscription_status ? '' : 'text-ink-muted'">
+            <td v-if="showBilling" class="whitespace-nowrap" :class="u.subscription_status === 'past_due' ? 'text-warn' : u.subscription_status ? '' : 'text-ink-muted'">
               {{ u.subscription_status ? subscriptionStatusLabel(u.subscription_status) : 'None' }}
             </td>
             <td class="user-servers whitespace-nowrap">
@@ -150,7 +150,8 @@
 // support tier, subscription, live servers, last sign-in, whether it is online
 // now and its status, filtered and paged in the URL query; each opens its
 // player page. And a new account (POST /api/admin/users, or the public
-// registration when no PCID is given, which makes one up).
+// registration when no PCID is given, which makes one up). The Subscription
+// column shows only to the admin who sees billing (utils/billingAccess.ts).
 import { computed, onMounted, reactive, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import RelativeTime from '../../../components/RelativeTime.vue';
@@ -165,6 +166,7 @@ import { useSession } from '../../../composables/useSession';
 import type { UserListEntry } from '../../../types/users';
 import { PLAYERS_TABS } from '../../../utils/adminNav';
 import { accountStatusLabel, accountStatusTone, entitlementLabel } from '../../../utils/adminView';
+import { seesBilling } from '../../../utils/billingAccess';
 import { subscriptionStatusLabel } from '../../../utils/billingView';
 import { formatCount } from '../../../utils/format';
 import type { Tone } from '../../../utils/tone';
@@ -173,6 +175,7 @@ import { useQueryText } from '../../../composables/useQueryText';
 const PAGE_SIZE = 50;
 
 const { user: sessionUser } = useSession();
+const showBilling = computed(() => seesBilling(sessionUser.value));
 const route = useRoute();
 const router = useRouter();
 
