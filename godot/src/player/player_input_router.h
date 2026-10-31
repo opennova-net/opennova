@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <runtime/inmatch/player_input_frame.h>
 
+#include "frontend/game_frontend.h"
 #include "hud/hud_chat_entry.h"
 #include "hud/hud_toggles.h"
 #include "mnu/controls_model.h"
@@ -69,9 +70,10 @@ public:
 	// run at each update's input-frame head under no menu screen. Kept across a teardown, as
 	// the shell installs it once.
 	void set_keyboard_pass(const Callable &p_pass) { shell_.keyboard_pass_ = p_pass; }
-	// The shell's menu-screen bit, read again at each update's input-frame head. Kept across a
-	// teardown; unset, the frame head's read holds for the frame.
-	void set_menu_screen_probe(const Callable &p_probe) { shell_.menu_screen_probe_ = p_probe; }
+	// The shell's frontend, whose screen stack answers the menu-screen bit at each update's
+	// input-frame head (menu::ScreenStack::holds_input). Kept across a teardown; unset, the frame
+	// head's read holds for the frame.
+	void set_frontend(const Ref<GameFrontend> &p_frontend) { shell_.frontend_ = p_frontend; }
 	// The shell's arms for the records it owns, called as (code, first argument): the escape
 	// row's (code 18), the screen shot's (code 2), the cheat row's weapon-screen toggle
 	// (code 40) and the deploy pick's (input event 12, its pick). Kept across a teardown;
@@ -190,7 +192,7 @@ private:
 		bool menu_screen_open() override;
 		void record_leg(int32_t p_code, int32_t p_param) override;
 		Callable keyboard_pass_;
-		Callable menu_screen_probe_;
+		Ref<GameFrontend> frontend_;
 		Callable record_leg_;
 	};
 

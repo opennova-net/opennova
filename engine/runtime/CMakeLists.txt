@@ -99,6 +99,10 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_state_frame.cpp # the frame seam's state writes, and the seam headless
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_commands.cpp # what the game's code does with a control it binds by name
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/screen_history.cpp # the screen history across menu files and a mission (D-MNU-28)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/screen_stack.cpp # the in-mission screen up over a mission, its open, close and close request
+    # frontend — the game's mode table above the session (MainMenu, PreMenu, Game Loop, Post
+    # Menu): the transitions, the save points and the routing (ADR 0077 R3)
+    ${CMAKE_CURRENT_SOURCE_DIR}/frontend/frontend.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_flow.cpp # SP selection, expansion requests and host rotation
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/mod_list.cpp # the Mods list's rows, its pick's description and ACCEPT's pick (D-MNU-31)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/options_screen.cpp # options remap and preview decisions

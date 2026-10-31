@@ -382,12 +382,4 @@ void PlayerProfiles::_bind_methods() {
 			&PlayerProfiles::restore_player_info_kit);
 	ClassDB::bind_method(D_METHOD("apply_character_selection", "profile"),
 			&PlayerProfiles::apply_character_selection);
-	ClassDB::bind_method(D_METHOD("record_mission_start", "campaign"),
-			&PlayerProfiles::record_mission_start);
-	ClassDB::bind_method(D_METHOD("begin_session"), &PlayerProfiles::begin_session);
-	ClassDB::bind_method(D_METHOD("clamp_session_classes"), &PlayerProfiles::clamp_session_classes);
-	ClassDB::bind_method(D_METHOD("record_round_end", "in_session", "round_over", "campaign",
-								 "campaign_mission", "won"),
-			&PlayerProfiles::record_round_end);
-	ClassDB::bind_method(D_METHOD("clear_intro_pending"), &PlayerProfiles::clear_intro_pending);
 }

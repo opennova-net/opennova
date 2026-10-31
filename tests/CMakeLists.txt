@@ -2359,6 +2359,22 @@ target_link_libraries(screen_history_test PRIVATE opennova_runtime)
 target_compile_features(screen_history_test PRIVATE cxx_std_17)
 add_test(NAME screen_history COMMAND screen_history_test)
 
+# The in-mission screen stack (menu/screen_stack.h): one screen up at a time, the open word's
+# refusal, the close request the next screen pass runs, the pass-through word's input law.
+add_executable(screen_stack_test menu/screen_stack_test.cpp)
+target_link_libraries(screen_stack_test PRIVATE opennova_runtime)
+target_compile_features(screen_stack_test PRIVATE cxx_std_17)
+add_test(NAME screen_stack COMMAND screen_stack_test)
+
+# The frontend (frontend/frontend.h) driven headless over recording legs: the start, the
+# MainMenu's init and its save points, the mission starts through the load executor's headless
+# legs, the screens, Esc and the use-item routes, the exits' routing, the quit's saves, the menu
+# mode's bank (ADR 0077 R3; formerly GUT's main_game lifecycle reads).
+add_executable(frontend_test frontend/frontend_test.cpp)
+target_link_libraries(frontend_test PRIVATE opennova_runtime)
+target_compile_features(frontend_test PRIVATE cxx_std_17)
+add_test(NAME frontend COMMAND frontend_test)
+
 # The loadout screens' shared text compositions (menu/loadout_labels.h): the WepDes
 # weapon label, the ammo row, the armory row order and the weight readout.
 add_executable(loadout_labels_test menu/loadout_labels_test.cpp)
