@@ -192,7 +192,7 @@ namespace {
 // The STAT screen's DONE, found by name [orig: UI_FindScreenControl(g_GameMenu, "STAT",
 // "DONE") @0x561819 / @0x561012 (dfx2.exe)]; -1 when the title registers none.
 int stat_done_widget(const menu::MenuRuntime &menu, const Title *title) {
-	if (title == nullptr || !title->stat_screen_done) return -1;
+	if (!require_title(title, "stat_screen_done").stat_screen_done) return -1;
 	return menu.widget_id("DONE");
 }
 
@@ -216,7 +216,9 @@ bool stat_screen_show_done(menu::MenuRuntime &menu, const Title *title, bool rou
 }
 
 bool stat_screen_done_pressed(const Title *title, ClientRuntime *joiner_runtime) {
-	if (title == nullptr || !title->stat_screen_done || joiner_runtime == nullptr) return false;
+	if (!require_title(title, "stat_screen_done_pressed").stat_screen_done ||
+			joiner_runtime == nullptr)
+		return false;
 	// [orig: StatScreen_OnDone - g_MissionExitReason = 4 @0x561143, g_EndRoundLingerTimer = 0
 	//  @0x56114d (dfx2.exe)]
 	joiner_runtime->set_mission_exit_reason(kMissionExitRoundOver);

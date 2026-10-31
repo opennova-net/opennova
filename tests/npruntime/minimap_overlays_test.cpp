@@ -124,6 +124,7 @@ void test_overlays_gather() {
     inmatch::MinimapOverlayInputs in;
     in.client = &cs;
     in.world = &mw.w;
+    in.title = title_by_code("jo");
     in.game_type = 0x10010;
     in.gametext = [](const char *section, const char *key, const char *) {
         return std::string(section) + "/" + key;
@@ -198,6 +199,7 @@ void test_player_slot_table_feeds_loop_one() {
     inmatch::MinimapOverlayInputs in;
     in.client = &cs;
     in.world = &w;
+    in.title = title_by_code("jo");
     hud::HudMinimapOverlays out;
     inmatch::build_minimap_overlays(in, out);
     CHECK(out.zone_score_delta == 15);
@@ -258,6 +260,7 @@ void test_joiner_rows_feed_loop_one() {
     inmatch::MinimapOverlayInputs in;
     in.client = &cs;
     in.world = &mw.w;
+    in.title = title_by_code("jo");
     in.self_handle = 0x0009; // the joiner's own wire handle
     hud::HudMinimapOverlays out;
     inmatch::build_minimap_overlays(in, out);
@@ -275,12 +278,10 @@ void test_joiner_rows_feed_loop_one() {
 } // namespace
 
 // DFX2-49 / DFX2-50 / DFX2-115: the session's title names the map's under-layer capture rings, the
-// DEATH map's zone markers and its unnamed labels; no title none.
+// DEATH map's zone markers and its unnamed labels; Jointops.exe's none.
 static void test_title_map_legs() {
     inmatch::MinimapOverlayInputs in;
     hud::HudMinimapOverlays out;
-    inmatch::build_minimap_overlays(in, out);
-    CHECK(!out.capture_rings_under_layers && !out.death_map_zone_markers && !out.death_map_no_names);
     in.title = title_by_code("jo");
     inmatch::build_minimap_overlays(in, out);
     CHECK(!out.capture_rings_under_layers && !out.death_map_zone_markers && !out.death_map_no_names);

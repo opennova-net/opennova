@@ -206,7 +206,6 @@ void test_done_button() {
 	dfx2.stat_screen_done = true;
 	CHECK(!stat_screen_hide_done(rt, &jo) && rt.is_widget_shown(id));
 	CHECK(!stat_screen_show_done(rt, &jo, true));
-	CHECK(!stat_screen_hide_done(rt, nullptr));
 	// The show hides it; the pass shows it only while the hold is up.
 	CHECK(stat_screen_hide_done(rt, &dfx2) && !rt.is_widget_shown(id));
 	CHECK(!stat_screen_show_done(rt, &dfx2, false) && !rt.is_widget_shown(id));

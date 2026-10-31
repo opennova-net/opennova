@@ -42,7 +42,8 @@ struct MinimapOverlayInputs {
     // the own slot's revive leg reads live each frame; 0 = automatic requests.
     // [orig: draw_entity_labels_and_markers @0x5a4b49..0x5a4b56]
     int32_t own_auto_medic_off = 0;
-    // The title the session runs as: its map's own legs (Title::map_capture_rings_under_layers).
+    // The title the session runs as (RoleView::title): its map's own legs
+    // (Title::map_capture_rings_under_layers). None aborts, named (require_title).
     const Title *title = nullptr;
 };
 
