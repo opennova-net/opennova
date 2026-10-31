@@ -18,6 +18,22 @@ namespace {
 // UI_SaveCookieFileIfDirty @0x554d40 (dfx2.exe)].
 constexpr const char *kAbsentResourceRoles[] = { "cmap_menu", "vehicle_menu", "nw_cdata", nullptr };
 
+// dfx2.exe's HUD label fonts: Joint Operations' three tiers, then Arial20b / 20n to 1280 pixels,
+// Arial28b / 28n to 1600 and Arial32b / 32n above, over 1280 / 1600 / 1920; Impac44b and Impac76b
+// over 1600 (DFX2-39).
+// [orig: HUD_InitAllFonts @0x51BD70 (dfx2.exe) - the widths @0x51BDCE / @0x51BDFE / @0x51BE2E /
+//  @0x51BE5B / @0x51BE88, the names @0x51BDDA..0x51BECD, the scale @0x51BEE1, Impac44b @0x51BF0D
+//  and Impac76b @0x51BF40 over 1600 @0x51BF2E / @0x51BF53]
+constexpr TitleHudFontTier kHudFontTiers[] = {
+	{640, "Arial14n.fnt", "Arial12b.fnt", 640},
+	{800, "Arial14n.fnt", "Arial14b.fnt", 800},
+	{1024, "Arial16n.fnt", "Arial16b.fnt", 1024},
+	{1280, "Arial20n.fnt", "Arial20b.fnt", 1280},
+	{1600, "Arial28n.fnt", "Arial28b.fnt", 1600},
+	{0, "Arial32n.fnt", "Arial32b.fnt", 1920},
+};
+constexpr TitleHudFonts kHudFonts{kHudFontTiers, "Impac44b.fnt", "Impac76b.fnt", 1600};
+
 Title make() {
 	Title t;
 	t.code = "dfx2";
@@ -65,6 +81,7 @@ Title make() {
 	// its serializer tests each GRENADE_AMMO control [orig: nullsub_137 @0x5cac97;
 	//  WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0 (@0x565bcf..0x565be5)].
 	t.death_screen_loadout = true;
+	t.hud_fonts = &kHudFonts;
 	return t;
 }
 

@@ -18,6 +18,10 @@
 //  bar primitive HUD_DrawProgressBar_0 @ 0x5d4c40]
 // Witness record: docs/interface/loading-screen-re.md.
 
+namespace opennova {
+struct Title; // base/title/title.h
+} // namespace opennova
+
 namespace opennova::hud {
 
 // The LoadingText key for a numeric session game type, or "" for an unknown
@@ -219,7 +223,8 @@ inline constexpr const char *kSplashSoundSet = "START_MISSION";
 
 // The continue line: gametext LoadingText/LT_Continue, drawn CENTERED at
 // virtual (512, 730) of the 1024x768 overlay space in the large HUD label
-// font (Impac22b.fnt at the (screen_w << 16) / 800 slot scale), through the
+// font (the title's large slot, hud_large_label_font: Impac22b.fnt at the
+// (screen_w << 16) / 800 slot scale in Jointops.exe), through the
 // half-bright text fold (hud_math.h half_bright_argb), color alternating on
 // GetTickCount() bit 0x200 — a 512 ms two-color pulse, white / light red
 // [orig: fetch @ 0x520975; HUD_DrawTextAtVirtualPos(ctx, 512, 730, 0, text,
@@ -227,7 +232,6 @@ inline constexpr const char *kSplashSoundSet = "START_MISSION";
 //  @ 0x5209b0-0x5209be; font slot Impac22b.fnt @ HUD_InitAllFonts 0x51ef4e;
 //  centered dispatch HUD_DrawTextCentered_HalfBright @ 0x580680].
 inline constexpr const char *kSplashContinueTextKey = "LT_Continue";
-inline constexpr const char *kSplashContinueFont = "Impac22b.fnt";
 inline constexpr int kSplashContinueX = 512;
 inline constexpr int kSplashContinueY = 730;
 inline constexpr uint32_t kSplashContinueColorOn = 0xFFFFFFFFu;
@@ -238,7 +242,8 @@ inline constexpr int kSplashBlinkMaskMs = 0x200;
 // the game's code page: the design point through HUD_DrawTextAtVirtualPos's integer rounding, ((512 * W
 // + 512) / 1024, (730 * H + 384) / 768) [orig: HUD_DrawTextAtVirtualPos @ 0x5d3ec0], its mode 2 the
 // centred half-bright drawer, which halves the phase's colour, its alpha forced opaque, and lays the run
-// out centred at the large slot's scale, W / 800 [orig: HUD_DrawTextAligned_HalfBrightNoFlags @ 0x5d2ece ->
+// out centred at the title's large slot's scale (W / 800 in Jointops.exe)
+// [orig: HUD_DrawTextAligned_HalfBrightNoFlags @ 0x5d2ece ->
 // HUD_DrawTextCentered_HalfBright @ 0x580680 -> CGameFont_DrawText @ 0x6752c0, flags 1 @ 0x58069d;
 // the slot @ HUD_InitAllFonts 0x51ef62 (hud_label_font_choice)]. The quads carry the halved colour, the
 // raw diffuse the font page's material doubles on the device (kFontPageMaterialWord, MODULATE2X), so
@@ -249,7 +254,7 @@ inline constexpr int kSplashBlinkMaskMs = 0x200;
 // background's pixels @ 0x521f1a..0x521f42 / 0x521f86..0x521fa8 -> Render_DrawWrappedTextBlockEx @
 // 0x580eb0 -> CGameFont_RenderText @ 0x675e40 -> CGameFont_DrawBlendedGlyph @ 0x6744a0].
 GameFontRun splash_continue_run(const GameFont &font, const char *text, int surface_w, int surface_h,
-		bool phase_on);
+		bool phase_on, const Title &title);
 
 // The continue line's phase at a GetTickCount() reading: on (white) while bit 0x200 is set
 // [orig: Game_ShowStartMissionSplash - the blink select @ 0x5209b0-0x5209be].

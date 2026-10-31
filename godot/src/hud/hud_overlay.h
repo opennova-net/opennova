@@ -626,7 +626,7 @@ private:
 	bool label_font_large_valid_ = false;
 	opennova::fnt::fnt_font_t label_font_impact38_ = {}; // Impac38b (the end-round overlay)
 	bool label_font_impact38_valid_ = false;
-	int label_tier_ = -1; // -1 = not loaded; 0 <=640 / 1 <=800 / 2 >800
+	int label_tier_ = -2; // -2 = not loaded; else the title's tier (hud_label_font_choice)
 	int label_width_ = 0;  // the width the pushed label scales were computed for
 	// The hudpos FONTHUD1_LO / _HI names (engine hudpos_font_for_width picks one
 	// per width); loaded into font_ by ensure_label_fonts_.

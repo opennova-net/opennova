@@ -3,6 +3,7 @@
 // composited resource names, the wrapped block and the session block's
 // composite into the background.
 
+#include <base/title/title.h> // the splash's large slot (Title::hud_fonts)
 #include <runtime/hud/hud_math.h> // loading_bar_fill_span
 #include <runtime/hud/loading_screen.h>
 #include <runtime/hud/cine_text.h>
@@ -156,7 +157,8 @@ int main() {
 		const opennova::fnt::fnt_font_t uniform = test_font::uniform_test_font();
 		GameFont font;
 		font.set_font(&uniform);
-		const GameFontRun on = splash_continue_run(font, "GO", 1280, 720, true);
+		const opennova::Title &jo = *opennova::title_by_code("jo"); // the large slot over 800
+		const GameFontRun on = splash_continue_run(font, "GO", 1280, 720, true, jo);
 		check(on.quads.size() == 2, "the line's two glyphs");
 		if (on.quads.size() == 2) {
 			const float left = on.quads[0].x_top_left + 0.5f, right = on.quads[1].x_top_right + 0.5f;
@@ -171,9 +173,10 @@ int main() {
 			check(on.quads[0].color == 0xFF7F7F7Fu && on.quads[1].color == 0xFF7F7F7Fu,
 			      "the white phase halved, alpha forced");
 		}
-		const GameFontRun off = splash_continue_run(font, "GO", 1280, 720, false);
+		const GameFontRun off = splash_continue_run(font, "GO", 1280, 720, false, jo);
 		check(!off.quads.empty() && off.quads[0].color == 0xFF7F4040u, "the red phase halved");
-		check(splash_continue_run(font, "GO", 0, 720, true).quads.empty(), "no display, no line");
+		check(splash_continue_run(font, "GO", 0, 720, true, jo).quads.empty(),
+		      "no display, no line");
 	}
 
 	// The epilog cine's text through the large slot's glyph runs (D-LOADSCR-2's epilog screen): a

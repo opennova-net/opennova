@@ -1,5 +1,7 @@
 #include <runtime/hud/hud_math.h>
 
+#include <base/title/title.h> // Title::hud_fonts
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -308,24 +310,32 @@ std::string friendly_tag_fallback_name(uint16_t encoded_entity_id) {
 	return out;
 }
 
-// [orig: HUD_InitAllFonts @0x51ee20 — the sprintf'd names per width branch
-// @0x51ee8a..0x51ef0e; the retail fixed-point (w<<16)/divisor lands in the
-// slot as a float @0x58045d, so the float division is the same value modulo
-// the 16.16 truncation]
-HudLabelFontChoice hud_label_font_choice(int surface_w) {
-	// The large slot is one file at the over-800 divisor for every width
-	// [orig: g_HUDLabelFontLarge = Impac22b.fnt "over 800" @0x51ee20].
-	const float large_scale = static_cast<float>(surface_w) / 800.0f;
-	if (surface_w > 800) {
-		return {"Arial16n.fnt", "Arial16b.fnt", "Impac22b.fnt", "Impac38b.fnt",
-				static_cast<float>(surface_w) / 1024.0f, large_scale, 2};
+const char *hud_large_label_font(const Title &title) {
+	return title.hud_fonts != nullptr ? title.hud_fonts->large_fnt : "";
+}
+
+// [orig: HUD_InitAllFonts @0x51ee20 — the width tests `cmp, jle` @0x51ee7e / @0x51eeab, the
+// sprintf'd names per branch @0x51ee8a..0x51ef0e; the retail fixed-point (w<<16)/divisor lands in
+// the slot as a float @0x58045d, so the float division is the same value modulo the 16.16
+// truncation] [orig: the twin @0x51BD70 (@0x51BDCE..0x51BECD) (dfx2.exe)]
+HudLabelFontChoice hud_label_font_choice(int surface_w, const Title &title) {
+	HudLabelFontChoice out;
+	const TitleHudFonts *fonts = title.hud_fonts;
+	if (fonts == nullptr || fonts->tiers == nullptr) return out;
+	// The large pair is one file each at the large divisor for every width.
+	out.large_fnt = fonts->large_fnt;
+	out.impact38_fnt = fonts->impact38_fnt;
+	out.large_scale = static_cast<float>(surface_w) / static_cast<float>(fonts->large_divisor);
+	// Each branch takes the width up to its bound (`jle`), the last any width.
+	for (int i = 0;; ++i) {
+		const TitleHudFontTier &tier = fonts->tiers[i];
+		if (tier.max_width != 0 && surface_w > tier.max_width) continue;
+		out.normal_fnt = tier.normal_fnt;
+		out.bold_fnt = tier.bold_fnt;
+		out.scale = static_cast<float>(surface_w) / static_cast<float>(tier.divisor);
+		out.tier = i;
+		return out;
 	}
-	if (surface_w > 640) {
-		return {"Arial14n.fnt", "Arial14b.fnt", "Impac22b.fnt", "Impac38b.fnt",
-				static_cast<float>(surface_w) / 800.0f, large_scale, 1};
-	}
-	return {"Arial14n.fnt", "Arial12b.fnt", "Impac22b.fnt", "Impac38b.fnt",
-			static_cast<float>(surface_w) / 640.0f, large_scale, 0};
 }
 
 } // namespace opennova::hud

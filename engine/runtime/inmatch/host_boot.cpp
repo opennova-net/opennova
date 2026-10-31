@@ -233,7 +233,10 @@ void ConsoleChatFont::release() {
 
 void ConsoleChatFont::apply(NapiNPServerCtx &ctx, const mission::BootFileSource &files,
 		int32_t display_width) {
-	const std::string name = hud::hud_label_font_choice(display_width).bold_fnt;
+	// The session title's bold tier; a config with no title loads none.
+	const std::string name = ctx.config.title != nullptr
+			? hud::hud_label_font_choice(display_width, *ctx.config.title).bold_fnt
+			: "";
 	if (name != name_) {
 		release();
 		name_ = name;

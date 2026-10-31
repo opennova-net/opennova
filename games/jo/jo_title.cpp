@@ -32,6 +32,18 @@ constexpr const char *kReadDefs[] = {
 	nullptr,
 };
 
+// Jointops.exe's HUD label fonts: Arial12b / Arial14n under 641 pixels, Arial14b / 14n under 801,
+// Arial16b / 16n above, over 640 / 800 / 1024; Impac22b and Impac38b over 800.
+// [orig: HUD_InitAllFonts @0x51EE20 - the widths @0x51EE7E / @0x51EEAB, the names
+//  @0x51EE8A..0x51EF0E, the scale @0x51EF26, Impac22b @0x51EF48 and Impac38b @0x51EF7B over 800
+//  @0x51EF62]
+constexpr TitleHudFontTier kHudFontTiers[] = {
+	{640, "Arial14n.fnt", "Arial12b.fnt", 640},
+	{800, "Arial14n.fnt", "Arial14b.fnt", 800},
+	{0, "Arial16n.fnt", "Arial16b.fnt", 1024},
+};
+constexpr TitleHudFonts kHudFonts{kHudFontTiers, "Impac22b.fnt", "Impac38b.fnt", 800};
+
 Title make() {
 	Title t;
 	t.code = "jo";
@@ -68,6 +80,7 @@ Title make() {
 	// @ 0x4a76ac (/exp, /mod), Expansion_LoadAssets @ 0x4a4730].
 	t.expansions = true;
 	t.read_defs = kReadDefs;
+	t.hud_fonts = &kHudFonts;
 	return t;
 }
 

@@ -10,6 +10,10 @@
 // here and keep only CanvasItem work. Witness record:
 // docs/interface/hud-re.md.
 
+namespace opennova {
+struct Title; // base/title/title.h
+} // namespace opennova
+
 namespace opennova::hud {
 
 // ---------------------------------------------------------------------------
@@ -300,28 +304,32 @@ inline constexpr uint8_t kFriendlyTagRadioRequestIcon = 0x17;
 // g_FallbackPeopleNames @0x840a78, count @0x840a0c].
 std::string friendly_tag_fallback_name(uint16_t encoded_entity_id);
 
-// The overlay label-font selection by surface width: the Arial pair and the
-// slot scale the friendly-tag / attach-label draws ride
-// [orig: HUD_InitAllFonts @0x51ee20 — width <= 640: Arial14n/Arial12b over
-// 640; <= 800: Arial14n/Arial14b over 800; > 800: Arial16n/Arial16b over
-// 1024; scale = (screenWidth<<16)/divisor @0x51ef26, stored as the slot's
-// float pair by HUD_LoadFontIntoSlot @0x580400].
+// The overlay label-font selection by surface width, from the title's table (Title::hud_fonts):
+// the Arial pair and the slot scale the friendly-tag / attach-label draws ride, of the first
+// tier whose bound holds the width; scale = (screenWidth<<16)/divisor, stored as the slot's
+// float pair by HUD_LoadFontIntoSlot @0x580400. A title with no table chooses no file (every
+// name empty) at scale 1, tier -1; the tables are the titles' rows.
+// [orig: HUD_InitAllFonts @0x51ee20 — @0x51ef26]
+// [orig: the twin @0x51BD70 (@0x51BEE1) (dfx2.exe)]
 struct HudLabelFontChoice {
-	const char *normal_fnt;
-	const char *bold_fnt;
-	// The single-file large slot the big-map grid labels ride
-	// [orig: HUD_InitAllFonts — g_HUDLabelFontLarge @0xB4C3A0 = Impac22b.fnt
-	//  at the over-800 scale for every width].
-	const char *large_fnt;
+	const char *normal_fnt = "";
+	const char *bold_fnt = "";
+	// The single-file large slot the big-map grid labels ride, at the large divisor for every
+	// width: Impac22b.fnt over 800 in Jointops.exe, Impac44b.fnt over 1600 in dfx2.exe
+	// [orig: HUD_InitAllFonts — g_HUDLabelFontLarge @0xB4C3A0].
+	const char *large_fnt = "";
 	// The Impact38 slot the end-round overlay / death screen / disconnect
-	// dialog draw with, loaded at the SAME over-800 scale as the large slot
-	// [orig: HUD_InitAllFonts — g_HUDLabelFontImpact38 @0xB4C3AC = Impac38b.fnt
-	//  @0x51ef7b..0x51ef94, the scale register shared with Impac22b].
-	const char *impact38_fnt = nullptr;
+	// dialog draw with, loaded at the SAME scale as the large slot
+	// (Impac38b.fnt, Impac76b.fnt in dfx2.exe), the scale register shared with the large
+	// [orig: HUD_InitAllFonts — g_HUDLabelFontImpact38 @0xB4C3AC (@0x51ef7b..0x51ef94)].
+	const char *impact38_fnt = "";
 	float scale = 1.0f;
 	float large_scale = 1.0f;
-	int tier = 0; // 0 <= 640 / 1 <= 800 / 2 > 800 — stable id for reload checks
+	int tier = -1; // the tier's index in the title's table — a stable id for reload checks
 };
-HudLabelFontChoice hud_label_font_choice(int surface_w);
+HudLabelFontChoice hud_label_font_choice(int surface_w, const Title &title);
+// The large slot's one file, whatever the width ("" for a title with no table): the splash's
+// continue line and the epilog cine's text load it.
+const char *hud_large_label_font(const Title &title);
 
 } // namespace opennova::hud

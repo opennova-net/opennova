@@ -398,7 +398,7 @@ void HudOverlay::clear_font_() {
 	}
 	label_font_impact38_ = {};
 	label_font_impact38_valid_ = false;
-	label_tier_ = -1;
+	label_tier_ = -2;
 	for (const Ref<Texture2D> &page : page_textures_) {
 		if (page.is_valid()) texture_material_words_.erase(page->get_instance_id());
 	}
@@ -439,8 +439,8 @@ void HudOverlay::ensure_label_fonts_(float p_surface_w) {
 	if (w <= 0 || root_.is_null()) {
 		return;
 	}
-	const opennova::hud::HudLabelFontChoice choice =
-			opennova::hud::hud_label_font_choice(w);
+	const opennova::hud::HudLabelFontChoice choice = opennova::hud::hud_label_font_choice(
+			w, ResourceRoot::session_title(root_));
 	if (choice.tier == label_tier_) {
 		// Same files, new width: retail recomputes the slot scales on every
 		// resolution change (the witness rides hud_label_font_choice), and the

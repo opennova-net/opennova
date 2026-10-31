@@ -9,8 +9,11 @@
 
 #include <runtime/hud/hud_math.h>
 
+#include <base/title/title.h>
+
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -233,6 +236,53 @@ int main() {
 	expect(static_cast<int>(30 * hud::kPercentToAlpha) == 76 &&
 					static_cast<int>(50 * hud::kPercentToAlpha) == 127,
 			"the percent to alpha factor, 2.55");
+
+	// The label fonts by width, each title's table (Title::hud_fonts): Jointops.exe's three tiers
+	// and its Impact pair over 800; dfx2.exe's six (DFX2-39) and its Impact pair over 1600; a title
+	// with no table chooses no file
+	// [orig: HUD_InitAllFonts @0x51EE20] [orig: @0x51BD70 (dfx2.exe)].
+	{
+		const opennova::Title &jo = *opennova::title_by_code("jo");
+		const opennova::Title &dfx2 = *opennova::title_by_code("dfx2");
+		const auto is = [](const char *a, const char *b) { return std::strcmp(a, b) == 0; };
+		const hud::HudLabelFontChoice j640 = hud::hud_label_font_choice(640, jo);
+		const hud::HudLabelFontChoice j800 = hud::hud_label_font_choice(800, jo);
+		const hud::HudLabelFontChoice j1600 = hud::hud_label_font_choice(1600, jo);
+		expect(is(j640.normal_fnt, "Arial14n.fnt") && is(j640.bold_fnt, "Arial12b.fnt") &&
+						j640.scale == 1.0f && j640.tier == 0,
+				"JO: 640 takes the first tier over 640");
+		expect(is(j800.bold_fnt, "Arial14b.fnt") && j800.scale == 1.0f && j800.tier == 1,
+				"JO: 800 takes the second tier over 800");
+		expect(is(j1600.normal_fnt, "Arial16n.fnt") && is(j1600.bold_fnt, "Arial16b.fnt") &&
+						j1600.scale == 1600.0f / 1024.0f && j1600.tier == 2,
+				"JO: any wider width takes the last tier over 1024");
+		expect(is(j1600.large_fnt, "Impac22b.fnt") && is(j1600.impact38_fnt, "Impac38b.fnt") &&
+						j1600.large_scale == 2.0f,
+				"JO: the Impact pair over 800");
+		const hud::HudLabelFontChoice d1024 = hud::hud_label_font_choice(1024, dfx2);
+		const hud::HudLabelFontChoice d1280 = hud::hud_label_font_choice(1280, dfx2);
+		const hud::HudLabelFontChoice d1600 = hud::hud_label_font_choice(1600, dfx2);
+		const hud::HudLabelFontChoice d1920 = hud::hud_label_font_choice(1920, dfx2);
+		expect(is(d1024.bold_fnt, "Arial16b.fnt") && d1024.scale == 1.0f && d1024.tier == 2,
+				"DFX2: 1024 keeps JO's third tier");
+		expect(is(d1280.normal_fnt, "Arial20n.fnt") && is(d1280.bold_fnt, "Arial20b.fnt") &&
+						d1280.scale == 1.0f && d1280.tier == 3,
+				"DFX2: 1280 takes Arial20 over 1280");
+		expect(is(d1600.bold_fnt, "Arial28b.fnt") && d1600.scale == 1.0f && d1600.tier == 4,
+				"DFX2: 1600 takes Arial28 over 1600");
+		expect(is(d1920.normal_fnt, "Arial32n.fnt") && is(d1920.bold_fnt, "Arial32b.fnt") &&
+						d1920.scale == 1.0f && d1920.tier == 5,
+				"DFX2: wider takes Arial32 over 1920");
+		expect(is(d1600.large_fnt, "Impac44b.fnt") && is(d1600.impact38_fnt, "Impac76b.fnt") &&
+						d1600.large_scale == 1.0f &&
+						is(hud::hud_large_label_font(dfx2), "Impac44b.fnt"),
+				"DFX2: the Impact pair over 1600");
+		opennova::Title bare;
+		const hud::HudLabelFontChoice none = hud::hud_label_font_choice(1024, bare);
+		expect(none.tier == -1 && is(none.bold_fnt, "") && is(none.large_fnt, "") &&
+						none.scale == 1.0f && is(hud::hud_large_label_font(bare), ""),
+				"a title with no table chooses no file");
+	}
 
 	if (failures) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

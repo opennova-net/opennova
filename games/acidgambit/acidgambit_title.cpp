@@ -28,6 +28,8 @@ Title make() {
 	// Its expansions and the .def names it opens are Joint Operations', as its code is.
 	t.expansions = jo_title().expansions;
 	t.read_defs = jo_title().read_defs;
+	// Its HUD's fonts are Joint Operations', as its HUD is.
+	t.hud_fonts = jo_title().hud_fonts;
 	return t;
 }
 

@@ -16,6 +16,24 @@ namespace opennova {
 // flavour makes it a Title field.
 inline constexpr int kNewArchivePffFormat = 0;
 
+// The HUD's label fonts by screen width, as a title's executable loads them at each resolution
+// change (runtime/hud/hud_math.h hud_label_font_choice reads them): the Arial pair of the first
+// tier whose bound holds the width, each slot at (width << 16) / the tier's divisor, and the two
+// large slots, one file each, at (width << 16) / the large divisor.
+// [orig: HUD_InitAllFonts @0x51EE20] [orig: the twin @0x51BD70 (dfx2.exe)]
+struct TitleHudFontTier {
+	int32_t max_width = 0; // the widest screen the tier holds; 0 ends the table (any width)
+	const char *normal_fnt = nullptr; // g_HUDLabelFont
+	const char *bold_fnt = nullptr;   // g_HUDLabelFontBold
+	int32_t divisor = 0;
+};
+struct TitleHudFonts {
+	const TitleHudFontTier *tiers = nullptr; // its last tier's max_width is 0
+	const char *large_fnt = nullptr;         // g_HUDLabelFontLarge
+	const char *impact38_fnt = nullptr;      // g_HUDLabelFontImpact38
+	int32_t large_divisor = 0;
+};
+
 // A title (CONTEXT.md "Title"): the retail game a game runs as, by its short code (the `/game
 // <code>` launch flag, a project's target game). Its rows live in games/<code>/<code>_title.cpp,
 // which games::install() hands to install_titles; engine/ holds the type and the lookups alone.
@@ -83,6 +101,9 @@ struct Title {
 	// control (DFX2-38). False (Jointops.exe): the DEATH screen's SPAWNPOINTS_LIST, a close that
 	// applies nothing, and only the shown grenade positions serialized.
 	bool death_screen_loadout = false;
+	// The HUD's label fonts by screen width (TitleHudFonts); null where no binary of the title was
+	// read for them, which loads none (the HUD's slots fall back to its hudpos font).
+	const TitleHudFonts *hud_fonts = nullptr;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

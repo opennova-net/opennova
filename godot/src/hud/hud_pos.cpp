@@ -448,7 +448,8 @@ String HudPos::loading_splash_continue_key() {
 }
 
 String HudPos::loading_splash_continue_font() {
-	return String(opennova::hud::kSplashContinueFont);
+	return String(opennova::hud::hud_large_label_font(
+			ResourceRoot::session_title(Ref<ResourceRoot>())));
 }
 
 
@@ -461,7 +462,8 @@ Array HudPos::draw_splash_continue(CanvasItem *p_item, const Ref<FntResource> &p
 	opennova::hud::GameFont font;
 	font.set_font(parsed);
 	const opennova::hud::GameFontRun run =
-			opennova::hud::splash_continue_run(font, text.c_str(), p_size.x, p_size.y, p_phase_on);
+			opennova::hud::splash_continue_run(font, text.c_str(), p_size.x, p_size.y, p_phase_on,
+					ResourceRoot::session_title(Ref<ResourceRoot>()));
 	return draw_glyph_runs(p_item, run, p_pages);
 }
 
@@ -473,7 +475,8 @@ Array HudPos::draw_cine_text(CanvasItem *p_item, const Ref<FntResource> &p_font,
 	opennova::hud::GameFont font;
 	font.set_font(parsed);
 	// The large label slot at its scale for this width; the viewport the whole screen.
-	const float scale = opennova::hud::hud_label_font_choice(p_size.x).large_scale;
+	const float scale = opennova::hud::hud_label_font_choice(
+			p_size.x, ResourceRoot::session_title(Ref<ResourceRoot>())).large_scale;
 	const opennova::hud::CineViewport view{0, 0, p_size.x, p_size.y};
 	const opennova::hud::GameFontRun run = opennova::hud::cine_event_text_run(p_event->value(),
 			code_page_text(p_text), font, scale, view);
