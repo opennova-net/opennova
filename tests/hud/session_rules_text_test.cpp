@@ -293,6 +293,131 @@ static void check_rules_and_briefing() {
 	CHECK(format_end_game_condition(0, 5, empty) == "!?? 5");
 }
 
+// The in-session end-game (I) screen's pages: the session block with the
+// expansion's name and no win conditions, page 0's rules and briefing, page 1's
+// named stats with the penalties' header written only before a penalty line,
+// the explanations' eight-entry pages, the tags' residue and the footer
+// [orig: HUD_DrawEndGameScreen @0x5bd070 — the mission line @0x5bd257, the
+//  conditions' session gate @0x5bd48c..0x5bd4a6, the names' tests @0x5bd6ec /
+//  @0x5bd885, the lazy header @0x5bd899..0x5bd92f, the counters
+//  @0x5bda0b..0x5bda53, the footer @0x5bdd52..0x5bdde9].
+static void check_end_game_screen() {
+	const GameTextLookup table = table_of({
+			{"Overlays/STROVER_SERVERNAME", "Server:"},
+			{"Overlays/STROVER_MISSIONNAME", "Mission:"},
+			{"Overlays/STROVER_UPTIME", "Uptime:"},
+			{"Overlays/STROVER_GAMETYPE", "Game type:"},
+			{"Overlays/STROVER64", "Team Deathmatch"},
+			{"Overlays/STROVER_MAXPLAYERSALLOWED", "Max:"},
+			{"Overlays/STROVER_NUMPLAYERS", "Num:"},
+			{"Overlays/STROVER_ENDGAMECOND_TITLEWIN", "Win:"},
+			{"Overlays/STROVER_RULES_TDM_B", "Blue TDM rules"},
+			{"Overlays/STROVER_RULES_PSPGAMES", "PSP rules"},
+			{"Overlays/STROVER_RULEPOINTS", "Points:"},
+			{"Overlays/STROVER_RULEPENALTIES", "Penalties:"},
+			{"Overlays/STROVER_STATVAR03", "Enemy kill"},
+			{"Overlays/STROVER_STATVAREXP03", "Kill an enemy."},
+			{"Overlays/STROVER_STATVAR05", ""}, // a stat with no name
+			{"Overlays/STROVER_STATVAR06", ""},
+			{"Overlays/STROVER_STATVAR29", "Snipe min"},
+			{"Overlays/METERS", "m"},
+	});
+	SessionStatusView status;
+	status.valid = true;
+	status.server_name = "Host";
+	status.mission_name = "Bridge";
+	status.max_players = 16;
+	status.elapsed_ms = 90061000; // 1 day 01:01:01
+	status.stats[3] = 5;
+	status.stats[5] = 2;  // no name: no line
+	status.stats[29] = 50;
+	status.stats[12] = 7; // gated: no stat 31 / 32 outside KOTH
+	status.options = {{1, 30}};
+	RulesBriefingInputs inputs;
+	inputs.game_type = game_type::kTeamDeathmatch;
+	inputs.local_team = 1;
+	inputs.spawn_zones = true;
+	inputs.authority = true;
+	inputs.briefing2 = "Take the bridge.";
+	const std::string head =
+			"Server:\tHost\r\n"
+			"Mission:\tBridge (jox01)\r\n"
+			"Uptime:\t1 01:01:01\r\n"
+			"Game type:\tTeam Deathmatch\r\n"
+			"Max:\t16\r\n"
+			"Num:\t9\r\n"
+			"\r\n\r\n\r\n\r\n\r\n";
+	EndGameScreenPage page;
+	// Page 0: the block, no win conditions in a session, then the rules and the briefing.
+	CHECK(build_end_game_screen_page(0, status, 9, "jox01", inputs, table, page));
+	CHECK(page.text == head + "Blue TDM rules\r\n\r\nPSP rules\r\nTake the bridge.");
+	CHECK(!contains(page.text, "Win:"));
+	// Its tags draw live only while the uptime's seconds read 0, and never under TKOTH, whose
+	// rules key reaches the residue's byte.
+	CHECK(!page.tags_live);
+	status.elapsed_ms = 90060000; // 1 day 01:01:00
+	CHECK(build_end_game_screen_page(0, status, 9, "jox01", inputs, table, page));
+	CHECK(page.tags_live);
+	inputs.game_type = game_type::kTeamKingOfTheHill;
+	CHECK(build_end_game_screen_page(0, status, 9, "jox01", inputs, table, page));
+	CHECK(!page.tags_live);
+	inputs.game_type = game_type::kTeamDeathmatch;
+	status.elapsed_ms = 90061000;
+
+	// Page 1: the named points; no penalty, no header.
+	CHECK(build_end_game_screen_page(1, status, 9, "jox01", inputs, table, page));
+	CHECK(page.text == head + "Points:\r\nEnemy kill:\t+5\r\nSnipe min:\t50 m\r\n");
+	CHECK(!page.tags_live);
+	// A penalty with no name writes nothing, the header neither.
+	status.stats[6] = -1;
+	CHECK(build_end_game_screen_page(1, status, 9, "jox01", inputs, table, page));
+	CHECK(!contains(page.text, "Penalties:"));
+	// A named one: a line break and the header before its line.
+	status.stats[4] = -3;
+	CHECK(build_end_game_screen_page(1, status, 9, "jox01", inputs, table, page));
+	CHECK(page.text == head + "Points:\r\nEnemy kill:\t+5\r\nSnipe min:\t50 m\r\n"
+			"\r\nPenalties:\r\n!STROVER_STATVAR04:\t-3\r\n");
+
+	// Pages 2 and 3: eight entries each, the awards then the penalties, no session block and
+	// no quantum gate; a nameless entry keeps its place.
+	SessionStatusView stats;
+	stats.valid = true;
+	for (int i = 0; i <= 9; ++i) stats.stats[static_cast<size_t>(i)] = 1;
+	stats.stats[20] = -1;
+	stats.stats[21] = -256;
+	CHECK(build_end_game_screen_page(2, stats, 9, "jox01", inputs, table, page));
+	const std::string first = "<b>!STROVER_STATVAR00<-b>\r\n!STROVER_STATVAREXP00\r\n\r\n";
+	CHECK(page.text.compare(0, first.size(), first) == 0);
+	CHECK(contains(page.text, "<b>Enemy kill<-b>\r\nKill an enemy.\r\n\r\n"));
+	CHECK(contains(page.text, "<b>!STROVER_STATVAR07<-b>"));
+	CHECK(!contains(page.text, "STROVER_STATVAR05") && !contains(page.text, "STROVER_STATVAR08"));
+	CHECK(!contains(page.text, "Server:"));
+	CHECK(!page.tags_live); // the last explanation's value, 1
+	CHECK(build_end_game_screen_page(3, stats, 9, "jox01", inputs, table, page));
+	CHECK(page.text ==
+			"<b>!STROVER_STATVAR08<-b>\r\n!STROVER_STATVAREXP08\r\n\r\n"
+			"<b>!STROVER_STATVAR09<-b>\r\n!STROVER_STATVAREXP09\r\n\r\n"
+			"<b>STROVER_STATVAR20<-b>\r\nSTROVER_STATVAREXP20\r\n\r\n"
+			"<b>STROVER_STATVAR21<-b>\r\nSTROVER_STATVAREXP21\r\n\r\n");
+	CHECK(page.tags_live); // -256's low byte is 0
+
+	// Not valid: nothing built, the box alone.
+	status.valid = false;
+	CHECK(!build_end_game_screen_page(0, status, 9, "jox01", inputs, table, page));
+	CHECK(page.text.empty() && !page.tags_live);
+
+	// The footer: keyhelp's entries as their own formats, else the literals untouched, and the
+	// literals while gametext is not loaded.
+	const GameTextLookup keyhelp = table_of({{"Text/PAGE", "Seite %i von %i"}});
+	std::string page_line;
+	std::string footer;
+	end_game_screen_footer(2, keyhelp, true, page_line, footer);
+	CHECK(page_line == "Seite 3 von 4");
+	CHECK(footer == "!PgUp and PgDn to change pages");
+	end_game_screen_footer(0, keyhelp, false, page_line, footer);
+	CHECK(page_line == "!Page 1 of 4");
+}
+
 int main() {
 	check_session_status_fold();
 	check_server_config_strings();
@@ -300,6 +425,7 @@ int main() {
 	check_co_op_key_nine();
 	check_composition();
 	check_rules_and_briefing();
+	check_end_game_screen();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

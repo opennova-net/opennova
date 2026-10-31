@@ -208,6 +208,8 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("map_legend_keys"),
 			&HudOverlay::map_legend_keys);
 	ClassDB::bind_method(D_METHOD("set_briefing", "shown", "sim"), &HudOverlay::set_briefing);
+	ClassDB::bind_method(D_METHOD("set_end_game_screen", "shown", "sim", "gametext"),
+			&HudOverlay::set_end_game_screen);
 	ClassDB::bind_method(D_METHOD("cycle_briefing_page", "direction", "in_session"),
 			&HudOverlay::cycle_briefing_page);
 	ClassDB::bind_method(D_METHOD("set_tip", "tip", "countdown", "local_dead", "gametext",

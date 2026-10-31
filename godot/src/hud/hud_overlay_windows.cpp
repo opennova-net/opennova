@@ -1,7 +1,8 @@
 // The key-toggled overlay windows' setters (engine runtime/hud/
 // hud_overlay_windows.h): the F1 help page, the F12 map legend, the I
-// briefing panel and its page keys. The shell resolves the text tables;
-// the compiler owns the layout and the briefing's page state.
+// briefing panel, the I window's in-session end-game screen and the page
+// keys. The shell resolves the text tables; the compiler owns the layout and
+// the briefing's page state.
 #include "hud/hud_overlay.h"
 #include "mnu/controls_model.h"
 #include "rtxt/rtxt_string_file.h"
@@ -9,8 +10,11 @@
 #include "util/string_convert.h"
 
 #include <runtime/controls/binding_set.h>
+#include <runtime/controls/key_strings.h> // the end-game footer's keyhelp getter
 #include <runtime/hud/hud_server_status.h>
+#include <runtime/hud/session_rules_text.h>
 #include <runtime/hud/tip_system.h>
+#include <runtime/inmatch/role_feeds.h> // end_game_screen_text
 
 #include <utility>
 
@@ -56,6 +60,28 @@ PackedStringArray HudOverlay::map_legend_keys() {
 void HudOverlay::set_briefing(bool p_shown, const Ref<Simulation> &p_sim) {
 	state_.briefing.shown = p_shown;
 	state_.briefing.text = p_shown && p_sim.is_valid() ? p_sim->mission_briefing_text() : std::string();
+}
+
+void HudOverlay::set_end_game_screen(bool p_shown, const Ref<Simulation> &p_sim,
+		const Ref<RtxtStringFile> &p_gametext) {
+	// The page the briefing pages stand on, built for this frame's draw, and keyhelp's footer
+	// over it (engine hud/session_rules_text.h carries the witnesses).
+	opennova::hud::HudEndGameScreenState &eg = state_.end_game;
+	eg = opennova::hud::HudEndGameScreenState();
+	eg.shown = p_shown;
+	if (!p_shown || !p_sim.is_valid()) return;
+	eg.page = compiler_.briefing_pages().page;
+	opennova::hud::EndGameScreenPage page;
+	eg.valid = opennova::inmatch::end_game_screen_text(p_sim->role_view(),
+			game_text_lookup(p_gametext), eg.page, page);
+	eg.text = std::move(page.text);
+	eg.tags_live = page.tags_live;
+	const opennova::hud::GameTextLookup keyhelp = [](const char *section, const char *key,
+			const char *fallback) {
+		return opennova::controls::key_help_string_raw(section, key, fallback);
+	};
+	opennova::hud::end_game_screen_footer(eg.page, keyhelp, p_gametext.is_valid(), eg.page_line,
+			eg.footer);
 }
 
 void HudOverlay::cycle_briefing_page(int p_direction, bool p_in_session) {

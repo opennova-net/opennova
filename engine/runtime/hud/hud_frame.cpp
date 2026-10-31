@@ -827,7 +827,15 @@ void HudFrameCompiler::compile_gameplay_overlay_windows(const HudFrameState &sta
 	//  and g_ScoreboardPanelVisible tests @0x424310].
 	if (!state.local_dead && !state.round_over)
 		layered_(HudElement::Scoreboard, [&] { element_scoreboard(state, w, h); });
-	layered_(HudElement::Briefing, [&] { element_briefing(state, w, h); });
+	// The I window: in a session the end-game screen, out of one the briefing panel
+	// [orig: `cmp g_NapiNPCtx.is_in_session, 0` @0x5be135, HUD_DrawEndGameScreen @0x5be13e,
+	//  HUD_DrawBriefingPanel @0x5be145]; the embedder raises the one the session picks.
+	layered_(HudElement::Briefing, [&] {
+		if (state.end_game.shown)
+			element_end_game_screen(state, w, h);
+		else
+			element_briefing(state, w, h);
+	});
 	layered_(HudElement::Objectives, [&] { element_objectives(state, w, h); });
 	layered_(HudElement::HelpScreen, [&] { element_help_screen(state, w, h); });
 	// The quit dialog below the blank level [orig: `cmp g_HUDDetailLevel, 3`

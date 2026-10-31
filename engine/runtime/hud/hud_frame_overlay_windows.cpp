@@ -1,6 +1,7 @@
-// THE KEY-TOGGLED OVERLAY WINDOWS: the I briefing panel, the F1 key-binding
-// help screen and the F12 map legend, the tail HUD_DrawGameplayOverlays draws
-// after the big map [orig: HUD_DrawGameplayOverlays @0x5BDE60 — the briefing
+// THE KEY-TOGGLED OVERLAY WINDOWS: the I briefing panel (the end-game screen in
+// a session), the F1 key-binding help screen and the F12 map legend, the tail
+// HUD_DrawGameplayOverlays draws after the big map [orig: HUD_DrawGameplayOverlays
+// @0x5BDE60 — the briefing
 // @0x5be133..0x5be145, HUD_DrawWinConditions @0x5be163, HelpScreen_Draw
 // @0x5be179], plus the block wrapper the briefing lays its text out with
 // [orig: HUD_DrawWrappedText @0x580C00].
@@ -11,6 +12,7 @@
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_medic_cross.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -56,7 +58,7 @@ uint32_t legend_icon_color(const char *name, uint32_t color, int frame_counter) 
 
 int wrapped_text_layout(const GameFont &font, float scale_x, float scale_y,
 		const std::string &text, int x_start, int y_start, int x_end, int y_limit,
-		int skip_lines, std::vector<HudWrappedLine> &out) {
+		int skip_lines, std::vector<HudWrappedLine> &out, int tab_width) {
 	out.clear();
 	if (font.font() == nullptr || scale_x == 0.0f) return 0;
 	const int budget = ftol(static_cast<float>(x_end - x_start) / scale_x);
@@ -77,7 +79,9 @@ int wrapped_text_layout(const GameFont &font, float scale_x, float scale_y,
 		if (c != '\0') {
 			int h = 0;
 			const std::string run = text.substr(line_start, i + 1 - line_start);
-			font.measure(run.c_str(), 1.0f, 1.0f, &width, &h);
+			GameFontState tabs;
+			tabs.tab_width = tab_width;
+			font.measure(run.c_str(), 1.0f, 1.0f, &width, &h, tab_width != 0 ? &tabs : nullptr);
 		}
 		size_t line_end = i;
 		if (width <= budget) {
@@ -330,6 +334,69 @@ void HudFrameCompiler::element_briefing(const HudFrameState &state, float w, flo
 				laid.underlines.end());
 	}
 	if (next != 0 && pages.page + 1 < HudBriefingPages::kPages) pages.starts[pages.page + 1] = next;
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_end_game_screen(const HudFrameState &state, float w, float h) {
+	// THE END-GAME SCREEN, the I window in a session [orig: HUD_DrawEndGameScreen @0x5bd070 —
+	//  HUD_DrawLabelBox(ctx, 170, 76, 854, 692, NULL, -1) @0x5bd089..0x5bd0c8; the text rect,
+	//  the box inset 42 / 38 / 42 / 48, (212, 114)..(812, 644), each corner through
+	//  Viewport_ScaleToVirtualCoords @0x5bd0cd..0x5bd107; the rest only while the status
+	//  record is valid @0x5bd10f..0x5bd115]
+	const HudEndGameScreenState &eg = state.end_game;
+	if (!eg.shown) return;
+	emit_label_box(170.0f, 76.0f, 854.0f, 692.0f, std::string(), 0xFFFFFFFFu, w, h);
+	const int32_t sw = static_cast<int32_t>(w);
+	const int32_t sh = static_cast<int32_t>(h);
+	const int32_t x1 = design_to_screen_x(212, sw);
+	const int32_t y1 = design_to_screen_y(114, sh);
+	const int32_t x2 = design_to_screen_x(812, sw);
+	const int32_t y2 = design_to_screen_y(644, sh);
+	if (!eg.valid) {
+		++draw_list_.elements_drawn;
+		return;
+	}
+	const bool have_bold = label_font_bold_.font() != nullptr;
+	const GameFont &bf = have_bold ? label_font_bold_ : font_;
+	const float bscale = have_bold ? label_scale_ : 1.0f;
+	// The bold slot's tab stop, 240 scaled (GText_SetTabWidth clamps below 0 to 0), which the
+	// wrapper's measure and its state block read [orig: @0x5bd12d..0x5bd14a; HUD_DrawWrappedText
+	// @0x580cc6..0x580cce]. Retail's write stays on the font after the screen.
+	const int tab = std::max(0, design_to_screen_x(240, sw));
+	// The page's text, wrapped from its first line in the bold slot, alignment 0, colour -1,
+	// the overflow line written as the next page's start [orig: HUD_DrawWrappedText(text,
+	// g_HUDLabelFontBold, x1, y1, x2, y2, 0, -1, 0) @0x5bdd0f..0x5bdd36; dword_28E3D74[page]
+	// @0x5bdd44..0x5bdd4b].
+	std::vector<HudWrappedLine> lines;
+	const int next =
+			wrapped_text_layout(bf, bscale, bscale, eg.text, x1, y1, x2, y2, 0, lines, tab);
+	const uint32_t color = half_bright_keep_alpha(0xFFFFFFFFu);
+	GameFontState block;
+	block.tags_inert = !eg.tags_live;
+	block.tab_width = tab;
+	for (const HudWrappedLine &line : lines) {
+		const std::string run = eg.text.substr(line.begin, line.end - line.begin);
+		const GameFontRun laid = bf.layout(run.c_str(), static_cast<float>(x1),
+				static_cast<float>(line.y), bscale, bscale, 0u, color, &block);
+		draw_list_.glyphs.insert(draw_list_.glyphs.end(), laid.quads.begin(), laid.quads.end());
+		draw_list_.underlines.insert(draw_list_.underlines.end(), laid.underlines.begin(),
+				laid.underlines.end());
+	}
+	HudBriefingPages &pages = briefing_pages_;
+	if (next != 0 && eg.page >= 0 && eg.page + 1 < HudBriefingPages::kPages)
+		pages.starts[eg.page + 1] = next;
+	// The footer, bold, half-bright white [orig: KeyHelp Text/PAGE and Text/CHANGE_SCREEN].
+	const uint32_t footer_color = half_bright_argb(0xFFFFFFFFu);
+	// Both centred on the screen, at design (512, 700) and (512, 720) plus the safe top
+	// [orig: HUD_DrawTextCentered_HalfBright @0x5bdd7d..0x5bddc4 / @0x5bddee..0x5bde31;
+	//  HUD_DrawTextCentered_HalfBright @0x580680 (flags 1: draw flags 1)].
+	const float x = static_cast<float>(design_to_screen_x(512, sw));
+	emit_slot_text(label_font_bold_, label_scale_, eg.page_line.c_str(), x,
+			static_cast<float>(design_to_screen_y(700, sh)) + kSafeTop, footer_color,
+			kFontAlignCenter);
+	emit_slot_text(label_font_bold_, label_scale_, eg.footer.c_str(), x,
+			static_cast<float>(design_to_screen_y(720, sh)) + kSafeTop, footer_color,
+			kFontAlignCenter);
 	++draw_list_.elements_drawn;
 }
 

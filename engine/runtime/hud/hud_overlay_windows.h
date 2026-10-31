@@ -64,6 +64,23 @@ struct HudBriefingState {
 	std::string text;
 };
 
+// The I window in a session, the end-game screen: the embedder builds the
+// page the briefing pages stand on (hud/session_rules_text.h
+// build_end_game_screen_page, end_game_screen_footer; inmatch
+// end_game_screen_text) and the compiler draws it: its box, then while the
+// session status record is valid the wrapped page and the two footer lines
+// [orig: HUD_DrawEndGameScreen @0x5bd070, drawn on the briefing's window flag
+// in a session @0x5be135..0x5be13e].
+struct HudEndGameScreenState {
+	bool shown = false;
+	bool valid = false;  // g_SessionStatus' valid word (@0x5bd10f)
+	int page = 0;        // the page the text was built for [orig: dword_28E3D6C]
+	std::string text;
+	bool tags_live = false; // EndGameScreenPage::tags_live
+	std::string page_line;  // KeyHelp Text/PAGE over (page + 1, 4)
+	std::string footer;     // KeyHelp Text/CHANGE_SCREEN
+};
+
 // The briefing pages: the current page and each page's first wrapped line;
 // the drawer writes the next page's start when the page overflows, and the
 // page keys walk them [orig: dword_28E3D6C (page), g_BriefingPageLineOffsets

@@ -255,13 +255,17 @@ public:
 	// runtime/hud/hud_overlay_windows.h): the F1 help page's resolved text,
 	// the F12 legend's title / labels (one per map_legend_keys() entry; its
 	// pulses read the HUD frame counter), the I briefing panel (its text read from the sim's
-	// mission text) and the briefing's page keys (direction 0 resets).
+	// mission text), the I window's session screen (the end-game page the briefing pages
+	// stand on, inmatch::end_game_screen_text, with keyhelp's footer) and the briefing's page
+	// keys (direction 0 resets).
 	void set_help_screen(bool p_shown, const String &p_title, const String &p_page_line,
 			const String &p_footer, const PackedStringArray &p_keys,
 			const PackedStringArray &p_texts);
 	void set_map_legend(bool p_shown, const String &p_title, const PackedStringArray &p_labels);
 	static PackedStringArray map_legend_keys();
 	void set_briefing(bool p_shown, const Ref<Simulation> &p_sim);
+	void set_end_game_screen(bool p_shown, const Ref<Simulation> &p_sim,
+			const Ref<RtxtStringFile> &p_gametext);
 	void cycle_briefing_page(int p_direction, bool p_in_session);
 	// The tip panel (engine hud/tip_system.h): the showing tip, its
 	// countdown, the local player's dead bit (a dead player's M-cycle map

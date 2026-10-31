@@ -9,10 +9,12 @@
 #include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_elements.h>
 #include <runtime/hud/hud_frame.h>
+#include <runtime/hud/hud_math.h>
 #include <runtime/hud/hud_overlay_windows.h>
 
 #include "common/test_font.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -243,6 +245,71 @@ void test_briefing_markup_draws_plain(const fnt_font_t *font) {
 		CHECK(list.glyphs[i].color == 0xFF7F7F7Fu);
 }
 
+// The I window in a session, the end-game screen: it stands in for the briefing panel at the
+// window's slot; its box alone while the status record is not valid; its page wrapped in the
+// bold slot with the 240 tab stop, its tags inert unless the residue reads 0, an overflow
+// written as the next page's start; the footer centred at (512, 700) / (512, 720)
+// [orig: HUD_DrawGameplayOverlays @0x5be135..0x5be145; HUD_DrawEndGameScreen @0x5bd070 -
+//  the gate @0x5bd10f, the tab width @0x5bd12d..0x5bd14a, the wrap @0x5bdd36 and its store
+//  @0x5bdd4b, the footer @0x5bdd7d..0x5bde31].
+void test_end_game_screen(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	configure(compiler, font);
+	HudFrameState state;
+	state.briefing.shown = true;
+	state.briefing.text = "brief";
+	state.end_game.shown = true;
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(box_quads_from(list, list.top_begin.quads) > 0);
+		CHECK(list.glyphs.size() == list.top_begin.glyphs); // neither the page nor the briefing
+	}
+	state.briefing.shown = false;
+	state.end_game.valid = true;
+	// A tab steps to the next 240 from the text's left edge, 212.
+	state.end_game.text = "A\tB";
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(list.glyphs.size() - list.top_begin.glyphs == 2);
+		if (list.glyphs.size() - list.top_begin.glyphs == 2) {
+			CHECK(std::fabs(list.glyphs[list.top_begin.glyphs].x_top_left - 211.5f) < 1.0f);
+			CHECK(std::fabs(list.glyphs[list.top_begin.glyphs + 1].x_top_left - 451.5f) < 1.0f);
+		}
+	}
+	// Inert tags draw plain; a live residue draws <b> bold, a second strike per glyph.
+	state.end_game.text = "<b>A<-b>";
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.size() -
+					compiler.last_draw_list().top_begin.glyphs == 1);
+	state.end_game.tags_live = true;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.size() -
+					compiler.last_draw_list().top_begin.glyphs == 2);
+	state.end_game.tags_live = false;
+	// An overflow is written as the next page's start.
+	std::string tall;
+	for (int i = 0; i < 400; ++i) tall += "line\r\n";
+	state.end_game.text = tall;
+	state.end_game.page = 1;
+	compiler.briefing_pages().reset();
+	compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(compiler.briefing_pages().starts[2] > 0);
+	CHECK(compiler.briefing_pages().starts[1] == 0);
+	// The footer: both lines centred at x 512, at y 700 and 720.
+	state.end_game.text.clear();
+	state.end_game.page_line = "P";
+	state.end_game.footer = "F";
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(list.glyphs.size() - list.top_begin.glyphs == 2);
+		if (list.glyphs.size() - list.top_begin.glyphs == 2) {
+			const GameFontQuad &page = list.glyphs[list.top_begin.glyphs];
+			const GameFontQuad &hint = list.glyphs[list.top_begin.glyphs + 1];
+			CHECK(std::fabs((page.x_top_left + page.x_top_right) * 0.5f - 512.0f) < 1.5f);
+			CHECK(std::fabs((hint.x_top_left + hint.x_top_right) * 0.5f - 512.0f) < 1.5f);
+			CHECK(std::fabs(hint.y_top - page.y_top - 20.0f) < 0.01f);
+		}
+	}
+}
+
 // The view veil's place in the lists (D-NET-1384): the main HUD (the gameplay overlay pass, its
 // ammo count among it) lies under veil_begin, where the device leg lays the damage quads and the
 // sun veil; HUD_DrawGameplayOverlays' legs (the frame-rate overlay, then the Tab player list)
@@ -357,6 +424,7 @@ int main() {
 	test_briefing_pages();
 	test_windows_ride_the_top_layer(&font);
 	test_briefing_markup_draws_plain(&font);
+	test_end_game_screen(&font);
 	test_view_veil_layer(&font);
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

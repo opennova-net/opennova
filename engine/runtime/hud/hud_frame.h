@@ -1160,6 +1160,8 @@ struct HudFrameState {
 	HudHelpScreenState help_screen;
 	HudMapLegendState map_legend;
 	HudBriefingState briefing;
+	// The I window in a session: the end-game screen (hud_overlay_windows.h).
+	HudEndGameScreenState end_game;
 	// The overlay-panel pass's voice-macro menus (hud_overlay_windows.h).
 	HudVoiceMacroMenuState emotes_menu;
 	HudVoiceMacroMenuState radio_menu;
@@ -1742,6 +1744,7 @@ private:
 	// HUD_DrawOverlayPanels' legs, over HUD_DrawGameplayOverlays' (hud_frame.cpp).
 	void compile_overlay_panels(const HudFrameState &state, float w, float h);
 	void element_briefing(const HudFrameState &state, float w, float h);
+	void element_end_game_screen(const HudFrameState &state, float w, float h);
 	void element_help_screen(const HudFrameState &state, float w, float h);
 	void element_map_legend(const HudFrameState &state, float w, float h);
 	// HUD_DrawLabelBox over design corners: the stdbox, and a non-empty title
@@ -1957,8 +1960,12 @@ int chat_wrap_text(const GameFont &font, float scale, std::string &text,
 // advance @0x580d59..0x580d64. Returns 0 at the text's end @0x580e44 /
 // @0x580e84, else the index of the first line that does not fit above
 // `y_limit` (unless y_start == y_limit) @0x580e4a..0x580e60 / @0x580e9c.
+// The run's measure is the font's own with no state, so a tab advances to the
+// font's tab width (this+0x168, `tab_width` here; 0 measures it as the SPACE
+// glyph) [orig: CGameFont_GetTextExtent(.., 0) @0x580d0e; CGameFont_MeasureText
+// @0x674e70 - the tab arm reads this+0x168 @0x674ff8].
 int wrapped_text_layout(const GameFont &font, float scale_x, float scale_y,
 		const std::string &text, int x_start, int y_start, int x_end, int y_limit,
-		int skip_lines, std::vector<HudWrappedLine> &out);
+		int skip_lines, std::vector<HudWrappedLine> &out, int tab_width = 0);
 
 } // namespace opennova::hud

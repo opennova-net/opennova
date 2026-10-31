@@ -15,6 +15,7 @@
 #include <runtime/hud/hud_frame.h> // HudSessionState
 #include <runtime/hud/hud_minimap.h> // HudMapGridOrigin
 #include <runtime/hud/hud_map_view.h> // DeathMapFacts
+#include <runtime/hud/session_rules_text.h> // EndGameScreenPage
 #include <net/npwire/session_vars.h> // SessionVars
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/world/deploy_screen_feed.h>
@@ -194,6 +195,16 @@ SessionVars scoreboard_session_vars(const RoleView &view);
 //  Server_BuildAndSerializeSessionStatus @0x4fc990]
 bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gametext,
 		std::string &out);
+
+// THE END-GAME (I) SCREEN'S PAGE for this client, over the same record and
+// inputs as the CMAP RULES text, plus the active expansion's name the mission
+// line carries (g_ExpansionName: the authority's configured expansion, a
+// joiner's the one its join switched to, the S2C 0x7B's). False (the screen
+// draws its box alone) while the record is not valid, or on the bare local
+// role, which is never in a session.
+// [orig: HUD_DrawEndGameScreen @0x5bd070 (g_ExpansionName @0xB4C584 @0x5bd221)]
+bool end_game_screen_text(const RoleView &view, const hud::GameTextLookup &gametext, int page,
+		hud::EndGameScreenPage &out);
 
 // THE TALK KEYS' FACTS for this client (hud::ChatEntryFacts): the death
 // screen and round-over latches off the replica, the session (a joiner's

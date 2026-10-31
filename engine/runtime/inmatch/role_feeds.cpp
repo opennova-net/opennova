@@ -1717,13 +1717,18 @@ world::DeployActivation deploy_activation(const RoleView &view, const hud::GameT
 	return out;
 }
 
-bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gametext,
-		std::string &out) {
+namespace {
+
+// What the session's rules texts read (the CMAP RULES text, the end-game
+// screen): the session status record as this role sees it and the rules and
+// briefing inputs. False on the bare local role.
+bool session_rules_sources(const RoleView &view, hud::SessionStatusView &sv,
+		hud::RulesBriefingInputs &inputs) {
 	if (view.runtime == nullptr || view.kernel == nullptr) return false;
 	const replication::ClientState &state = view.runtime->state();
 	world::World &w = view.kernel->world;
 	replication::ClientSessionStatus status;
-	hud::RulesBriefingInputs inputs;
+	inputs = hud::RulesBriefingInputs();
 	if (view.joiner) {
 		status = state.session_status;
 		inputs.config_first = replication::server_config_first_text(state.server_config_strings);
@@ -1742,7 +1747,6 @@ bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gam
 	} else {
 		return false;
 	}
-	hud::SessionStatusView sv;
 	sv.valid = status.valid;
 	sv.server_name = status.server_name;
 	sv.mission_name = status.mission_name;
@@ -1758,8 +1762,35 @@ bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gam
 	if (const world::Entity *local = w.registry.get(w.cached.local_player))
 		inputs.local_team = static_cast<int8_t>(local->team);
 	inputs.spawn_zones = w.zones.has_spawn_zone(); // SpawnZoneList_HasAny
+	return true;
+}
+
+} // namespace
+
+bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gametext,
+		std::string &out) {
+	hud::SessionStatusView sv;
+	hud::RulesBriefingInputs inputs;
+	if (!session_rules_sources(view, sv, inputs)) return false;
 	// [orig: g_ScoreboardInGameCount, the 0x16 trailer @0x42fe70]
-	return hud::build_end_game_stats_text(sv, state.scoreboard.in_game_count, inputs, gametext, out);
+	return hud::build_end_game_stats_text(sv, view.runtime->state().scoreboard.in_game_count,
+			inputs, gametext, out);
+}
+
+bool end_game_screen_text(const RoleView &view, const hud::GameTextLookup &gametext, int page,
+		hud::EndGameScreenPage &out) {
+	out = hud::EndGameScreenPage();
+	hud::SessionStatusView sv;
+	hud::RulesBriefingInputs inputs;
+	if (!session_rules_sources(view, sv, inputs)) return false;
+	// g_ExpansionName: the authority's configured name, a joiner's the S2C 0x7B's, which its join
+	// switched the mount to [orig: HUD_DrawEndGameScreen @0x5bd221; UI_JoinSelectedSession
+	// @0x569afa / Expansion_SwitchTo @0x5688c0].
+	const std::string &expansion =
+			view.joiner ? view.runtime->expansion() : view.host->config.expansion;
+	// [orig: g_ScoreboardInGameCount @0x5bd408, the 0x16 trailer @0x42fe70]
+	return hud::build_end_game_screen_page(page, sv, view.runtime->state().scoreboard.in_game_count,
+			expansion, inputs, gametext, out);
 }
 
 void scoreboard_feed(const RoleView &view, hud::HudScoreboardState &out) {
