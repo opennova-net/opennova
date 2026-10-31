@@ -567,9 +567,12 @@ struct HudDeployKeyInput {
 inline constexpr int kHudDeployKeyAutoTeam = 0xFFFE;
 int hud_deploy_key_pick(const HudDeployKeyInput &input);
 
-// The tip producers' events, in the order they were raised
-// [orig: CTipSystem_HandleEvent @0x5b6ad0 per call site].
-void hud_toggles_tip_events(HudToggleState &state, const uint8_t *events, size_t count);
+// The tip producers' events, in the order they were raised, under the title: none heard where
+// its tip system hears none (Title::hud_tips, DFX2-122)
+// [orig: CTipSystem_HandleEvent @0x5b6ad0 per call site] [orig: nullsub_11 @0x5B5BA0
+//  (dfx2.exe)].
+void hud_toggles_tip_events(HudToggleState &state, const uint8_t *events, size_t count,
+		const Title &title);
 // `frames` main frames of the tip countdown [orig: CTipSystem_TickCountdown
 // @0x5b69f0, called once per Game_ProcessMainFrame @0x52675d whether or not
 // the SP pause holds (the pause gate @0x526779 comes after it)].

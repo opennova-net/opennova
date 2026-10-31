@@ -553,6 +553,15 @@ struct Title {
 	//  @0x4DE6F0 - the big map @0x4DE832..0x4DE842, `mov dword_B6FA3C, 40000h` @0x4DE847
 	//  (dfx2.exe)]
 	int32_t spinmap_spawn_zoom_q16 = 0;
+	// DFX2-122: the tip system ("MrClippy") hears its producers' events
+	// (hud::hud_toggles_tip_events): the boarding, NVG, binocular, scope and designator tips and
+	// the spectator-begin tip. dfx2.exe's CTipSystem_HandleEvent and CTipSystem_Init are empty
+	// (its CTipSystem_ShowTip has no caller), so no tip ever shows, the once-counters never count
+	// and Esc never closes one; false. On the Title: the executable's own HUD.
+	// [orig: CTipSystem_HandleEvent @0x5B6AD0; CTipSystem_Init @0x5B6970] [orig: nullsub_11
+	//  @0x5B5BA0 (`retn 4`) at every producer's call, nullsub_36 @0x5B5AA0 from
+	//  Render_InitMissionTextures @0x5856F0 (dfx2.exe)]
+	bool hud_tips = true;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

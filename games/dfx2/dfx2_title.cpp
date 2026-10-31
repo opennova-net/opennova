@@ -515,6 +515,11 @@ Title make() {
 	//  @0x4DE6F0 - `mov dword_B6FA3C, 40000h` @0x4DE847, the twin of Jointops.exe's mission-scaled
 	//  g_SpinmapZoom store @0x4E1763 (dfx2.exe)].
 	t.spinmap_spawn_zoom_q16 = 0x40000;
+	// DFX2-122: no tip: every producer calls the empty handler and the init is empty [orig:
+	//  nullsub_11 @0x5B5BA0 (`retn 4`), from Player_ToggleWeaponScope @0x4DC2E8 and
+	//  Entity_ProcessVehicleAttach @0x435A37 among the rest; nullsub_36 @0x5B5AA0 from
+	//  Render_InitMissionTextures @0x5856F0; CTipSystem_ShowTip @0x5B5B30 no caller (dfx2.exe)].
+	t.hud_tips = false;
 	return t;
 }
 

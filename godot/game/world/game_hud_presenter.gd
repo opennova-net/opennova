@@ -759,7 +759,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# last frame (paused or not), then the draw feed: the countdown steps once
 	# a main frame, the frame that steps the main-frame counter (engine
 	# hud/tip_system.h, world/world.h HudFrameCounters).
-	_toggles.apply_tip_events(sim.take_tip_events())
+	_toggles.apply_tip_events(sim.take_tip_events(), sim)
 	# The 0x0F's death-screen HUD blank: the replica fold queues it only with
 	# the death screen up (the engine's gate); this drain applies it.
 	if sim.take_hud_detail_blank():

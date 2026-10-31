@@ -10,6 +10,7 @@
 //  KeyBinding_GetDisplayStringByActionName @0x5b6a00; Input_HandleActionBinding
 //  case 18 @0x49b34d; Entity_ProcessVehicleAttach @0x435bfd..0x435cc0;
 //  Entity_DetachFromVehicle @0x4356b0]
+#include <base/title/title.h>
 #include <runtime/audio/oneshot_play.h>
 #include <runtime/controls/binding_set.h>
 #include <runtime/hud/hud_frame.h>
@@ -226,8 +227,18 @@ void test_escape_tip_leg() {
 	CHECK(hud_toggles_escape(s, in) == (kEscapeOpenMenu | kOverlayWindowsCleared));
 	// The drain and the frames.
 	const uint8_t events[] = {kTipEventNvgOn, kTipEventBinocularsOn};
-	hud_toggles_tip_events(s, events, 2);
+	hud_toggles_tip_events(s, events, 2, *title_by_code("jo"));
 	CHECK(s.tips.tip == kTipBinocRange && s.tips.nvg_count == 1);
+	// DFX2-122: dfx2.exe's handler is empty: the drain shows nothing and counts nothing, so the
+	// spectator-begin tip never shows either [orig: nullsub_11 @0x5B5BA0 (dfx2.exe)].
+	{
+		HudToggleState dfx2;
+		const uint8_t dfx2_events[] = {kTipEventNvgOn, kTipEventBoardHelo, kTipEventSpectatorBegin};
+		hud_toggles_tip_events(dfx2, dfx2_events, 3, *title_by_code("dfx2"));
+		CHECK(dfx2.tips.tip == kTipNone && dfx2.tips.countdown == 0 && dfx2.tips.nvg_count == 0);
+		CHECK(!tip_is_showing(dfx2.tips));
+		CHECK(hud_toggles_escape(dfx2, in) == (kEscapeOpenMenu | kOverlayWindowsCleared));
+	}
 	hud_toggles_tip_frames(s, 40);
 	CHECK(s.tips.countdown == 1200);
 	hud_toggles_tip_frames(s, 1000000);

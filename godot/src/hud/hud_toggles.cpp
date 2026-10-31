@@ -149,9 +149,11 @@ bool HudToggles::is_server_status_score_list_open() const {
 }
 bool HudToggles::is_quit_dialog_open() const { return state_.quit_dialog_open; }
 void HudToggles::set_paused(bool p_paused) { state_.paused = p_paused; }
-void HudToggles::apply_tip_events(const PackedByteArray &p_events) {
+void HudToggles::apply_tip_events(const PackedByteArray &p_events, const Ref<Simulation> &p_sim) {
+	// The events are the sim's own drain: no sim, no events.
+	if (p_sim.is_null()) return;
 	opennova::hud::hud_toggles_tip_events(state_, p_events.ptr(),
-			static_cast<size_t>(p_events.size()));
+			static_cast<size_t>(p_events.size()), p_sim->game_title());
 }
 void HudToggles::advance_tip_frames(int p_frames) {
 	opennova::hud::hud_toggles_tip_frames(state_, p_frames);
@@ -231,7 +233,7 @@ void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_radio_menu_open"), &HudToggles::is_radio_menu_open);
 	ClassDB::bind_method(D_METHOD("is_paused"), &HudToggles::is_paused);
 	ClassDB::bind_method(D_METHOD("set_paused", "paused"), &HudToggles::set_paused);
-	ClassDB::bind_method(D_METHOD("apply_tip_events", "events"), &HudToggles::apply_tip_events);
+	ClassDB::bind_method(D_METHOD("apply_tip_events", "events", "sim"), &HudToggles::apply_tip_events);
 	ClassDB::bind_method(D_METHOD("advance_tip_frames", "frames"), &HudToggles::advance_tip_frames);
 	ClassDB::bind_method(D_METHOD("restart_round"), &HudToggles::restart_round);
 	ClassDB::bind_method(D_METHOD("set_tip_options", "keyboard_tips", "gameplay_tips"),
