@@ -820,8 +820,8 @@ ahead of the waiting polls, so a page never meets its own `console_busy`.
 | `GET /api/me/servers/<id>/chat` | `CHAT GET` | the chat window, oldest first |
 | `POST /api/me/servers/<id>/chat` | `CHAT SEND <text>` | `{"text"}`: cp1252, no control character, not blank, at most 59 characters; 400 `invalid_text` |
 | `GET /api/me/servers/<id>/console` | none | the console ring in any state, with the link's state (`?limit=`, `?after=`); 404 |
-| `GET .../settings` | none (the database) | saved configuration, revision, title schema and pinned weapon catalog, in any state |
-| `PATCH .../settings` | supported `SET` and `WEAPON SET` commands | `{settings_revision, patch}`; file-only changes wait for the next launch; an edit with no live command is saved with no admin line, its link up or not (`next_launch_only`), one with a live command needs the server running and its link up (409 `server_not_running`, 503 `admin_unavailable`) |
+| `GET .../settings` | none (the database) | saved configuration, revision, title schema and pinned weapon catalog, in any state; 409 `game_gone` once its game is deleted (no title reads it) |
+| `PATCH .../settings` | supported `SET` and `WEAPON SET` commands | `{settings_revision, patch}`; file-only changes wait for the next launch; an edit with no live command is saved with no admin line, its link up or not (`next_launch_only`), one with a live command needs the server running and its link up (409 `server_not_running`, 503 `admin_unavailable`); 409 `game_gone` with its game's row gone (the fleet's drain refuses the edit too) |
 | `GET .../weapons` | `WEAPON LIST` | complete reply packets |
 
 No admin line passes through (ADR 0053 decision 9): every command is one the routes
