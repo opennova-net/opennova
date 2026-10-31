@@ -510,8 +510,8 @@ void Simulation::finish_kernel_boot() {
 	// title's constant spin reset over it (witness at
 	// hud::HudMapControl::set_mission_map_zoom — the Player_InitPlayer derivation off
 	// the BMS header float; Title::spinmap_spawn_zoom_q16).
-	kernel_->local.hud_map_control.set_mission_map_zoom(kernel_->mission.header.map_zoom,
-			game_title().spinmap_spawn_zoom_q16);
+	kernel_->local.hud_map_control.set_mission_map_zoom(
+			kernel_->mission.header.map_zoom, game_title());
 	if (!kernel_->wac_loaded && assets_.wac_program && assets_.wac_program->is_ok())
 		kernel_->wac.set_program(assets_.wac_program->native_program(), kernel_->world);
 }

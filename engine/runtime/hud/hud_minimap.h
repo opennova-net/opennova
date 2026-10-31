@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include <base/title/title.h> // Title::spinmap_spawn_zoom_q16 (set_mission_map_zoom)
 #include <runtime/terrain_query/coords.h>
 
 namespace opennova::hud {
@@ -769,9 +770,10 @@ struct HudMapControl {
 
 	// Stamp the mission's authored map_zoom (BMS header float) at promotion;
 	// the current values snap to the new spawn defaults like the player init.
-	// `title_spin_zoom_q16` is the title's spin reset (Title::spinmap_spawn_zoom_q16):
-	// 0 takes the mission's.
-	void set_mission_map_zoom(float map_zoom, int32_t title_spin_zoom_q16) {
+	// `title` is the session's, whose spin reset (Title::spinmap_spawn_zoom_q16) stands in for
+	// the mission's where it names one (0, Jointops.exe's: the mission's).
+	void set_mission_map_zoom(float map_zoom, const Title &title) {
+		const int32_t title_spin_zoom_q16 = title.spinmap_spawn_zoom_q16;
 		float x = map_zoom <= 0.0f ? 1.0f : 1.0f - map_zoom;
 		if (x > 1.0f) x = 1.0f;
 		if (x < 0.0625f) x = 0.0625f;

@@ -787,7 +787,7 @@ void test_spinmap_projection_zoom_and_clip() {
 	// by the independently scaled rect HEIGHT (281 px at 1920x1080), not its
 	// 375 px width.
 	opennova::hud::HudMapControl control;
-	control.set_mission_map_zoom(0.61f, opennova::title_by_code("jo")->spinmap_spawn_zoom_q16);
+	control.set_mission_map_zoom(0.61f, *opennova::title_by_code("jo"));
 	CHECK(control.spawn_zoom_q16 == 25559 && control.zoom_q16 == 25559,
 			"00TRa map_zoom initializes the retail complementary Q16 zoom");
 	CHECK(control.spawn_big_zoom_q16 == 204472 &&
@@ -797,8 +797,7 @@ void test_spinmap_projection_zoom_and_clip() {
 	// takes the mission's factor as Jointops.exe's [orig: Player_InitPlayer @0x4DE6F0 -
 	//  @0x4DE832..0x4DE847 (dfx2.exe)].
 	opennova::hud::HudMapControl dfx2_control;
-	dfx2_control.set_mission_map_zoom(
-			0.61f, opennova::title_by_code("dfx2")->spinmap_spawn_zoom_q16);
+	dfx2_control.set_mission_map_zoom(0.61f, *opennova::title_by_code("dfx2"));
 	CHECK(dfx2_control.spawn_zoom_q16 == 0x40000 && dfx2_control.zoom_q16 == 0x40000,
 			"the DFX2 radar spawns at its constant zoom");
 	CHECK(dfx2_control.spawn_big_zoom_q16 == 204472 && dfx2_control.big_zoom_q16 == 204472,
