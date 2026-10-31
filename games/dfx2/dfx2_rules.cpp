@@ -206,6 +206,9 @@ world::TitleRules make() {
 	// DFX2-112: the airborne glide [orig: the twin of Entity_UpdateInfantryPlayerBody @0x4B4140 -
 	// @0x4B7933..0x4B7A13 (dfx2.exe)].
 	r.airborne_steer_glide = true;
+	// DFX2-113: the impact speed's order [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 -
+	// @0x47CCC7..0x47CCD1 (dfx2.exe)].
+	r.tracked_impact_speed_xz_first = true;
 	// Section 7.12: the zoom-out cap, 0x80000 for the radar and the big map alike
 	// [orig: Input_HandleActionBinding @0x49ad50 - case 361, `cmp eax, 80000h` @0x49bf27 /
 	// @0x49bf57 (dfx2.exe)].

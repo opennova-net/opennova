@@ -331,6 +331,14 @@ struct TitleRules {
 	//  (-64), flt_7C8A50 (4194304) (dfx2.exe)]
 	bool airborne_steer_glide = false;
 
+	// --- DFX2-113: the tracked hull's impact speed. --------------------------------------------
+	// joiner-side: every peer's tracked ground solve gates its scrape sound and momentum share on
+	// it. Its |velocity| at a severity-3 contact sums the squares as Jointops.exe's x87 order,
+	// vx^2 + (vy^2 + vz^2), or dfx2.exe's, (vx^2 + vz^2) + vy^2 (world::tracked_impact_speed).
+	// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - @0x47CCAD..0x47CCD5] [orig:
+	//  Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - @0x47CCAD..0x47CCD3 (dfx2.exe)]
+	bool tracked_impact_speed_xz_first = false;
+
 	// --- Section 7.12: the radar and big-map zoom cap (the local player's own view). -------------
 	// The zoom-out key's cap (Q16, a world-extent multiplier) over the corner radar's zoom and, while
 	// a map mode is up, the big map's (hud::HudMapControl::zoom_step); the x1.15 / x0.85 steps and
