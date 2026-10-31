@@ -781,7 +781,7 @@ profile::CharacterSelection::Kit kit_page(int page_class, std::vector<playersav:
 //  side's bytes @0x55EE93..0x55EF38 by g_PlayerInfoTeamIndex, the kit through
 //  PlayerInfo_SerializeWeaponLoadout @0x55E4B0 into the populate's page]
 int test_character_selection() {
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     PlayerProfiles::LoadInput in;
     p.load(in, defaults());
     // Slot 1 carries sentinels the slot-0 save must not touch, and slot 0's red side a
@@ -873,7 +873,7 @@ int test_character_selection() {
 int test_character_selection_over_a_corrupt_file() {
     const std::string junk = "NOTAPROFILE";
     const std::vector<uint8_t> bytes(junk.begin(), junk.end());
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     PlayerProfiles::LoadInput in;
     in.weapon_sav = &bytes;
     p.load(in, defaults());
@@ -882,7 +882,7 @@ int test_character_selection_over_a_corrupt_file() {
     TEST_EXPECT(p.apply_character_selection(s));
     const std::vector<uint8_t> saved = p.weapon_sav_bytes();
     playersav::File back;
-    TEST_EXPECT(playersav::read(saved.data(), saved.size(), back));
+    TEST_EXPECT(playersav::read(saved.data(), saved.size(), kJo.profile_magic, back));
     TEST_EXPECT(back.slots[0].blue.avatar_packed == 0x0200 && back.slots[0].blue.player_class == 8);
     return 0;
 }
