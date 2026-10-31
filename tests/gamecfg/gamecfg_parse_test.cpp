@@ -467,6 +467,27 @@ int dfx2_player_cap_defaults() {
 	return 0;
 }
 
+// dfx2.exe's defaults store seven words otherwise (DFX2-100): lock_framerate 0, enable_slotmachine 1,
+// the four volumes 255 and mpchangeteam 1, where Jointops.exe's store 1, 0, 192 and 0
+// [orig: Config_SetDefaults @0x54D030 - @0x54D12F, @0x54D165, @0x54D10F..0x54D17A, @0x54D390]
+// [orig: Config_SetDefaults @0x54a2c0 - @0x54a3c1, @0x54a3f3, @0x54a392..0x54a40b, @0x54a613
+//  (dfx2.exe)].
+int dfx2_set_defaults_words() {
+	const GameCfg jo = defaults();
+	const GameCfg dfx2 = defaults({}, 0, 0, ConfigTable::Dfx2);
+	TEST_EXPECT(jo.lock_framerate == 1 && dfx2.lock_framerate == 0);
+	TEST_EXPECT(jo.enable_slotmachine == 0 && dfx2.enable_slotmachine == 1);
+	TEST_EXPECT(jo.music_volume == 192 && jo.sfx_level == 192 && jo.dialogue_level == 192 &&
+			jo.rotor_volume == 192);
+	TEST_EXPECT(dfx2.music_volume == 255 && dfx2.sfx_level == 255 && dfx2.dialogue_level == 255 &&
+			dfx2.rotor_volume == 255);
+	TEST_EXPECT(jo.mpchangeteam == 0 && dfx2.mpchangeteam == 1);
+	// The words the two share stay shared.
+	TEST_EXPECT(dfx2.windows_volume == 255 && dfx2.force_vsync == 0 && dfx2.reduce_mouselag == 1 &&
+			dfx2.mpchangeteam_interval == 300 && dfx2.mpchangeteam_penalty == 60);
+	return 0;
+}
+
 } // namespace
 
 // The settings schema's availability names over the host screen's words: a weapon's MISSION word
@@ -578,6 +599,7 @@ int main() {
 	if (defaults_match_config_set_defaults() != 0) return 1;
 	if (dfx2_table_row() != 0) return 1;
 	if (dfx2_player_cap_defaults() != 0) return 1;
+	if (dfx2_set_defaults_words() != 0) return 1;
 	if (comments_and_quoting() != 0) return 1;
 	if (value_is_token_two() != 0) return 1;
 	if (unknown_and_dead_keys() != 0) return 1;
