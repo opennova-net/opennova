@@ -98,6 +98,9 @@ Title make() {
 	// [orig: PlayerProfile_InitDefaults @ 0x54bb40 - @ 0x54bced, @ 0x54bd1a..0x54bdd1].
 	t.profile_single_player_kit = playersav::kJointOpsSinglePlayerKit;
 	t.profile_class_kits = playersav::kJointOpsClassKits;
+	// DFX2-61: the Mods list's base row [orig: Options_PopulateModList @ 0x559fb0 (the literal
+	//  @0x7C7114, read @ 0x559fe2)].
+	t.mod_list_base = "Joint Operations: Typhoon Rising";
 	return t;
 }
 

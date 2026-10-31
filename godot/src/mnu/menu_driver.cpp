@@ -947,7 +947,8 @@ void MenuDriver::seed_mod_list(int p_id) {
 		if (!dir.is_empty()) records = opennova::vfs_expansion_records(to_std(dir));
 		mods_.set_records(std::move(records));
 	}
-	mods_.populate(runtime_, p_id, root_.is_valid() ? to_std(root_->get_expansion()) : std::string());
+	mods_.populate(runtime_, p_id, root_.is_valid() ? to_std(root_->get_expansion()) : std::string(),
+			ResourceRoot::session_title(root_).mod_list_base);
 }
 
 String MenuDriver::mod_list_pick(int p_id) const { return to_gd(mods_.pick(runtime_, p_id)); }

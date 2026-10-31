@@ -148,6 +148,9 @@ Title make() {
 	//  radios, CA_LIST and CA_MISSION_LIST registered), run by sub_560F90 @0x560f90 (dfx2.exe)], the
 	// twins of SinglePlayer_PopulateMissionList @0x561840 and UI_InitSinglePlayerScreen @0x562080.
 	t.sp_campaign_tabs = true;
+	// DFX2-61: the Mods list's base row reads "NONE" [orig: Options_PopulateModList @0x5582a0 (the
+	//  literal @0x7CA4EC, read @0x5582d2) (dfx2.exe)].
+	t.mod_list_base = "NONE";
 	return t;
 }
 

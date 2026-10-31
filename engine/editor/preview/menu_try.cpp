@@ -196,7 +196,8 @@ void MenuTry::prepare_() {
 	if (!commands_.mod_lists().empty() && source_) {
 		expansion_ = source_->expansion;
 		mods_.set_records(source_->expansions ? source_->expansions() : std::vector<ExpansionRecord>());
-		for (const int id : commands_.mod_lists()) mods_.populate(runtime_, id, expansion_);
+		const char *base = source_->title != nullptr ? source_->title->mod_list_base : nullptr;
+		for (const int id : commands_.mod_lists()) mods_.populate(runtime_, id, expansion_, base);
 	}
 }
 

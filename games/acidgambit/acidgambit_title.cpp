@@ -40,6 +40,7 @@ Title make() {
 	// Its fresh profile's kit pages are Joint Operations', as its code is.
 	t.profile_single_player_kit = jo_title().profile_single_player_kit;
 	t.profile_class_kits = jo_title().profile_class_kits;
+	t.mod_list_base = jo_title().mod_list_base;
 	return t;
 }
 

@@ -168,6 +168,10 @@ struct Title {
 	// runtime/mission/campaign.h). False (Jointops.exe): IA_LIST alone, every waypoint-family
 	// mission, its pick writing BRIEFING.
 	bool sp_campaign_tabs = false;
+	// DFX2-61: the key of the Mods list's base-game row, looked up through the list's string table
+	// (its text where the table holds none): the literal the executable carries. Null unwitnessed:
+	// the row is blank.
+	const char *mod_list_base = nullptr;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title
