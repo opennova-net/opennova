@@ -1901,30 +1901,38 @@ void Match::update_flag_objectives(World &world) {
         // Preserve resolver/candidate order. If one movement pass touches a
         // flag and its bay, retail mutates the carried link inline before the
         // later callback. [orig: sole caller @0x4B2FF5; handler @0x4AD820]
+        // A carrying Player's touch does something only in a bay arm: the
+        // blue bay (4098) for team 1, or ANY team when g_GameType == 8 (Flag
+        // Me); the red bay (4100) for team 2; 4102 for team 4 and 4103 for team
+        // 3. There a carried object with no def drops the link both ways;
+        // otherwise 4098 captures a red or neutral flag, 4100 a blue or neutral
+        // one, 4102 and 4103 only the neutral flag.
+        // [orig: Entity_ProcessWaypointInteraction — 4098 @0x4AD95E..0x4AD9A2
+        // (the Flag Me OR @0x4AD966..0x4AD976), 4100 @0x4AD9A6..0x4AD9D2,
+        // 4102 @0x4AD9E3, 4103 @0x4AD9D6; the def tests @0x4AD98F / @0x4AD9BF /
+        // @0x4AD9FD to the clears @0x4AD9FF / @0x4ADA07; capture @0x4ADA19;
+        // the same @0x4AD9D6..0x4ADA79 (dfx2.exe)]
         if (carrier->mounted_child.valid()) {
+            const int32_t bay = target->item_id;
+            const bool bay_team =
+                (bay == kBlueBay && (rules_.game_type == gt::kFlagMe || carrier->team == 1)) ||
+                (bay == kRedBay && carrier->team == 2) ||
+                (bay == kTeam4Bay && carrier->team == 4) ||
+                (bay == kTeam3Bay && carrier->team == 3);
+            if (!bay_team)
+                continue;
             Entity *flag = world.registry.get(carrier->mounted_child);
-            if (flag == nullptr) {
+            if (flag == nullptr || !flag->has_item_def) {
+                if (flag != nullptr)
+                    flag->primary_occupant = EntityHandle{};
                 carrier->mounted_child = EntityHandle{};
                 continue;
             }
-            if (!is_flag_bay(target->item_id))
-                continue;
-            // The bay matrix: the blue bay (4098) takes a carried red or
-            // neutral flag from team 1, or from ANY team when g_GameType == 8
-            // (Flag Me); the red bay (4100) takes blue/neutral from team 2;
-            // 4102 and 4103 take only the neutral flag from teams 4 and 3.
-            // [orig: Entity_ProcessWaypointInteraction — 4098 @0x4AD95E..0x4AD9A2
-            // (the Flag Me OR @0x4AD966..0x4AD976), 4100 @0x4AD9A6..0x4AD9D2,
-            // 4102 @0x4AD9E3, 4103 @0x4AD9D6; capture @0x4ADA19]
             const bool neutral = flag->item_id == kNeutralFlag;
             const bool accepted =
-                (target->item_id == kBlueBay &&
-                 (rules_.game_type == gt::kFlagMe || carrier->team == 1) &&
-                 (flag->item_id == kRedFlag || neutral)) ||
-                (target->item_id == kRedBay && carrier->team == 2 &&
-                 (flag->item_id == kBlueFlag || neutral)) ||
-                (target->item_id == kTeam3Bay && carrier->team == 3 && neutral) ||
-                (target->item_id == kTeam4Bay && carrier->team == 4 && neutral);
+                (bay == kBlueBay && (flag->item_id == kRedFlag || neutral)) ||
+                (bay == kRedBay && (flag->item_id == kBlueFlag || neutral)) ||
+                ((bay == kTeam3Bay || bay == kTeam4Bay) && neutral);
             if (accepted)
                 record_flag_capture(world, contact.source,
                                     carrier->mounted_child);

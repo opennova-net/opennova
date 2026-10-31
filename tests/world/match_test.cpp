@@ -1606,6 +1606,59 @@ void test_pickup_leg_scores_even_when_the_attach_refuses() {
     }
 }
 
+// A carried object with no def (or a link to a destroyed row) drops the link
+// only in a bay arm the toucher's team opens; any other touch leaves it.
+// [orig: Entity_ProcessWaypointInteraction - 4098's def test @0x4AD98F, the
+//  clears @0x4AD9FF / @0x4ADA07; the 4093 arm's +0x268 test @0x4AD936]
+void test_bay_arm_alone_clears_a_defless_carried_link() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 8);
+    WaypointContactHarness contacts(*world);
+    MatchRules ctf;
+    ctf.game_type = gt::kCaptureTheFlag;
+    world->match.configure(ctf);
+    const EntityHandle blue = player(*world, 0, 1, "Blue");
+    Entity *blue_entity = world->registry.get(blue);
+    blue_entity->net_move_input = Entity::kMoveOrderMoving;
+    const EntityHandle red_flag = objective(*world, 4093, 2, {0.0f, 0.0f, 0.0f});
+    const EntityHandle red_bay = objective(*world, 4100, 2, {20.0f, 0.0f, 0.0f});
+    const EntityHandle blue_bay = objective(*world, 4098, 1, {40.0f, 0.0f, 0.0f});
+    contacts.bind(red_flag);
+    contacts.bind(red_bay);
+    contacts.bind(blue_bay);
+    Entity defless;
+    defless.kind = EntityKind::Item;
+    defless.item_type_index = 7;
+    defless.alive = true;
+    defless.position = {60.0f, 0.0f, 0.0f};
+    const EntityHandle held = world->registry.spawn(1, defless);
+    blue_entity->mounted_child = held;
+    world->registry.get(held)->primary_occupant = blue;
+
+    contacts.touch(*world, blue, red_flag);
+    run_match_frame(*world);
+    CHECK(blue_entity->mounted_child == held);
+    CHECK(!world->registry.get(red_flag)->primary_occupant.valid());
+    contacts.touch(*world, blue, red_bay); // team 2's bay
+    run_match_frame(*world);
+    CHECK(blue_entity->mounted_child == held);
+    contacts.touch(*world, blue, blue_bay);
+    run_match_frame(*world);
+    CHECK(!blue_entity->mounted_child.valid());
+    CHECK(!world->registry.get(held)->primary_occupant.valid());
+
+    // A link to a destroyed row reads as no def, in the bay arm alone.
+    blue_entity->mounted_child = held;
+    world->registry.despawn(held);
+    contacts.touch(*world, blue, red_flag);
+    run_match_frame(*world);
+    CHECK(blue_entity->mounted_child == held);
+    contacts.touch(*world, blue, blue_bay);
+    run_match_frame(*world);
+    CHECK(!blue_entity->mounted_child.valid());
+}
+
 // The entity update's own tail consumes the flag and bay touches its bodies'
 // movement resolves recorded, so the pickup lands in the frame that touched,
 // ahead of the next server tick. The handler returns at once off the
@@ -2175,6 +2228,7 @@ int main() {
     test_a_carrier_still_saves_its_own_flag();
     test_own_flag_touch_syncs_its_definition_pose();
     test_pickup_leg_scores_even_when_the_attach_refuses();
+    test_bay_arm_alone_clears_a_defless_carried_link();
     test_entity_update_consumes_its_movement_contacts();
     test_aas_capture_scoring_and_outcomes();
     test_flagball_four_team_bays_consume_exact_contacts();
