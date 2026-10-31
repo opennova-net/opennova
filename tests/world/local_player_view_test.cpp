@@ -3314,6 +3314,53 @@ void test_scope_zero_request_keys_on_the_rule_bit_and_clicks() {
     CHECK(local.weapon.slot.zero_yaw == 13669483);
 }
 
+// A press the clamp holds still writes the words again: no click and a false
+// return, but the step's elevation pitch re-derived (the look pitch moved by the
+// difference) and the zero-yaw term recomputed with the adjust's sign, so a fresh
+// slot's install yaw (never negated) turns negative at its cap. The personal slot's
+// table entry takes the same words. A def with no zero table writes nothing.
+// [orig: Player_AdjustWeaponZoomLevel @0x4dbcc0 -- the click's skip @0x4dbd47 ->
+//  @0x4dbd58, +0x60 @0x4dbd5d, +4 @0x4dbd70, the look pitch @0x4dbd7c..0x4dbd8b, +8
+//  @0x4dbdd5, the sign test @0x4dbdd8, the negate @0x4dbddf..0x4dbde3; the zero-table gate
+//  @0x4dbcef..0x4dbcf7]
+//  [orig: Player_AdjustWeaponZoomLevel @0x4D8D70 (dfx2.exe)]
+void test_scope_zero_request_at_the_cap_writes_the_words() {
+    LocalWorld lw;
+    LocalPlayer local(lw.w);
+    local.weapon.active = true;
+    local.weapon.def.flags = static_cast<int32_t>(DEF_WEAPON_FLAG_FORCESCOPED);
+    WeaponScopeZero &zero = local.weapon.def.scope_zero;
+    zero.max_steps = 3;
+    zero.step_metres = 100;
+    zero.paralax_distance_q16 = -(2 << 16);
+    zero.elevation[3] = 700;
+    // A fresh slot at its cap: the install's yaw (its own sign, never negated) and a pitch the
+    // elevation entry does not hold.
+    local.weapon.slot.scope_zero = 3;
+    local.weapon.slot.zero_pitch = 200;
+    local.weapon.slot.zero_yaw = weapon_scope_zero_yaw(zero, 3);
+    CHECK(local.weapon.slot.zero_yaw < 0);
+    local.inventory_valid = true;
+    local.inventory.slots[0].adm_index = 1;
+    local.inventory.equipped_combo = 0;
+    lw.w.rules.mp_session = false;
+    CHECK(!local.request_scope_zero(1)); // the cap holds the step
+    CHECK(local.weapon.slot.scope_zero == 3);
+    CHECK(lw.w.out.script_sounds.empty()); // no click without a change
+    CHECK(local.weapon.slot.zero_pitch == 700);
+    CHECK(local.input.look_pitch == 500);
+    CHECK(local.weapon.slot.zero_yaw == -weapon_scope_zero_yaw(zero, 3));
+    CHECK(local.inventory.slots[0].scope_zero == 3 && local.inventory.slots[0].zero_pitch == 700 &&
+            local.inventory.slots[0].zero_yaw == local.weapon.slot.zero_yaw);
+    // No zero table: nothing written.
+    zero.max_steps = 0;
+    local.weapon.slot.zero_pitch = 200;
+    local.weapon.slot.zero_yaw = 9;
+    CHECK(!local.request_scope_zero(1));
+    CHECK(local.weapon.slot.zero_pitch == 200 && local.weapon.slot.zero_yaw == 9 &&
+            local.input.look_pitch == 500);
+}
+
 // The slot install seeds the zero-yaw term (MountSlot+8) from the seeded step,
 // outside the flags & 3 elevation gate and with the parallax sign kept
 // [orig: WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b]; an inventory-restored
@@ -4386,6 +4433,7 @@ int main() {
         CHECK(weapon_scope_zero_adjust(zero, 2, -1, false, false) == 2);
     }
     test_scope_zero_request_keys_on_the_rule_bit_and_clicks();
+    test_scope_zero_request_at_the_cap_writes_the_words();
     test_scope_zero_install_seeds_the_yaw_term();
     test_scope_zero_yaw_term();
     test_scope_zero_bake_max_range();
