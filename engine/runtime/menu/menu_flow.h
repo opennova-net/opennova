@@ -90,6 +90,7 @@ private:
 	void read_campaigns(MenuRuntime &menu);
 	void show_campaign(MenuRuntime &menu, size_t campaign);
 	void show_overlay(MenuRuntime &menu, bool complete);
+	void set_campaign_image(MenuRuntime &menu);
 	std::vector<std::string> sp_lists_, briefings_, accepts_;
 	std::unordered_map<int, std::vector<MissionChoice>> mission_rows_;
 	std::string selected_mission_, expansion_request_;

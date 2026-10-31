@@ -247,6 +247,27 @@ bool MenuFrameAssets::add_font(MenuFrameCompiler &compiler, const std::string &n
 	return load_font_(compiler, name, files) == LoadResult::Loaded;
 }
 
+int MenuFrameAssets::load_added_textures(MenuFrameCompiler &compiler, const FileSource &files,
+                                         MenuTextureDecoder &decoder) {
+	const std::vector<std::string> &textures = compiler.texture_names();
+	int added = 0;
+	for (size_t slot = slot_keys_.size(); slot < textures.size(); ++slot, ++added) {
+		const TextureEntry *entry = nullptr;
+		std::string key;
+		const LoadResult result = load_texture_(textures[slot], files, decoder, key, &entry);
+		slot_keys_.push_back(key);
+		if (entry == nullptr) {
+			if (note_unresolved_(textures[slot], result))
+				compiler.add_load_note(result == LoadResult::Unreadable ? MenuFrameNoteCode::TextureUnreadable
+				                                                        : MenuFrameNoteCode::TextureMissing,
+				                       textures[slot]);
+			continue;
+		}
+		compiler.set_texture_size(static_cast<int32_t>(slot), entry->width, entry->height);
+	}
+	return added;
+}
+
 bool MenuFrameAssets::texture_loads(const std::string &name, const FileSource &files, MenuTextureDecoder &decoder) {
 	const TextureEntry *entry = nullptr;
 	std::string key;

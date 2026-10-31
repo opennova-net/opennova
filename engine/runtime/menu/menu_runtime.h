@@ -145,6 +145,9 @@ public:
 	// CWnd_SetRect: the widget's own (parent-relative) design rect replaced.
 	virtual void set_widget_rect(int index, int left, int top, int right, int bottom) = 0;
 	virtual void set_widget_caret(int index, int caret) = 0;
+	// An appearance's texture set at run time: each state of `states` (bit n the appearance
+	// state n, menu_frame.h kStateDefault..) draws `file` as its IMAGE; the device loads it.
+	virtual void set_widget_image(int index, uint32_t states, const std::string &file) = 0;
 
 	virtual int get_widget_caret(int index) const = 0;
 	virtual std::string get_widget_text(int index) const = 0;
@@ -320,12 +323,17 @@ struct MenuWidgetRuntimeState {
 	bool has_clip = false;
 	bool clip_enabled = false;
 	int clip_left = 0, clip_top = 0, clip_right = 0, clip_bottom = 0;
+	// An appearance texture set at run time (set_widget_image): the states it draws in, the file.
+	bool has_image = false;
+	uint32_t image_states = 0;
+	std::string image;
 
 	// True while no override has been written (a replay skips the widget).
 	bool empty() const {
 		return !(has_shown || has_disabled || has_checked || has_text || has_items ||
 				has_selected_item || has_scroll_row || has_scroll_range || has_selected_set ||
-				has_table_rows || has_table_columns || has_rect || has_clip || has_disabled_items);
+				has_table_rows || has_table_columns || has_rect || has_clip || has_disabled_items ||
+				has_image);
 	}
 };
 
@@ -446,6 +454,14 @@ public:
 	// units) replaced until the document reopens [orig: CWnd_SetRect @0x646560,
 	// CWnd_MoveToSquare @0x646580 (the same at the widget's own square size)].
 	void set_widget_rect(int id, int left, int top, int right, int bottom);
+	// The widget's appearance texture for the states `states` (bit n the appearance state n) set
+	// to `file` at run time, as the game sets a static's: each named state's appearance takes the
+	// IMAGE type and the texture, loaded at once by the texture manager, its own height
+	// [orig: sub_646450 @0x646450 (CTextureManager_LoadOrFindTexture @0x646497, the height
+	//  0xFFFFFFFF); its twin sub_6D3760 @0x6d3760 (dfx2.exe)].
+	void set_widget_image(int id, uint32_t states, const std::string &file);
+	// The file the widget's run-time image names ("" none set).
+	std::string widget_image(int id) const;
 	// Clip a widget's own passes to an absolute design rect until the
 	// document reopens; `enabled` false removes it [orig: CWnd_SetClipRect
 	// @0x646210].

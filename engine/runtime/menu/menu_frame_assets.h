@@ -75,6 +75,10 @@ public:
 	// A font named after the configure (a marquee's node fonts), loaded and registered the
 	// same way; false when it does not load.
 	bool add_font(MenuFrameCompiler &compiler, const std::string &name, const FileSource &files);
+	// Every texture slot `compiler` interned past the ones this loader reported (a widget's
+	// run-time image, MenuFrameCompiler::add_runtime_texture), loaded and its size reported, its
+	// key kept with the configure's (slot_keys); returns how many it added.
+	int load_added_textures(MenuFrameCompiler &compiler, const FileSource &files, MenuTextureDecoder &decoder);
 	// Whether a texture name loads (retail's dispatch, then a decode), kept like the
 	// screen's own.
 	bool texture_loads(const std::string &name, const FileSource &files, MenuTextureDecoder &decoder);

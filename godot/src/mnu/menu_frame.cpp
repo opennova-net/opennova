@@ -605,6 +605,14 @@ void MenuFrame::set_widget_text_bytes(int p_index, const std::string &p_text, in
 	queue_redraw();
 }
 
+void MenuFrame::set_widget_image(int p_index, uint32_t p_states, const std::string &p_file) {
+	opennova::menu::frame_set_image(state_, p_index, p_states, p_file);
+	if (files_ != nullptr && compiler_.add_runtime_texture(p_file) >= 0 &&
+			assets_.load_added_textures(compiler_, *files_, texture_store_) > 0)
+		adopt_slots_();
+	queue_redraw();
+}
+
 void MenuFrame::set_widget_rect(int p_index, const Rect2i &p_rect) {
 	opennova::menu::frame_set_rect(state_, p_index, p_rect.position.x, p_rect.position.y,
 			p_rect.position.x + p_rect.size.x, p_rect.position.y + p_rect.size.y);

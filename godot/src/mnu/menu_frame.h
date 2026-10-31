@@ -191,6 +191,9 @@ public:
 	void set_widget_text_bytes(int p_index, const std::string &p_text, int p_hotkey_pos = -1);
 	// CWnd_SetRect: the widget's own rect (parent-relative design units).
 	void set_widget_rect(int p_index, const Rect2i &p_rect);
+	// A widget's appearance texture set at run time (engine MenuRuntime::set_widget_image): the
+	// state's, and the texture loaded at once through the screen's file source (C++ only).
+	void set_widget_image(int p_index, uint32_t p_states, const std::string &p_file);
 	void set_widget_selection(int p_index, int p_selected_item, int p_hover_item,
 			int p_scroll_row);
 	// Standalone type=scroll range/page/value. Page is the original inclusive

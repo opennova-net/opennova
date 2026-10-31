@@ -923,8 +923,21 @@ void MenuFrameCompiler::emit_outline(const mnu::RectEdges &design,
 // `appearance_slot` is the FINAL slot (fallback or force already applied);
 // -1 skips every pass.
 void MenuFrameCompiler::emit_appearance(const WidgetNode &node,
-		const mnu::RectEdges &rect, const WalkScale &s, int appearance_slot) {
+		const mnu::RectEdges &rect, const WalkScale &s, int appearance_slot,
+		const MenuWidgetState *ws) {
 	if (appearance_slot < 0 || appearance_slot > 3) {
+		return;
+	}
+	// A texture set at run time ORs the IMAGE type into the state's appearance and loads its
+	// texture, the file's own height, its MAP_STATE as authored [orig: sub_646450 @0x646450 -
+	// `*channel |= 2` @0x64647c, CTextureManager_LoadOrFindTexture(.., 0xFFFFFFFF) @0x646497].
+	if (ws != nullptr && ws->has_image && (ws->image_states & (1u << appearance_slot)) != 0) {
+		StatePass pass = node.states[appearance_slot];
+		pass.has_image = true;
+		pass.texture = intern_texture(ws->image);
+		pass.band_height = -1;
+		pass.row_height = -1;
+		emit_state_pass(rect, s, pass);
 		return;
 	}
 	emit_state_pass(rect, s, node.states[appearance_slot]);
@@ -2187,7 +2200,7 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			if (w.draw_frame) {
 				emit_frame(node, rect, s);
 			}
-			emit_appearance(node, rect, s, visual);
+			emit_appearance(node, rect, s, visual, ws);
 			emit_widget_text(node, rect, s, color_state, ws);
 			break;
 		}

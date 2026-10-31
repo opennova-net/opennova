@@ -962,6 +962,50 @@ void test_menu_font_draws_at_its_texels() {
 	fnt_free(&wide);
 }
 
+// A static's appearance texture set at run time (MenuWidgetState::image): its default state takes
+// the IMAGE type and the texture, interned past the configure's slots, drawn over the rect once
+// its size is known; another state, or no image, draws as authored (nothing for an empty
+// APPEARANCE) [orig: sub_646450 @0x646450 - the channel's IMAGE bit @0x64647c, the load
+// @0x646497; its twin sub_6D3760 @0x6d3760, CAMPAIGN_IMAGE's @0x560464 (dfx2.exe)].
+void test_runtime_image_appearance() {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>SP</NAME>
+  <WINDOW type="window" name="MAIN">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="static" name="CAMPAIGN_IMAGE">
+      <APPEARANCE state="default"></APPEARANCE>
+      <POSITION><LEFT>325</LEFT><RIGHT>776</RIGHT><TOP>14</TOP><BOTTOM>260</BOTTOM></POSITION>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen());
+	MenuFrameState state;
+	CHECK(c.compile(state, 1.0f, 1.0f).quads.empty(), "an empty appearance draws nothing");
+	const size_t configured = c.texture_names().size();
+	MenuWidgetState image;
+	image.index = 1;
+	image.has_image = true;
+	image.image_states = 1u;
+	image.image = "camp.tga";
+	state.widgets.push_back(image);
+	CHECK(c.compile(state, 1.0f, 1.0f).quads.empty(), "an unloaded run-time image draws nothing");
+	CHECK(c.texture_names().size() == configured + 1 && c.texture_names().back() == "camp.tga",
+			"the run-time image is interned past the configure's slots");
+	const int32_t slot = c.add_runtime_texture("camp.tga");
+	CHECK(slot == static_cast<int32_t>(configured), "the same name keeps its slot");
+	c.set_texture_size(slot, 256, 128);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	CHECK(dl.quads.size() == 1 && dl.quads[0].texture == slot, "the default state draws the image");
+	CHECK(!dl.quads.empty() && dl.quads[0].x0 == 325.0f && dl.quads[0].y0 == 14.0f &&
+					dl.quads[0].x1 == 776.0f && dl.quads[0].y1 == 260.0f,
+			"stretched over the static's rect");
+	state.widgets[0].image_states = 2u; // the disabled state's alone
+	CHECK(c.compile(state, 1.0f, 1.0f).quads.empty(), "another state's image leaves the default");
+}
+
 // Menu text honours the inline tags: a colour tag draws its own RGB under the
 // text colour's alpha and <co> the text colour again (D-FNT-5)
 // [orig: font_cache_draw_text_scaled @0x653230 -> CGameFont_DrawText_Cdecl
@@ -3373,6 +3417,7 @@ int main() {
 	test_table_rows_draw_row_state_not_widget_hover(&font);
 	test_text_placement_and_truncation(&font);
 	test_menu_font_draws_at_its_texels();
+	test_runtime_image_appearance();
 	test_list_rows_lay_out_by_the_items_justification(&font);
 	test_text_inline_colour_tags(&font);
 	test_scale_truncation(&font);

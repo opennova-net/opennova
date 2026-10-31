@@ -451,6 +451,7 @@ void MenuRuntime::replay_state_() {
 		if (state->has_rect)
 			frame_->set_widget_rect(index, state->rect_left, state->rect_top, state->rect_right,
 					state->rect_bottom);
+		if (state->has_image) frame_->set_widget_image(index, state->image_states, state->image);
 	}
 }
 
@@ -670,6 +671,20 @@ void MenuRuntime::set_widget_rect(int id, int left, int top, int right, int bott
 	state.rect_bottom = bottom;
 	const int index = frame_index(id);
 	if (index >= 0) frame_->set_widget_rect(index, left, top, right, bottom);
+}
+
+void MenuRuntime::set_widget_image(int id, uint32_t states, const std::string &file) {
+	MenuWidgetRuntimeState &state = state_of_(id);
+	state.has_image = true;
+	state.image_states = states;
+	state.image = file;
+	const int index = frame_index(id);
+	if (index >= 0) frame_->set_widget_image(index, states, file);
+}
+
+std::string MenuRuntime::widget_image(int id) const {
+	const MenuWidgetRuntimeState *state = saved_state_(id);
+	return state != nullptr && state->has_image ? state->image : std::string();
 }
 
 void MenuRuntime::set_widget_clip_rect(int id, bool enabled, int left, int top, int right,

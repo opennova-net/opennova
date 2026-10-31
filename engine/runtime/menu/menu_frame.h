@@ -276,6 +276,11 @@ struct MenuWidgetState {
 	// the parent's origin.
 	bool has_rect = false;
 	mnu::RectEdges rect;
+	// An appearance texture set at run time (MenuRuntime::set_widget_image): each state of
+	// `image_states` (bit n the state n) draws `image` as its IMAGE, its own height.
+	bool has_image = false;
+	uint32_t image_states = 0;
+	std::string image;
 	// TABLE data rows (menu_table_row.h: the texts, cell values, row state,
 	// flags and colour of the 40-byte row records) [orig: CUITable_Render
 	// @ 0x6411d0]. scroll_row above is the first visible row.
@@ -556,6 +561,10 @@ public:
 	// @ 0x648120; CTextureManager_LoadOrFindTexture @ 0x654980 zeroes the
 	// handle of a load that fails].
 	void set_texture_size(int32_t slot, int width, int height);
+	// A texture a widget takes at run time (MenuWidgetState::image), interned after configure: its
+	// slot, which a compile draws once the embedder reported its size (MenuFrameAssets::
+	// load_added_textures loads every slot past the configure's).
+	int32_t add_runtime_texture(const std::string &name) { return intern_texture(name); }
 
 	const MenuDrawList &compile(const MenuFrameState &state, float scale_x,
 			float scale_y);
@@ -1159,7 +1168,7 @@ private:
 	void emit_outline(const mnu::RectEdges &design, const WalkScale &s,
 			uint32_t color);
 	void emit_appearance(const WidgetNode &node, const mnu::RectEdges &rect,
-			const WalkScale &s, int appearance_slot);
+			const WalkScale &s, int appearance_slot, const MenuWidgetState *ws = nullptr);
 	void emit_frame(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s);
 	void emit_glyph_run(const WidgetNode &node, const std::string &text,

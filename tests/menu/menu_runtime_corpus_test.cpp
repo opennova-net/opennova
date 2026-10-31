@@ -112,6 +112,7 @@ public:
 	void set_widget_table_rows(int, const std::vector<MenuTableRow> &) override {}
 	void set_widget_clip_rect(int, bool, int, int, int, int) override {}
 	void set_widget_rect(int, int, int, int, int) override {}
+	void set_widget_image(int, uint32_t, const std::string &) override {}
 	void set_widget_table_columns(int, bool, const std::vector<MenuTableColumn> &, int) override {}
 	void set_widget_hover_item(int, int) override {}
 	void set_widget_popup_open(int, bool) override {}

@@ -317,11 +317,42 @@ static int test_loaded_ahead() {
 	return 0;
 }
 
+// A widget's run-time image (MenuFrameCompiler::add_runtime_texture): the slot past the configure's
+// loads at once, its size reported and its key kept with theirs; a name nothing reads is noted
+// and draws nothing [orig: sub_646450 @0x646450 - CTextureManager_LoadOrFindTexture @0x646497].
+static int test_runtime_texture_loads() {
+	opennova::mnu::Document doc;
+	TEST_EXPECT(parse(kScreen, doc));
+	FakeFileSource files;
+	files_for(files);
+	files.put("camp.tga", texture(16, 8), 1);
+	SizeDecoder decoder;
+	MenuFrameCompiler compiler;
+	MenuFrameAssets assets;
+	assets.configure(compiler, &doc, &doc.screens[0], files, decoder, {{"F", "main.fnt"}});
+	const size_t configured = assets.slot_keys().size();
+	TEST_EXPECT(assets.load_added_textures(compiler, files, decoder) == 0);
+	const int32_t slot = compiler.add_runtime_texture("camp.tga");
+	TEST_EXPECT(slot == static_cast<int32_t>(configured));
+	TEST_EXPECT(assets.load_added_textures(compiler, files, decoder) == 1);
+	TEST_EXPECT(assets.slot_keys().size() == configured + 1 && !assets.slot_keys().back().empty());
+	TEST_EXPECT(files.reads["camp.tga"] == 1);
+	// Read once: a second ask adds nothing.
+	TEST_EXPECT(compiler.add_runtime_texture("camp.tga") == slot);
+	TEST_EXPECT(assets.load_added_textures(compiler, files, decoder) == 0);
+	compiler.add_runtime_texture("gone.tga");
+	TEST_EXPECT(assets.load_added_textures(compiler, files, decoder) == 1);
+	TEST_EXPECT(assets.slot_keys().back().empty());
+	std::printf("test_runtime_texture_loads passed\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_loads_and_no_default_font();
 	failures += test_kept_by_stamp_and_swept();
 	failures += test_absent_or_unreadable();
 	failures += test_loaded_ahead();
+	failures += test_runtime_texture_loads();
 	return failures == 0 ? 0 : 1;
 }

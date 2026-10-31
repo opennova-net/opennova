@@ -62,6 +62,13 @@ void frame_set_rect(MenuFrameState &state, int index, int left, int top, int rig
 	row.rect.bottom = bottom;
 }
 
+void frame_set_image(MenuFrameState &state, int index, uint32_t states, const std::string &file) {
+	MenuWidgetState &row = frame_widget(state, index);
+	row.has_image = true;
+	row.image_states = states;
+	row.image = file;
+}
+
 bool frame_set_hover_item(MenuFrameState &state, int index, int row_index) {
 	MenuWidgetState &row = frame_widget(state, index);
 	if (row.hover_item == row_index) return false;
@@ -263,6 +270,10 @@ void MenuStateFrame::set_widget_focused(int index, bool focused) {
 }
 void MenuStateFrame::set_widget_rect(int index, int left, int top, int right, int bottom) {
 	frame_set_rect(state_, index, left, top, right, bottom);
+	++serial_;
+}
+void MenuStateFrame::set_widget_image(int index, uint32_t states, const std::string &file) {
+	frame_set_image(state_, index, states, file);
 	++serial_;
 }
 void MenuStateFrame::set_widget_caret(int index, int caret) {

@@ -25,6 +25,10 @@ constexpr const char *kCampaignList = "CA_LIST";
 constexpr const char *kCampaignMissionList = "CA_MISSION_LIST";
 constexpr const char *kCampaignBriefing = "BRIEFING";
 constexpr const char *kCampaignImageOverlay = "CAMPAIGN_IMAGE_OVERLAY";
+constexpr const char *kCampaignImage = "CAMPAIGN_IMAGE";
+// The appearance state the campaign images take: the default's, mask 1 [orig: sub_6D3760(.., 1,
+//  0x300651) @0x560464, @0x5604a4, @0x560cac, @0x560cfc (dfx2.exe)].
+constexpr uint32_t kCampaignImageStates = 1u;
 constexpr const char *kInstantActionList = "IA_LIST";
 constexpr const char *kInstantActionBriefing = "IA_BRIEFING";
 constexpr const char *kTabCampaign = "RADIO_TAB_CAMPAIGN";
@@ -217,14 +221,28 @@ void MenuFlow::show_campaign(MenuRuntime &menu, size_t index) {
 	menu.select_row(list, -1, false);
 	// [orig: CAMPAIGN_IMAGE's image sub_6D3760(+0x144) @0x560464; the overlay @0x560479..0x5604ad]
 	campaign_image_ = shown.image;
+	set_campaign_image(menu);
 	show_overlay(menu, shown.complete);
+}
+
+// CAMPAIGN_IMAGE's default appearance takes the named image, loaded at once
+// [orig: UI_FindScreenControl(CAMPAIGN_IMAGE) @0x56044b, sub_6D3760 @0x560464; sub_560BC0
+//  @0x560c5d, @0x560cac (dfx2.exe)].
+void MenuFlow::set_campaign_image(MenuRuntime &menu) {
+	const int image = menu.widget_id(kCampaignImage);
+	if (image >= 0) menu.set_widget_image(image, kCampaignImageStates, campaign_image_);
 }
 
 // [orig: CWnd_SetShown(CAMPAIGN_IMAGE_OVERLAY, 1) with the complete_overlay image @0x560491 /
 //  @0x5604a4, else CWnd_SetShown 0 @0x5604ad (dfx2.exe)]
 void MenuFlow::show_overlay(MenuRuntime &menu, bool complete) {
 	const int overlay = menu.widget_id(kCampaignImageOverlay);
-	if (overlay >= 0) menu.set_widget_shown(overlay, complete);
+	if (overlay < 0) return;
+	menu.set_widget_shown(overlay, complete);
+	// Shown, it takes campaign.def's complete_overlay image [orig: sub_6D3760(byte_25DB320)
+	//  @0x5604a4, @0x560cfc (dfx2.exe)].
+	if (complete)
+		menu.set_widget_image(overlay, kCampaignImageStates, campaigns_.complete_overlay);
 }
 
 // [orig: sub_55FAD0 @0x55fad0 - events 0x5000001 / 0x5000002 @0x55fb03, the row's value (the
@@ -269,6 +287,7 @@ void MenuFlow::select_mission(MenuRuntime &menu, int id, int row, const std::str
 	} else if (strutil::iequals(name, kCampaignMissionList)) {
 		const size_t dot = choice->file.find('.');
 		campaign_image_ = (dot == std::string::npos ? choice->file : choice->file.substr(0, dot)) + ".tga";
+		set_campaign_image(menu);
 		show_overlay(menu, (choice->campaign.flags & mission_catalog::kRowComplete) != 0);
 		apply_sp_selection(menu, {kCampaignBriefing}, choice->briefing, true);
 	} else {

@@ -184,6 +184,9 @@ public:
 	void set_widget_focused(int index, bool focused) override {
 		if (MenuFrame *f = frame()) f->set_widget_focused(index, focused);
 	}
+	void set_widget_image(int index, uint32_t states, const std::string &file) override {
+		if (MenuFrame *f = frame()) f->set_widget_image(index, states, file);
+	}
 	void set_widget_rect(int index, int left, int top, int right, int bottom) override {
 		if (MenuFrame *f = frame())
 			f->set_widget_rect(index, Rect2i(left, top, right - left, bottom - top));

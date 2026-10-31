@@ -153,6 +153,9 @@ struct FakeFrame : MenuFrameSeam {
 		note("rect " + std::to_string(i) + " " + std::to_string(l) + " " + std::to_string(t) +
 				" " + std::to_string(r) + " " + std::to_string(b));
 	}
+	void set_widget_image(int i, uint32_t states, const std::string &file) override {
+		note("image " + std::to_string(i) + " " + std::to_string(states) + " " + file);
+	}
 	void set_widget_caret(int i, int caret) override {
 		note("caret " + std::to_string(i) + " " + std::to_string(caret));
 		carets[i] = caret;
@@ -1574,6 +1577,7 @@ void test_campaign_tabs() {
 		widget("CA_MISSION_LIST", mnu::WindowType::List),
 		widget("BRIEFING", mnu::WindowType::Static),
 		widget("CAMPAIGN_IMAGE_OVERLAY", mnu::WindowType::Static),
+		widget("CAMPAIGN_IMAGE", mnu::WindowType::Static),
 		widget("IA_LIST", mnu::WindowType::List),
 		widget("IA_BRIEFING", mnu::WindowType::Static),
 		widget("ACCEPT", mnu::WindowType::Button),
@@ -1622,6 +1626,9 @@ void test_campaign_tabs() {
 	// c2 waits on c1; a title-less row shows its file name.
 	CHECK(menu.get_widget_items(missions) == (std::vector<std::string>{"C1"}));
 	CHECK(!menu.is_widget_shown(overlay) && flow.campaign_image() == "a.tga");
+	// CAMPAIGN_IMAGE's default appearance takes the image [orig: sub_6D3760 @0x560464 (dfx2.exe)].
+	const int image = menu.widget_id("CAMPAIGN_IMAGE");
+	CHECK(menu.widget_image(image) == "a.tga" && menu.widget_image(overlay).empty());
 	// IA_LIST: free.bms alone (the campaign ones incomplete, objective Co-op out, DM out).
 	CHECK(menu.get_widget_items(ia) == (std::vector<std::string>{"*Free"}));
 	CHECK(menu.is_widget_disabled(accept) && menu.get_widget_text(ia_briefing).empty());
@@ -1634,6 +1641,7 @@ void test_campaign_tabs() {
 	flow.select_mission(menu, missions, 0, "");
 	CHECK(flow.selected_mission() == "c1.bms" && !menu.is_widget_disabled(accept));
 	CHECK(menu.get_widget_text(briefing) == "c1 briefing" && flow.campaign_image() == "c1.tga");
+	CHECK(menu.widget_image(image) == "c1.tga"); // [orig: sub_560BC0 @0x560cac (dfx2.exe)]
 	CHECK(flow.selected_campaign().campaign == 0 && flow.selected_campaign().campaign_mission == 0);
 	CHECK(menu.get_widget_text(ia_briefing).empty());
 	// The instant-action radio: IA_LIST has none picked, ACCEPT off; its pick writes IA_BRIEFING.
@@ -1651,6 +1659,8 @@ void test_campaign_tabs() {
 	flow.set_campaign_source(def, &text, progress);
 	flow.seed_missions(menu, ia, rows);
 	CHECK(menu.is_item_enabled(ca, 1) && menu.selected_row(ca) == 0 && menu.is_widget_shown(overlay));
+	// The shown overlay takes campaign.def's complete_overlay [orig: @0x5604a4 (dfx2.exe)].
+	CHECK(menu.widget_image(overlay) == "done.tga" && menu.widget_image(image) == "a.tga");
 	CHECK(menu.get_widget_items(missions) == (std::vector<std::string>{"C1", "c2.bms"}));
 	CHECK(menu.get_widget_items(ia) == (std::vector<std::string>{"C1", "C2", "*Free"}));
 	CHECK(flow.select_campaign(menu, ca, 1));
