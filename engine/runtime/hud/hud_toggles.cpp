@@ -390,7 +390,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// dfx2.exe's EmoteToggle row (flags 0x0C000C01, a live-player row): the cycle closed ->
 	// emotes -> radio -> closed, each step through the keeping init. Jointops.exe carries the
 	// case too, on no row (D-HUD-36).
-	// [orig: Input_HandleActionBinding case 59 @0x49B703..0x49B74F]
+	// [orig: Input_HandleActionBinding case 59 @0x49B6FB..0x49B761]
 	// [orig: Input_HandleActionBinding @0x49AD50 case 59 - the emotes test @0x49B76A, emotes 0 /
 	//  radio 1 kept @0x49B772..0x49B786; the radio test @0x49B793, both 0, radio kept
 	//  @0x49B799..0x49B7AA; else emotes 1 kept @0x49B7B7..0x49B7C6 (dfx2.exe)]
