@@ -110,11 +110,13 @@ class MenuDriver : public RefCounted {
 	// The commands the game binds on the open document by control name (wire_commands).
 	opennova::menu::MenuCommands commands_;
 	// The screen controller holding the open document (claim_screen) and its binding; the last one
-	// let go stays alive past a dispatch that released it. While an open runs, its events are the
-	// claimant's open() (opening_).
+	// let go stays alive past a dispatch that released it. open_serial_ counts the opens (an event
+	// answered with another open is not the new document's); while an open runs, its events are
+	// the claimant's open() (opening_).
 	opennova::menu::MenuScreenController *wired_ = nullptr;
 	Ref<MenuScreenBinding> claimed_;
 	Ref<MenuScreenBinding> released_;
+	uint64_t open_serial_ = 0;
 	bool opening_ = false;
 	void release_wired_();
 	std::unique_ptr<FrameSeam> seam_;
@@ -495,9 +497,9 @@ public:
 	// --- screen controllers (engine menu_screen_controller.h) ---
 	// The document open now (a screen a mission opens by name, opened with open_document, or a
 	// delegate's document the shell hands its companion) is `p_screen`'s: its open() runs now with
-	// the open file and screen, the runtime's events reach it while it holds the document (ahead of
-	// this driver's signals), and its close() runs at release_screen() or the next open. False with
-	// no document open or no controller.
+	// the open file and screen, the runtime's events reach it while it holds the document (after
+	// this driver's signals, the shell's handling among them), and its close() runs at
+	// release_screen() or the next open. False with no document open or no controller.
 	bool claim_screen(const Ref<MenuScreenBinding> &p_screen);
 	void release_screen();
 };

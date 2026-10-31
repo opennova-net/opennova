@@ -318,11 +318,15 @@ public:
 
 MenuDriver::MenuDriver() : seam_(std::make_unique<FrameSeam>(this)) {
 	runtime_.set_sink([this](const opennova::menu::MenuEvent &p_event) {
-		// The screen controller holding the document hears an event first, while it still holds
-		// it (the open's own events are its controller's open(), its INIT); this device half
-		// relays every event after.
-		if (wired_ != nullptr && !opening_) wired_->on_event(runtime_, p_event);
+		// This device half relays every event (the shell's handling among its listeners); the
+		// screen controller holding the document hears it after, while it still holds it: an
+		// event answered with another open is not the new document's, and the open's own events
+		// are its controller's open() (its INIT).
+		opennova::menu::MenuScreenController *const holder = opening_ ? nullptr : wired_;
+		const uint64_t serial = open_serial_;
 		on_runtime_event_(p_event);
+		if (holder != nullptr && holder == wired_ && serial == open_serial_)
+			holder->on_event(runtime_, p_event);
 	});
 	// The single-player screen's controls and the Mods list's descriptions, the engine's name
 	// sets (menu_commands.h), as the editor's Try mode sets them (editor/preview/menu_try.cpp).
@@ -437,6 +441,7 @@ bool MenuDriver::open_document(const Ref<MnuDocument> &p_doc, const Ref<Resource
 	// The STARTUP label's line (D-MNU-76): the launch's game and its installed release, ONE's
 	// build and the protocol it speaks (LaunchFlags::version_line).
 	runtime_.set_version_line(to_std(LaunchFlags::version_line()));
+	++open_serial_;
 	opening_ = true;
 	const bool shown = runtime_.open_document(doc_.is_valid() ? &doc_->get_native() : nullptr,
 			to_std(p_menu_file), to_std(p_target_screen));
