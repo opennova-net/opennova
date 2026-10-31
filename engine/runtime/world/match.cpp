@@ -1869,9 +1869,10 @@ void Match::update_flag_objectives(World &world) {
         const bool player_class = (carrier->flags & kEntityFlagPlayer) != 0;
 
         // A Takeable def, touched by a Player with empty hands, is carried off
-        // ahead of the id switch, whatever its id: the attach alone, so no
-        // pickup score, no 0x14 feed for a non-flag def and no sound. The
-        // attach's own gate refuses an object someone already carries; its
+        // ahead of the id switch, whatever its id: the attach alone (for a
+        // non-flag def, its SPGOAL_PU play at the carrier), so no pickup score
+        // and no 0x14 feed. The attach's own gate refuses an object someone
+        // already carries; its
         // out-of-session-or-authority test always passes here.
         // [orig: Entity_ProcessWaypointInteraction - Flags & 0x100 @0x4AD85B,
         //  mountedChild @0x4AD862, def+0x54 & 0x2000 @0x4AD86D,
