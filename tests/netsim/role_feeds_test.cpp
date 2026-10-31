@@ -21,7 +21,9 @@
 #include <runtime/world/radio_call.h>
 #include <base/title/title.h> // title_by_code (DFX2-45)
 
+#include <csignal>
 #include <cstdio>
+#include <cstdlib>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -29,6 +31,10 @@
 
 using namespace opennova;
 using namespace opennova::inmatch;
+
+// The title a view runs as where a case names none other: Joint Operations'. A feed that reads the
+// view's title aborts without one (require_title), so every view that reaches one names it.
+const Title &kJo = *title_by_code("jo");
 
 static int failures = 0;
 #define CHECK(c)                                                                       \
@@ -77,6 +83,7 @@ static void inset_target_name_cases() {
 	RoleView host;
 	host.runtime = &host_runtime;
 	host.kernel = &kernel;
+	host.title = &kJo;
 	world::AiEntity *body = kernel.world.ai.for_handle(me);
 	CHECK(body != nullptr);
 	if (body != nullptr) {
@@ -236,6 +243,7 @@ static void voice_macro_override_cases() {
 	view.runtime = runtime_heap.get();
 	view.kernel = &kernel;
 	view.joiner = true;
+	view.title = &kJo;
 	auto macro_table = [](std::initializer_list<std::pair<const char *, const char *>> rows) {
 		rtxt::File table;
 		table.sections.push_back(rtxt::Section{"macrotext", static_cast<uint32_t>(rows.size())});
@@ -539,6 +547,7 @@ void deploy_table_zone_cases() {
 	RoleView view;
 	view.kernel = &kernel;
 	view.runtime = &host_view;
+	view.title = &kJo;
 	const hud::GameTextLookup gametext = [](const char *, const char *key, const char *fallback) {
 		return std::string(key) == "attach_50cal" ? std::string("Fifty") : std::string(fallback);
 	};
@@ -680,6 +689,7 @@ void vehicle_panel_rider_cases() {
 	RoleView view;
 	view.kernel = &kernel;
 	view.runtime = &host_view;
+	view.title = &kJo;
 	std::vector<hud::HudVehicleRider> riders;
 	fill_vehicle_panel_riders(view, riders);
 	CHECK(riders.size() == 2);
@@ -702,17 +712,28 @@ void vehicle_panel_rider_cases() {
 	CHECK(riders.empty());
 }
 
-int main() {
+int main(int argc, char **argv) {
+	// ctest role_feeds_untitled: a feed that reads the view's title with none aborts, naming
+	// itself (require_title), where a default Title's 240 reveal ticks once stood in. The abort's
+	// handler exits clean, so ctest reads the message (PASS_REGULAR_EXPRESSION).
+	if (argc > 1 && std::string(argv[1]) == "--untitled-shroud") {
+		std::signal(SIGABRT, [](int) { std::_Exit(0); });
+		mission::MissionKernel kernel;
+		RoleView untitled;
+		untitled.kernel = &kernel;
+		(void)death_shroud_revealed(untitled);
+		std::fputs("death_shroud_revealed read a view with no title\n", stderr);
+		return 1;
+	}
 	deploy_table_zone_cases();
 	vehicle_panel_rider_cases();
 	hud_pass_call_site_cases();
 	voice_macro_override_cases();
 	lighting_walk_keeps_the_row_at_l_cases();
 	serve_only_end_round_cases();
-	// DFX2-45: the role's title names the Inset reticle; no title draws the arms.
+	// DFX2-45: the role's title names the Inset reticle: Jointops.exe's draws the arms.
 	{
 		RoleView view;
-		CHECK(!hud_role_facts(view).inset_reticle_quad);
 		view.title = title_by_code("jo");
 		CHECK(!hud_role_facts(view).inset_reticle_quad);
 		view.title = title_by_code("dfx2");
@@ -721,6 +742,7 @@ int main() {
 	// The bare local role: nothing folded, nothing gathered.
 	{
 		RoleView bare;
+		bare.title = &kJo;
 		CHECK(!local_death_screen_active(bare) && !local_player_dead(bare));
 		const EndRoundSessionState s = end_round_session_state(bare);
 		CHECK(!s.header_known && !s.board_known && !s.session_open);
@@ -793,6 +815,7 @@ int main() {
 	RoleView joiner;
 	joiner.runtime = &runtime;
 	joiner.joiner = true;
+	joiner.title = &kJo;
 	CHECK(local_death_screen_active(joiner));
 	const EndRoundSessionState s = end_round_session_state(joiner);
 	CHECK(s.header_known && s.board_known && s.winner == 2 && s.team_score_0 == 7 &&
@@ -971,6 +994,7 @@ int main() {
 		view.runtime = &rt;
 		view.kernel = &kernel;
 		view.joiner = true;
+		view.title = &kJo;
 		const HudRoleFacts f = hud_role_facts(view);
 		CHECK(f.session.in_session && f.session.round_time_remaining == -1 &&
 				f.session.permanent_death && f.session.remaining_count == 3 &&
@@ -1003,7 +1027,9 @@ int main() {
 		CHECK(menus.emotes_menu.texts[7].rfind("EMO_", 0) == 0 && menus.emotes_menu.texts[7] != "EMO_8");
 		CHECK(menus.radio_menu.texts[0] == "RAD_1" && menus.radio_menu.texts[7] == "RAD_8");
 		CHECK(menus.radio_menu.texts[8].rfind("RAD_", 0) == 0 && menus.radio_menu.texts[8] != "RAD_9");
-		const HudRoleFacts none = hud_role_facts(RoleView{});
+		RoleView no_kernel;
+		no_kernel.title = &kJo;
+		const HudRoleFacts none = hud_role_facts(no_kernel);
 		CHECK(!none.session.in_session && none.session.round_time_remaining == -1);
 		// The death screen's spectate arm: with a target and a sub-mode the
 		// info is rebuilt for the target (its team byte, name and health

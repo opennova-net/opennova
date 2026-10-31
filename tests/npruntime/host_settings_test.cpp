@@ -13,6 +13,9 @@
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_state_frame.h>
 #include <runtime/menu/menu_text_tables.h>
+#include <csignal>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <string>
@@ -450,7 +453,16 @@ int host_words_are_the_titles() {
 }
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    // ctest npruntime_host_settings_unknown_title: a code no installed title has aborts, named
+    // (require_title_code), where the default title's words once stood in. The abort's handler
+    // exits clean, so ctest reads the message (PASS_REGULAR_EXPRESSION).
+    if (argc > 1 && std::string(argv[1]) == "--unknown-title") {
+        std::signal(SIGABRT, [](int) { std::_Exit(0); });
+        (void)server_settings_title("nosuchgame");
+        std::fputs("server_settings_title read a code no title has\n", stderr);
+        return 1;
+    }
     if (title_caps() != 0) return 1;
     if (untouched_dialog() != 0) return 1;
     if (max_players_recommendation() != 0) return 1;

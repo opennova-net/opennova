@@ -329,8 +329,7 @@ gamecfg::ServerSettingsTitle server_settings_title(const Title& title) {
 }
 
 gamecfg::ServerSettingsTitle server_settings_title(std::string_view title_code) {
-    const Title* title = title_by_code(title_code);
-    return server_settings_title(title != nullptr ? *title : default_title());
+    return server_settings_title(require_title_code(title_code, "server_settings_title"));
 }
 
 void populate_host_weapon_list(menu::MenuRuntime& screen, const gamecfg::GameCfg& cfg, const Title& title,

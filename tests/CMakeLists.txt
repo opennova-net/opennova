@@ -2054,6 +2054,10 @@ if(MSVC)
     target_link_options(role_feeds_test PRIVATE "/STACK:4194304")
 endif()
 add_test(NAME role_feeds COMMAND role_feeds_test)
+# A feed reading a view with no title aborts, named (base/title/title.h require_title).
+add_test(NAME role_feeds_untitled COMMAND role_feeds_test --untitled-shroud)
+set_tests_properties(role_feeds_untitled PROPERTIES PASS_REGULAR_EXPRESSION
+    "death_shroud_revealed: no title: ")
 
 # The server config flag word a joiner reads and the join entry's step
 # (inmatch/server_flags.h): the BuildFlags literals, the undiscovered word,
@@ -4293,6 +4297,10 @@ add_executable(npruntime_host_settings_test npruntime/host_settings_test.cpp)
 target_link_libraries(npruntime_host_settings_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_settings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_settings COMMAND npruntime_host_settings_test)
+# The settings schema of a code no installed title has aborts, named (require_title_code).
+add_test(NAME npruntime_host_settings_unknown_title COMMAND npruntime_host_settings_test --unknown-title)
+set_tests_properties(npruntime_host_settings_unknown_title PROPERTIES PASS_REGULAR_EXPRESSION
+    "server_settings_title: no title is installed under the code \"nosuchgame\"")
 # The host rules a session runs by its title (docs/titles/dfx2-vs-jo-re.md §7): the cfg table's
 # title, dfx2.exe's caps, score table seeds, linger, deploy protection and its want of a revive.
 add_executable(npruntime_title_host_rules_test npruntime/title_host_rules_test.cpp)

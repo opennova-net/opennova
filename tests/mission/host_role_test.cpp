@@ -906,6 +906,7 @@ void check_serve_only_net_quality_indicators(std::map<std::string, std::string> 
 		inmatch::RoleView view;
 		view.kernel = &kernel;
 		view.host = &ctx;
+		view.title = opennova::title_by_code("jo");
 		const inmatch::HudRoleFacts facts = inmatch::hud_role_facts(view);
 		CHECK(facts.net_quality.in_session && facts.net_quality.novaworld_icon == novaworld);
 		CHECK(facts.net_quality.indicators.level == 3 &&

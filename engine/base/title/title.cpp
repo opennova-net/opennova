@@ -70,4 +70,19 @@ const Title *title_by_command_file(std::string_view command_file) {
 	return nullptr;
 }
 
+void title_missing(const char *reader) {
+	std::fputs(reader, stderr);
+	std::fputs(": no title: the embedder or the session sets the title it runs as before a read\n",
+			stderr);
+	std::abort();
+}
+
+void title_code_unknown(const char *reader, std::string_view code) {
+	std::fputs(reader, stderr);
+	std::fputs(": no title is installed under the code \"", stderr);
+	std::fwrite(code.data(), 1, code.size(), stderr);
+	std::fputs("\": games::install() registers every title a program runs\n", stderr);
+	std::abort();
+}
+
 } // namespace opennova

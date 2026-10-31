@@ -7,6 +7,7 @@
 // [orig: DeathScreen_UpdateUI @0x553150; DeathScreen_OnSwapTeams @0x5535B0;
 //  NetPacket_SendPingRequest @0x42DD90; MapOverlay_UpdateTimers @0x5BFCE0]
 #include <runtime/inmatch/client_runtime.h>
+#include <base/title/title.h>
 #include <runtime/inmatch/role_feeds.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_replica_pipeline.h>
@@ -88,6 +89,7 @@ void test_joiner_feed_reads_the_session_rules() {
 	joiner.runtime = &runtime;
 	joiner.joiner = true;
 	joiner.staged_mp_attributes = 0x4u; // the joiner's own word is not read
+	joiner.title = opennova::title_by_code("jo"); // the DEATH screen's feed reads its title
 	runtime.view().apply(s2c::SESSION_CONFIG, session_config(0x10000u, 0x0u));
 	CHECK(runtime.state().session_rules_flags == 0u);
 	CHECK(!deploy_screen_status(joiner, world::SpawnZoneRegistry(), "M",

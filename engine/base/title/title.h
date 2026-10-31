@@ -564,4 +564,22 @@ const Title *title_at(size_t index);
 // opens the file); null for none.
 const Title *title_by_command_file(std::string_view command_file);
 
+// The title a reader runs as: the one its embedder or its session set (a role's view, a host's
+// screen, a launch's code). A read with none, or by a code no installed title has, aborts naming
+// `reader` and the invariant: no reader runs another title's values, a default's or Jointops.exe's,
+// in place of its own (the protocol's twin is protocol_in_match's abort).
+[[noreturn]] void title_missing(const char *reader);
+[[noreturn]] void title_code_unknown(const char *reader, std::string_view code);
+inline const Title &require_title(const Title *title, const char *reader) {
+	if (title == nullptr)
+		title_missing(reader);
+	return *title;
+}
+inline const Title &require_title_code(std::string_view code, const char *reader) {
+	const Title *title = title_by_code(code);
+	if (title == nullptr)
+		title_code_unknown(reader, code);
+	return *title;
+}
+
 } // namespace opennova
