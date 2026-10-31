@@ -369,6 +369,9 @@ func _process(_delta: float) -> void:
 		_set_shroud_shown(true)
 		if Simulation.deploy_refresh_due(_last_tick, tick):
 			_populate_spawn_list(sim)
+			# A title's team lists ride the same refresh (the engine's gate and witness:
+			# world::deploy_team_lists).
+			_driver.fill_deploy_team_lists(sim, Strings.get_table(Strings.TABLE_GAMETEXT))
 	_last_tick = tick
 	# The map window follows its widget, which the reveal just showed.
 	_place_map_window()

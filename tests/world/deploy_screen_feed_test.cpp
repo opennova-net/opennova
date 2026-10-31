@@ -11,6 +11,7 @@
 
 #include <base/title/title.h>
 #include <formats/mnu/mnu.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/world/deploy_screen_feed.h>
 #include <runtime/world/spawn_select.h>
@@ -562,7 +563,51 @@ void test_spawn_table_pan_target() {
 	CHECK(!deploy_table_pan_target(w, reg, 1, dx, dy) && !deploy_table_pan_target(w, reg, -1, dx, dy));
 }
 
+// DFX2-41: the team lists: a team-1 entity's name in the blue list, any other's in the red, the
+// local player's behind its list's colour, each line ending CR LF; STATIC_TEAM the local team's
+// colour and name; the three written where the screen has them.
+// [orig: sub_5503A0 @0x5503a0 - @0x550466..0x55059a, @0x55060f..0x55066d; sub_5B6820 @0x5b6820
+//  (dfx2.exe)]
+void test_team_lists() {
+	const hud::GameTextLookup names = [](const char *, const char *key, const char *fallback) {
+		const std::string k = key;
+		return k == "STRCLI05" ? std::string("Blue") : k == "STRCLI06" ? std::string("Red")
+				: k == "STRCLI19" ? std::string("None") : std::string(fallback);
+	};
+	const std::vector<DeployTeamListPlayer> players = {
+		{ 1, false, "Ace" }, { 2, true, "Me" }, { 1, true, "Self" }, { 0, false, "Spec" } };
+	DeployTeamLists lists = deploy_team_lists(players, 2, names);
+	CHECK(lists.blue == "Ace\r\n<cC0C0FF>Self\r\n");
+	CHECK(lists.red == "<cFFC0C0>Me\r\nSpec\r\n");
+	CHECK(lists.team == "Team: <cFFFF0000>Red");
+	CHECK(deploy_team_lists({}, 1, names).team == "Team: <cFF00AFFF>Blue");
+	CHECK(deploy_team_lists({}, 0, names).team == "Team: <cFF00FF00>None");
+	CHECK(deploy_team_lists({}, 9, names).team == "Team: <cFF00AFFF>");
+	mnu::Document doc;
+	mnu::Screen death;
+	death.name = "DEATH";
+	mnu::Window root;
+	root.name = "MAIN";
+	root.type = mnu::WindowType::Window;
+	for (const char *name : { "TEAMBLUE", "TEAMRED", "STATIC_TEAM" }) {
+		mnu::Window w;
+		w.name = name;
+		w.type = std::string(name) == "STATIC_TEAM" ? mnu::WindowType::Static
+				: mnu::WindowType::MultilineEdit;
+		root.children.push_back(w);
+	}
+	death.roots.push_back(root);
+	doc.screens.push_back(death);
+	menu::MenuRuntime rt;
+	rt.open_document(&doc, "death.mnu", "");
+	fill_deploy_team_lists(rt, lists);
+	CHECK(rt.get_widget_text(rt.widget_id("TEAMBLUE")) == lists.blue);
+	CHECK(rt.get_widget_text(rt.widget_id("TEAMRED")) == lists.red);
+	CHECK(rt.get_widget_text(rt.widget_id("STATIC_TEAM")) == lists.team);
+}
+
 int main() {
+	test_team_lists();
 	test_loadout_picker_gate();
 	test_spawn_table_rows();
 	test_spawn_table_fill();

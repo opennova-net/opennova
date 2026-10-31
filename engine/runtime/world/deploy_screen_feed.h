@@ -338,6 +338,33 @@ std::vector<DeployTableRow> build_deploy_table_rows(
 //  CTableWnd_SetRowSelected @0x551d53 (dfx2.exe)]
 bool fill_deploy_spawn_table(menu::MenuRuntime &menu, const std::vector<DeployTableRow> &rows);
 
+// DFX2-41: the DEATH screen's team lists, refreshed with its content: per Tab-board row, in its
+// order, the row's entity (the player slot's in a session, the slot driving one; else, and for
+// a row whose slot drives none, the entity the walk holds, the local player at first): a
+// team-1 entity's name in TEAMBLUE, any other's in TEAMRED, each line ending CR LF, the local
+// player's behind "<cC0C0FF>" / "<cFFC0C0>"; then STATIC_TEAM "Team: <c%08X>%s", the local
+// team's colour (0xFF00FF00 team 0, 0xFFFF0000 team 2, 0xFF00AFFF else) and its name
+// (Client STRCLI19 team 0, 05 team 1, 06 team 2, 17 team 3, 18 team 4, else 01).
+// [orig: sub_5503A0 @0x5503a0 - the row walk @0x55040d..0x5505c3 (the entity @0x550437..0x550459,
+//  never reset between rows), the team test @0x550466, the marks @0x550496 / @0x550536, the
+//  names @0x5504af / @0x55054f, the line ends @0x55059a, the texts @0x5505e6 / @0x5505fd,
+//  STATIC_TEAM @0x55060f..0x55066d; sub_5B6820 @0x5b6820 (dfx2.exe)]
+struct DeployTeamListPlayer {
+	uint8_t team = 0; // the entity's team byte (+354)
+	bool local = false;
+	std::string name; // HUD_GetEntityDisplayName
+};
+struct DeployTeamLists {
+	std::string blue;
+	std::string red;
+	std::string team;
+};
+DeployTeamLists deploy_team_lists(const std::vector<DeployTeamListPlayer> &players, int local_team,
+		const hud::GameTextLookup &gametext);
+// The three texts written to DEATH's TEAMBLUE, TEAMRED and STATIC_TEAM, each where the screen
+// has it.
+void fill_deploy_team_lists(menu::MenuRuntime &menu, const DeployTeamLists &lists);
+
 class World;
 struct SpawnZoneRegistry;
 // The table's cell event (0x8000001) on a data row whose state is not 1 (locked), by its press

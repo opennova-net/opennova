@@ -403,6 +403,15 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 //  the greyed test @0x551645..0x551673, the category and class @0x55170a / @0x551771, the seat
 //  walk @0x5518b3..0x5519c0, the gunner walk @0x5519db..0x551b7f, the wave members
 //  @0x551b96..0x551c86 (dfx2.exe)]
+// DFX2-41: the DEATH screen's team-list players for THIS client, a title with
+// Title::death_screen_team_lists alone (false for any other, or without a kernel and a replica
+// runtime): per Tab-board row the entity world::deploy_team_lists names (the roster slot the
+// row names, in a session, while it drives a body; else the one the walk held, the local
+// player at first), its team byte as this client holds it, whether it is the local player and
+// its name as the HUD names an entity.
+// [orig: sub_5503A0 @0x55040d..0x5505c3 (dfx2.exe)]
+bool deploy_team_list_players(const RoleView &view, std::vector<world::DeployTeamListPlayer> &out);
+
 bool deploy_table_zones(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		uint32_t stance_middle, uint32_t stance_bad, const hud::GameTextLookup &gametext,
 		std::vector<world::DeployTableZone> &out);

@@ -155,6 +155,10 @@ struct Title {
 	//  @0x553150 - the shroud's hide @0x55325f].
 	int32_t death_shroud_reveal_ticks = 240;
 	bool death_shroud_main = false;
+	// DFX2-41: the DEATH screen's content refresh also writes its team lists, TEAMBLUE and
+	// TEAMRED, and its STATIC_TEAM line (world::deploy_team_lists). False (Jointops.exe): the call
+	// there is an empty stub [orig: nullsub_177 @0x553140].
+	bool death_screen_team_lists = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

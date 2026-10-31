@@ -1233,6 +1233,38 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 	return true;
 }
 
+bool deploy_team_list_players(const RoleView &view, std::vector<world::DeployTeamListPlayer> &out) {
+	out.clear();
+	if (view.title == nullptr || !view.title->death_screen_team_lists) return false;
+	if (view.kernel == nullptr || view.runtime == nullptr) return false;
+	const ClientRuntime &runtime = *view.runtime;
+	const world::World &w = view.kernel->world;
+	const replication::ClientState &cs = runtime.state();
+	const bool in_session = view.joiner ? runtime.in_session() : w.rules.mp_session;
+	const uint16_t self_handle = deploy_self_handle(view);
+	// The entity the walk holds: never reset between rows [orig: @0x5503cb, @0x550449].
+	world::EntityHandle entity{};
+	for (const replication::ClientScoreboardRow &row : cs.scoreboard.rows) {
+		if (in_session && row.slot_id < cs.roster.size()) {
+			const replication::ClientRosterSlot &slot = cs.roster[row.slot_id];
+			if (slot.bound && slot.entity_slot >= 0)
+				entity = world::EntityHandle::make(0, static_cast<uint16_t>(slot.entity_slot));
+		}
+		if (!entity.valid()) entity = w.cached.local_player;
+		if (!entity.valid()) continue;
+		world::DeployTeamListPlayer player;
+		if (const world::Entity *e = w.registry.get(entity)) {
+			player.team = e->team;
+		} else if (const replication::ClientEntityState *state = cs.find(entity.packed)) {
+			player.team = state->team_known ? state->team : uint8_t{0};
+		}
+		player.local = entity.packed == self_handle;
+		hud_entity_display_name(view, entity, player.name);
+		out.push_back(std::move(player));
+	}
+	return true;
+}
+
 bool deploy_table_zones(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		uint32_t stance_middle, uint32_t stance_bad, const hud::GameTextLookup &gametext,
 		std::vector<world::DeployTableZone> &out) {

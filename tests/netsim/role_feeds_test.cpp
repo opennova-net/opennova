@@ -7,6 +7,7 @@
 // [orig: NapiNPClientMsg_0x01D @0x430840; StatScreen_PopulateStatResultsList
 //  @0x562240; UI_UpdateDeathScreenContent @0x5536a0]
 #include <base/gameprofile/game_type.h>
+#include <base/title/title.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/effect_pose_index.h>
 #include <runtime/inmatch/loopback_channel.h>
@@ -564,6 +565,33 @@ void deploy_table_zone_cases() {
 	CHECK(deploy_table_zones(view, reg, 0, 0, gametext, zones) && zones.empty());
 	RoleView bare;
 	CHECK(!deploy_table_zones(bare, reg, 0, 0, gametext, zones) && zones.empty());
+	// DFX2-41's team lists: per Tab-board row the entity the roster slot drives in a session,
+	// else the one the walk held (never reset), the local player at first; a title without the
+	// lists gives none [orig: sub_5503A0 @0x55040d..0x5505c3 (dfx2.exe)].
+	std::vector<world::DeployTeamListPlayer> players;
+	CHECK(!deploy_team_list_players(view, players));
+	opennova::Title dfx2;
+	dfx2.death_screen_team_lists = true;
+	view.title = &dfx2;
+	w.registry.get(rider)->team = 2;
+	replication::ClientScoreboardRow row;
+	row.slot_id = 0; // Ace, the pilot
+	cs.scoreboard.rows.push_back(row);
+	row.slot_id = 5; // no body: the walk keeps the pilot
+	cs.scoreboard.rows.push_back(row);
+	row.slot_id = 1; // the rider, the local player
+	cs.scoreboard.rows.push_back(row);
+	w.rules.mp_session = true;
+	CHECK(deploy_team_list_players(view, players));
+	CHECK(players.size() == 3);
+	CHECK(players.size() == 3 && players[0].name == "Ace<ch>CL<co>" && players[0].team == 1 &&
+			!players[0].local);
+	CHECK(players.size() == 3 && players[1].name == "Ace<ch>CL<co>");
+	CHECK(players.size() == 3 && players[2].name == "Rider" && players[2].team == 2 &&
+			players[2].local);
+	// Out of a session every row is the local player's.
+	w.rules.mp_session = false;
+	CHECK(deploy_team_list_players(view, players) && players.size() == 3 && players[0].local);
 }
 
 int main() {

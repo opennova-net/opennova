@@ -452,6 +452,41 @@ DeployTableClick deploy_table_click(const menu::MenuRuntime &menu, int table, in
 	return click;
 }
 
+DeployTeamLists deploy_team_lists(const std::vector<DeployTeamListPlayer> &players, int local_team,
+		const hud::GameTextLookup &gametext) {
+	DeployTeamLists out;
+	for (const DeployTeamListPlayer &player : players) {
+		std::string &list = player.team == 1 ? out.blue : out.red;
+		if (player.local) list += player.team == 1 ? "<cC0C0FF>" : "<cFFC0C0>";
+		list += player.name;
+		list += "\r\n";
+	}
+	const uint32_t color = local_team == 0 ? 0xFF00FF00u
+			: local_team == 2 ? 0xFFFF0000u : 0xFF00AFFFu;
+	const char *key = "STRCLI01";
+	switch (static_cast<int8_t>(local_team)) {
+		case 0: key = "STRCLI19"; break;
+		case 1: key = "STRCLI05"; break;
+		case 2: key = "STRCLI06"; break;
+		case 3: key = "STRCLI17"; break;
+		case 4: key = "STRCLI18"; break;
+		default: break;
+	}
+	char head[32];
+	std::snprintf(head, sizeof(head), "Team: <c%08X>", color);
+	out.team = head + hud::game_text(gametext, hud::kGameTextClient, key, "");
+	return out;
+}
+
+void fill_deploy_team_lists(menu::MenuRuntime &menu, const DeployTeamLists &lists) {
+	const int blue = menu.find_screen_control("DEATH", "TEAMBLUE");
+	const int red = menu.find_screen_control("DEATH", "TEAMRED");
+	if (blue >= 0) menu.set_widget_text(blue, lists.blue);
+	if (red >= 0) menu.set_widget_text(red, lists.red);
+	const int team = menu.find_screen_control("DEATH", "STATIC_TEAM");
+	if (team >= 0) menu.set_widget_text(team, lists.team);
+}
+
 bool deploy_map_moved(menu::MenuRuntime &menu) {
 	const int table = menu.find_screen_control("DEATH", "SPAWNPOINTS_TABLE");
 	if (table < 0) return false;

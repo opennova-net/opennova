@@ -140,6 +140,9 @@ Title make() {
 	// sub_550690 - CWnd_SetShown(MAIN, 0) @0x5507b8 (dfx2.exe)].
 	t.death_shroud_reveal_ticks = 360;
 	t.death_shroud_main = true;
+	// DFX2-41: the team lists [orig: sub_5503A0 @0x5503a0, called by sub_552770 @0x5527e6
+	// (dfx2.exe)].
+	t.death_screen_team_lists = true;
 	return t;
 }
 
