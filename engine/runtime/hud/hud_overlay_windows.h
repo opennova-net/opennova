@@ -62,6 +62,10 @@ inline constexpr int kHudRadioMenuContextRow = 9;  // [orig: `cmp esi, 9` @0x5bf
 struct HudBriefingState {
 	bool shown = false;
 	std::string text;
+	// DFX2-96: the box holds the single-player how-to (hud_toggles.h hud_briefing_window): the
+	// text from its first line, no page kept [orig: sub_5B8160 - HUD_DrawWrappedText(.., 0)
+	// (dfx2.exe)].
+	bool how_to = false;
 };
 
 // The I window in a session, the end-game screen: the embedder builds the

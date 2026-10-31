@@ -5,6 +5,7 @@
 // the briefing's page state.
 #include "hud/hud_overlay.h"
 #include "mnu/controls_model.h"
+#include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/simulation.h"
 #include "util/string_convert.h"
@@ -13,6 +14,7 @@
 #include <runtime/controls/key_strings.h> // the end-game footer's keyhelp getter
 #include <runtime/hud/hud_server_status.h>
 #include <runtime/hud/session_rules_text.h>
+#include <runtime/hud/hud_toggles.h> // hud_briefing_window
 #include <runtime/hud/tip_system.h>
 #include <runtime/inmatch/role_feeds.h> // end_game_screen_text
 
@@ -57,9 +59,23 @@ PackedStringArray HudOverlay::map_legend_keys() {
 	return keys;
 }
 
-void HudOverlay::set_briefing(bool p_shown, const Ref<Simulation> &p_sim) {
-	state_.briefing.shown = p_shown;
-	state_.briefing.text = p_shown && p_sim.is_valid() ? p_sim->mission_briefing_text() : std::string();
+void HudOverlay::set_briefing(int p_briefing_mode, bool p_briefing_panel_open,
+		const Ref<Simulation> &p_sim, const Ref<RtxtStringFile> &p_gametext) {
+	using opennova::hud::HudBriefingWindow;
+	opennova::hud::HudToggleState words;
+	words.briefing_mode = p_briefing_mode;
+	words.briefing_panel_open = p_briefing_panel_open;
+	const HudBriefingWindow window = opennova::hud::hud_briefing_window(words,
+			p_sim.is_valid() && p_sim->is_mp_session(), ResourceRoot::session_title(root_).hud_sp_how_to);
+	state_.briefing.shown = window != HudBriefingWindow::None;
+	state_.briefing.how_to = window == HudBriefingWindow::HowTo;
+	if (window == HudBriefingWindow::Briefing)
+		state_.briefing.text = p_sim.is_valid() ? p_sim->mission_briefing_text() : std::string();
+	else if (window == HudBriefingWindow::HowTo)
+		state_.briefing.text = opennova::hud::game_text(game_text_lookup(p_gametext), "Overlays",
+				"STROVER_SPMISSIONHOWTO", "");
+	else
+		state_.briefing.text.clear();
 }
 
 void HudOverlay::set_end_game_screen(bool p_shown, const Ref<Simulation> &p_sim,

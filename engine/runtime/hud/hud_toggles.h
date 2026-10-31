@@ -71,6 +71,17 @@ struct HudToggleState {
 	// keeping init @0x49b6c9 / @0x49b6e2].
 	bool emotes_menu_open = false;
 	bool radio_menu_open = false;
+	// DFX2-96: the briefing panel's own window. dfx2.exe's Objectives row (dispatch 58)
+	// flips it out of a session and re-dispatches Briefing (53) in one; Jointops.exe carries
+	// the word too, which only its respawn init and escape chain write (both clear it), so no
+	// key reaches it there. While it holds the gameplay overlays draw the briefing panel
+	// (hud_briefing_window).
+	// [orig: dword_24C18D0 - Game_InitRespawnState @0x49938B, the escape leg @0x49B2DA..0x49B2E2,
+	//  HUD_DrawGameplayOverlays @0x5BE16B -> HUD_DrawBriefingPanel @0x5BE174]
+	// [orig: dword_24BAE80 - Input_HandleActionBinding @0x49AD50 case 58 @0x49B6DB..0x49B70F,
+	//  Game_InitRespawnState @0x49939B, the escape leg @0x49B2EA..0x49B2F2, sub_5BCD20 @0x5BCFAC
+	//  -> sub_5B9BB0 (HUD_DrawBriefingPanel's twin) @0x5BCFB5 (dfx2.exe)]
+	bool briefing_panel_open = false;
 	// The single-player pause word's bit 0: the pause row (catalog 70,
 	// dispatch 25) flips it out of a session, the in-game menu sets it on
 	// open and clears it on resume out of a session, the escape chain clears
@@ -121,6 +132,7 @@ struct HudToggleState {
 	HudKeyEdge toggle_server;
 	HudKeyEdge flipmouse, mousescale;
 	HudKeyEdge lockgame;
+	HudKeyEdge objectives, emote_toggle;
 };
 
 // The briefing window's open value [orig: `mov eax, 2` @0x49b615].
@@ -163,6 +175,8 @@ struct HudKeyPoll {
 	bool flipmouse = false;      // row 79 flipmouse, dispatch 9
 	bool mousescale = false;     // row 82 mousescale, dispatch 17
 	bool lockgame = false;       // row 84 lockgame, dispatch 119
+	bool objectives = false;     // dfx2.exe's row 53 Objectives, dispatch 58
+	bool emote_toggle = false;   // dfx2.exe's row 99 EmoteToggle, dispatch 59
 	// Shift held: the sign bit (bit 31) the keyboard fallback pass and the
 	// mouse dispatch put on the queued binding id, which steps mousescale
 	// down. The modifier pass queues no sign, so a row whose modifier word is
@@ -313,6 +327,8 @@ enum HudToggleRow : int {
 	kRowFlipMouse,    // 79 flipmouse
 	kRowMouseScale,   // 82 mousescale
 	kRowLockGame,     // 84 lockgame
+	kRowObjectives,   // dfx2.exe's 53 Objectives
+	kRowEmoteToggle,  // dfx2.exe's 99 EmoteToggle
 	kHudToggleRowCount,
 };
 // The row's catalog config token ("" out of range).
@@ -342,6 +358,23 @@ uint32_t hud_toggles_dispatch(HudToggleState &state, const HudKeyPoll &fired);
 // keeping the color, detail, showhud and friendly-tag globals; the tip and
 // its once-counters clear as the next start from the menu clears them.
 void hud_toggles_reset_mission(HudToggleState &state);
+
+// DFX2-96: the panel the gameplay overlays draw from the briefing words. Out of a session the
+// I window (briefing_mode) draws Jointops.exe's briefing panel, dfx2.exe's single-player how-to
+// (`sp_how_to`, Title::hud_sp_how_to: Overlays STROVER_SPMISSIONHOWTO in the panel's box, from
+// its first line, no page kept), whose briefing panel is the Objectives window's
+// (briefing_panel_open); Jointops.exe draws that word too, never set. The panel draws after the
+// I window, so it wins. In a session the I window draws the end-game screen (elsewhere).
+// [orig: HUD_DrawGameplayOverlays @0x5BDE60 - dword_24C18C8 @0x5BE133, out of a session
+//  HUD_DrawBriefingPanel @0x5BE145; dword_24C18D0 @0x5BE16B -> HUD_DrawBriefingPanel
+//  @0x5BE174; HUD_DrawSinglePlayerHowTo @0x5B9210 has no caller]
+// [orig: sub_5BCD20 @0x5BCD20 - dword_24BAE78 @0x5BCF74, out of a session sub_5B8160 (the
+//  HUD_DrawSinglePlayerHowTo twin: HUD_DrawLabelBox(200, 40, 824, 728), the rect (235, 75)..
+//  (789, 693), GameText_GetString("Overlays", "STROVER_SPMISSIONHOWTO"), HUD_DrawWrappedText
+//  from line 0) @0x5BCF86; dword_24BAE80 @0x5BCFAC -> sub_5B9BB0 @0x5BCFB5 (dfx2.exe)]
+enum class HudBriefingWindow : uint8_t { None, Briefing, HowTo };
+HudBriefingWindow hud_briefing_window(const HudToggleState &state, bool in_session,
+		bool sp_how_to);
 
 // An S2C 0x0F folded with the death screen up forces the declutter level to
 // the blank level through the same live seam the cycle uses (the replica's

@@ -225,6 +225,7 @@ void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_help_open"), &HudToggles::is_help_open);
 	ClassDB::bind_method(D_METHOD("is_map_legend_open"), &HudToggles::is_map_legend_open);
 	ClassDB::bind_method(D_METHOD("get_briefing_mode"), &HudToggles::get_briefing_mode);
+	ClassDB::bind_method(D_METHOD("is_briefing_panel_open"), &HudToggles::is_briefing_panel_open);
 	ClassDB::bind_method(D_METHOD("is_mp_verbose"), &HudToggles::is_mp_verbose);
 	ClassDB::bind_method(D_METHOD("is_emotes_menu_open"), &HudToggles::is_emotes_menu_open);
 	ClassDB::bind_method(D_METHOD("is_radio_menu_open"), &HudToggles::is_radio_menu_open);

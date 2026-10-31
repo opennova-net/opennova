@@ -6,6 +6,7 @@
 // SP-only gate and sibling close, the respawn reset, the death-screen force,
 // the friendly-tags and verbose rows, the help / map legend / briefing
 // windows and the escape close chain.
+#include <base/title/title.h>
 #include <runtime/controls/controls.h>
 #include <runtime/hud/hud_toggles.h>
 #include <runtime/world/title_rules.h>
@@ -516,10 +517,14 @@ void test_head_drops_at_the_event_edge() {
 	hud_toggles_poll(s, k);
 	k.dotsize = true;
 	CHECK(hud_toggles_poll(s, k) == kDotsizeCycled);
-	// Every row's code is Jointops.exe's catalog row of its token.
+	// Every row's code is its title's catalog row of its token: Jointops.exe's, but dfx2.exe's
+	// Objectives and EmoteToggle rows.
+	const opennova::controls::Catalog &dfx2 =
+			opennova::controls::title_catalog(*opennova::title_by_code("dfx2"));
 	for (int row = 0; row < kHudToggleRowCount; ++row) {
+		const bool dfx2_row = row == kRowObjectives || row == kRowEmoteToggle;
 		const opennova::controls::ActionDef *def =
-				opennova::controls::default_catalog().for_code(hud_toggle_row_code(row));
+				(dfx2_row ? dfx2 : opennova::controls::default_catalog()).for_code(hud_toggle_row_code(row));
 		CHECK(def != nullptr && std::strcmp(def->token, hud_toggle_row_token(row)) == 0);
 	}
 	CHECK(hud_toggle_row_code(kHudToggleRowCount) == -1);
@@ -996,6 +1001,93 @@ static void test_row_tokens_are_the_catalog_rows() {
 		CHECK(hud_toggle_row_token(row)[0] != '\0');
 }
 
+// DFX2-96: dfx2.exe's Objectives row (dispatch 58) flips the briefing panel's window out of a
+// session, then the keeping init, and re-dispatches Briefing in one; the respawn init, the
+// escape chain (after the briefing window, before the objectives) and the mission reset close
+// it. Out of a session its I window draws the how-to where Jointops.exe's draws the briefing
+// panel, which dfx2.exe's draws for the Objectives window.
+// [orig: Input_HandleActionBinding @0x49AD50 case 58 @0x49B6DB..0x49B70F; Game_InitRespawnState
+//  @0x49939B; the escape leg @0x49B2EA; sub_5BCD20 @0x5BCF74..0x5BCFB5 (dfx2.exe)]
+void test_objectives_window() {
+	CHECK(std::strcmp(hud_toggle_row_token(kRowObjectives), "Objectives") == 0 &&
+			hud_toggle_row_code(kRowObjectives) == 58);
+	CHECK(std::strcmp(hud_toggle_row_token(kRowEmoteToggle), "EmoteToggle") == 0 &&
+			hud_toggle_row_code(kRowEmoteToggle) == 59);
+	HudKeyPoll rows;
+	hud_key_poll_set_rows(rows, (1u << kRowObjectives) | (1u << kRowEmoteToggle));
+	CHECK(rows.objectives && rows.emote_toggle && !rows.briefing);
+	HudToggleState s;
+	s.help_open = true;
+	HudKeyPoll k = keys();
+	k.objectives = true;
+	CHECK(hud_toggles_poll(s, k) == (kBriefingToggled | kOverlayWindowsCleared));
+	CHECK(s.briefing_panel_open && !s.help_open && s.briefing_mode == 0);
+	k.objectives = false;
+	hud_toggles_poll(s, k);
+	k.objectives = true;
+	hud_toggles_poll(s, k); // the second press closes it
+	CHECK(!s.briefing_panel_open);
+	k.objectives = false;
+	hud_toggles_poll(s, k);
+	// In a session it is the Briefing row's.
+	k.in_session = true;
+	k.objectives = true;
+	CHECK((hud_toggles_poll(s, k) & kBriefingToggled) != 0);
+	CHECK(!s.briefing_panel_open && s.briefing_mode == kBriefingModeOpen);
+	// The windows: Jointops.exe's I window draws the briefing panel out of a session, dfx2.exe's
+	// the how-to; the panel's own window wins; a session's I window draws neither here.
+	HudToggleState w;
+	w.briefing_mode = kBriefingModeOpen;
+	CHECK(hud_briefing_window(w, false, false) == HudBriefingWindow::Briefing);
+	CHECK(hud_briefing_window(w, false, true) == HudBriefingWindow::HowTo);
+	CHECK(hud_briefing_window(w, true, true) == HudBriefingWindow::None);
+	w.briefing_panel_open = true;
+	CHECK(hud_briefing_window(w, true, true) == HudBriefingWindow::Briefing);
+	w.briefing_mode = 0;
+	CHECK(hud_briefing_window(w, false, true) == HudBriefingWindow::Briefing);
+	w.briefing_panel_open = false;
+	CHECK(hud_briefing_window(w, false, true) == HudBriefingWindow::None);
+	// The escape chain closes it after the briefing window, ahead of the objectives.
+	HudToggleState e;
+	HudEscapeInput in;
+	e.briefing_mode = kBriefingModeOpen;
+	e.briefing_panel_open = true;
+	e.objectives_visible = true;
+	CHECK(hud_toggles_escape(e, in) == kEscapeClosedWindow && e.briefing_mode == 0 &&
+			e.briefing_panel_open);
+	CHECK(hud_toggles_escape(e, in) == kEscapeClosedWindow && !e.briefing_panel_open &&
+			e.objectives_visible);
+	// The mission reset closes it.
+	e.briefing_panel_open = true;
+	hud_toggles_reset_mission(e);
+	CHECK(!e.briefing_panel_open);
+}
+
+// dfx2.exe's EmoteToggle row (dispatch 59): closed -> emotes -> radio -> closed, each step
+// through the keeping init; a dead player's press is dropped (flags 0x0C000C01).
+// [orig: Input_HandleActionBinding @0x49AD50 case 59 @0x49B768..0x49B7CE (dfx2.exe)]
+void test_emote_toggle_cycle() {
+	HudToggleState s;
+	s.help_open = true;
+	HudKeyPoll k = keys();
+	const auto press = [&]() {
+		k.emote_toggle = true;
+		const uint32_t events = hud_toggles_poll(s, k);
+		k.emote_toggle = false;
+		hud_toggles_poll(s, k);
+		return events;
+	};
+	CHECK(press() == kOverlayWindowsCleared);
+	CHECK(s.emotes_menu_open && !s.radio_menu_open && !s.help_open);
+	press();
+	CHECK(!s.emotes_menu_open && s.radio_menu_open);
+	press();
+	CHECK(!s.emotes_menu_open && !s.radio_menu_open);
+	k.local_alive = false;
+	CHECK(press() == 0);
+	CHECK(!s.emotes_menu_open);
+}
+
 int main() {
 	test_row_tokens_are_the_catalog_rows();
 	test_edge_latch();
@@ -1022,6 +1114,8 @@ int main() {
 	test_quit_dialog_escape_legs();
 	test_special_keys();
 	test_deploy_keys();
+	test_objectives_window();
+	test_emote_toggle_cycle();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

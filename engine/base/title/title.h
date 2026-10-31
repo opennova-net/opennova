@@ -395,6 +395,11 @@ struct Title {
 	// binding records, the key-config and help screens and every by-code reader take. Null:
 	// Jointops.exe's (controls::default_catalog).
 	const controls::Catalog *controls = nullptr;
+	// DFX2-96: out of a session the Briefing window (the I key) draws the single-player how-to
+	// (Overlays STROVER_SPMISSIONHOWTO) and the briefing panel is the Objectives row's window
+	// (runtime/hud/hud_toggles.h hud_briefing_window). False (Jointops.exe): the Briefing window
+	// draws the briefing panel; the how-to has no caller. On the Title: the executable's own HUD.
+	bool hud_sp_how_to = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

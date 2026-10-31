@@ -46,6 +46,7 @@ uint32_t respawn_init(HudToggleState &s, bool in_session) {
 	s.radio_menu_open = false;  // [orig: dword_24C18D8 @0x49937c]
 	s.end_round_stats_open = false;
 	s.briefing_mode = 0;
+	s.briefing_panel_open = false; // [orig: @0x49938B] [orig: @0x49939B (dfx2.exe)]
 	s.message_log_open = false;
 	s.objectives_visible = false;
 	if (in_session) s.scoreboard_open = false;
@@ -80,9 +81,11 @@ uint32_t toggle_briefing(HudToggleState &s, bool in_session) {
 
 // The rows' dispatch codes and config tokens, in HudToggleRow order: Jointops.exe's catalog
 // rows 50, 76, 27, 38, 55, 107..109, 63, 56, 99, 100, 106, 73, 54, 75, 53, 70, 101, 102, 83,
-// 79, 82, 84 (+0x00 / +0x4B). A title's catalog that carries no row of the code (dfx2.exe's
-// has no dotsize, no commander_menu) binds nothing to it.
-// [orig: word_8159A8 + 108 * row, the token @+0x4B]
+// 79, 82, 84 (+0x00 / +0x4B), then dfx2.exe's rows 53 and 99. A title's catalog that carries
+// no row of the code (dfx2.exe's has no dotsize, no commander_menu; Jointops.exe's no
+// Objectives, no EmoteToggle) binds nothing to it.
+// [orig: word_8159A8 + 108 * row, the token @+0x4B] [orig: rows 53 @0x815EFC, 99 @0x817264
+//  (dfx2.exe)]
 struct RowId {
 	int code;
 	const char *token;
@@ -93,7 +96,8 @@ constexpr RowId kRowIds[kHudToggleRowCount] = {
 	{29, "OldMessages"}, {422, "ShowScore"}, {30, "ShowFriendly"}, {8, "help"},
 	{234, "helpmap"}, {53, "Briefing"}, {37, "Verbose"}, {221, "commander_menu"},
 	{25, "pause"}, {33, "AudioEmote"}, {54, "RadioMacro"}, {11, "ToggleServer"},
-	{9, "flipmouse"}, {17, "mousescale"}, {119, "lockgame"},
+	{9, "flipmouse"}, {17, "mousescale"}, {119, "lockgame"}, {58, "Objectives"},
+	{59, "EmoteToggle"},
 };
 
 } // namespace
@@ -132,6 +136,8 @@ void hud_key_poll_set_rows(HudKeyPoll &k, uint32_t rows) {
 	k.flipmouse = down(kRowFlipMouse);
 	k.mousescale = down(kRowMouseScale);
 	k.lockgame = down(kRowLockGame);
+	k.objectives = down(kRowObjectives);
+	k.emote_toggle = down(kRowEmoteToggle);
 }
 
 namespace {
@@ -146,7 +152,7 @@ constexpr HudKeyEdge HudToggleState::*kKeyEdges[] = {
 	&HudToggleState::briefing, &HudToggleState::verbose, &HudToggleState::commander,
 	&HudToggleState::pause, &HudToggleState::audio_emote, &HudToggleState::radio_macro,
 	&HudToggleState::toggle_server, &HudToggleState::flipmouse, &HudToggleState::mousescale,
-	&HudToggleState::lockgame,
+	&HudToggleState::lockgame, &HudToggleState::objectives, &HudToggleState::emote_toggle,
 };
 
 void reset_key_edges(HudToggleState &s) {
@@ -228,6 +234,20 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	}
 	if (s.briefing.step(k.briefing, k.active) && admitted(kRowBriefing))
 		events |= toggle_briefing(s, k.in_session);
+	// DFX2-96: the Objectives row (flags 0x05000800, no bit 0): out of a session it flips the
+	// briefing panel's window, then the keeping init; in one it re-dispatches Briefing.
+	// [orig: Input_HandleActionBinding @0x49AD50 case 58 - the session test @0x49B6DB, the
+	//  re-dispatch Input_HandleActionBinding(53) @0x49B6E4..0x49B6EE, `xor dword_24BAE80, 1`
+	//  @0x49B6FB, the keeping init @0x49B702..0x49B707 (dfx2.exe)]
+	if (s.objectives.step(k.objectives, k.active) && admitted(kRowObjectives)) {
+		if (k.in_session) {
+			events |= toggle_briefing(s, k.in_session);
+		} else {
+			s.briefing_panel_open = !s.briefing_panel_open;
+			events |= kBriefingToggled |
+					respawn_init_keeping(s, &s.briefing_panel_open, k.in_session);
+		}
+	}
 	// The view-action rows (catalog 107/108/109 = view1st F2, viewwithgun F3,
 	// viewchase F4): first person clears the FP-gun bit, gun view sets it, and
 	// both select first person; chase selects the chase preference. Each row
@@ -367,6 +387,27 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 		s.radio_menu_open = !s.radio_menu_open;
 		events |= respawn_init_keeping(s, &s.radio_menu_open, k.in_session);
 	}
+	// dfx2.exe's EmoteToggle row (flags 0x0C000C01, a live-player row): the cycle closed ->
+	// emotes -> radio -> closed, each step through the keeping init. Jointops.exe carries the
+	// case too, on no row (D-HUD-36).
+	// [orig: Input_HandleActionBinding case 59 @0x49B703..0x49B74F]
+	// [orig: Input_HandleActionBinding @0x49AD50 case 59 - the emotes test @0x49B76A, emotes 0 /
+	//  radio 1 kept @0x49B772..0x49B786; the radio test @0x49B793, both 0, radio kept
+	//  @0x49B799..0x49B7AA; else emotes 1 kept @0x49B7B7..0x49B7C6 (dfx2.exe)]
+	if (s.emote_toggle.step(k.emote_toggle, bit0_active && bit0_operand_clear) &&
+			admitted(kRowEmoteToggle)) {
+		if (s.emotes_menu_open) {
+			s.emotes_menu_open = false;
+			s.radio_menu_open = true;
+			events |= respawn_init_keeping(s, &s.radio_menu_open, k.in_session);
+		} else if (s.radio_menu_open) {
+			s.radio_menu_open = false;
+			events |= respawn_init_keeping(s, &s.radio_menu_open, k.in_session);
+		} else {
+			s.emotes_menu_open = true;
+			events |= respawn_init_keeping(s, &s.emotes_menu_open, k.in_session);
+		}
+	}
 	// ToggleServer: the authority that is also a peer flips its status view,
 	// in a session only. The row's flags (0x04000000) carry no bit 0.
 	// [orig: case 11 @0x49aff1 — is_in_session @0x49aff1, is_authority
@@ -435,6 +476,12 @@ uint32_t hud_toggles_escape(HudToggleState &s, const HudEscapeInput &in) {
 	}
 	if ((s.briefing_mode & 2) != 0) { // [orig: `test byte ptr dword_24C18C8, 2` @0x49b2c6]
 		s.briefing_mode = 0;
+		return kEscapeClosedWindow;
+	}
+	// The briefing panel's window (DFX2-96) [orig: @0x49b2da..0x49b2e2] [orig: @0x49B2EA..0x49B2F2
+	//  (dfx2.exe)].
+	if (s.briefing_panel_open) {
+		s.briefing_panel_open = false;
 		return kEscapeClosedWindow;
 	}
 	if (s.objectives_visible) { // [orig: @0x49b2ed]
@@ -551,6 +598,7 @@ void hud_toggles_reset_mission(HudToggleState &s) {
 	s.help_open = false;
 	s.map_legend_open = false;
 	s.briefing_mode = 0;
+	s.briefing_panel_open = false;
 	s.emotes_menu_open = false;
 	s.radio_menu_open = false;
 	// A mission start closes the quit dialog [orig: Game_StartMission
@@ -574,6 +622,14 @@ void hud_toggles_reset_mission(HudToggleState &s) {
 	s.briefing.reset();
 	s.audio_emote.reset();
 	s.radio_macro.reset();
+	s.objectives.reset();
+	s.emote_toggle.reset();
+}
+
+HudBriefingWindow hud_briefing_window(const HudToggleState &s, bool in_session, bool sp_how_to) {
+	if (s.briefing_panel_open) return HudBriefingWindow::Briefing;
+	if (s.briefing_mode == 0 || in_session) return HudBriefingWindow::None;
+	return sp_how_to ? HudBriefingWindow::HowTo : HudBriefingWindow::Briefing;
 }
 
 void hud_toggles_tip_events(HudToggleState &s, const uint8_t *events, size_t count) {

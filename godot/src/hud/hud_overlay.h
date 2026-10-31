@@ -263,7 +263,10 @@ public:
 			const PackedStringArray &p_texts);
 	void set_map_legend(bool p_shown, const String &p_title, const PackedStringArray &p_labels);
 	static PackedStringArray map_legend_keys();
-	void set_briefing(bool p_shown, const Ref<Simulation> &p_sim);
+	// The briefing words' panel (engine hud_toggles.h hud_briefing_window) under the session
+	// title: the briefing panel's mission text, or the how-to's gametext line.
+	void set_briefing(int p_briefing_mode, bool p_briefing_panel_open, const Ref<Simulation> &p_sim,
+			const Ref<RtxtStringFile> &p_gametext);
 	void set_end_game_screen(bool p_shown, const Ref<Simulation> &p_sim,
 			const Ref<RtxtStringFile> &p_gametext);
 	void cycle_briefing_page(int p_direction, bool p_in_session);

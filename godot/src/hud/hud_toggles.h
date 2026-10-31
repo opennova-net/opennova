@@ -181,6 +181,7 @@ public:
 	bool is_help_open() const;
 	bool is_map_legend_open() const;
 	int get_briefing_mode() const;
+	bool is_briefing_panel_open() const { return state_.briefing_panel_open; }
 	bool is_mp_verbose() const;
 	bool is_emotes_menu_open() const;
 	bool is_radio_menu_open() const;

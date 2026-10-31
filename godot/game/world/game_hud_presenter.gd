@@ -1182,10 +1182,10 @@ func _update_overlay_windows(sim: Simulation) -> void:
 	if legend_open and _map_legend_labels.is_empty():
 		_map_legend_labels = _resolve_map_legend_labels()
 	_game_hud.set_map_legend(legend_open, _map_legend_title, _map_legend_labels)
-	var window_open := _toggles.get_briefing_mode() != 0
 	var in_session := sim.is_mp_session()
-	_game_hud.set_briefing(window_open and not in_session, sim)
-	_game_hud.set_end_game_screen(window_open and in_session, sim,
+	_game_hud.set_briefing(_toggles.get_briefing_mode(), _toggles.is_briefing_panel_open(), sim,
+			Strings.get_table(Strings.TABLE_GAMETEXT))
+	_game_hud.set_end_game_screen(_toggles.get_briefing_mode() != 0 and in_session, sim,
 			Strings.get_table(Strings.TABLE_GAMETEXT))
 
 

@@ -309,8 +309,10 @@ void HudFrameCompiler::element_briefing(const HudFrameState &state, float w, flo
 	HudBriefingPages &pages = briefing_pages_;
 	if (pages.page < 0 || pages.page >= HudBriefingPages::kPages) pages.page = 0;
 	std::vector<HudWrappedLine> lines;
+	// The how-to draws from its first line and keeps no page (DFX2-96).
+	const bool how_to = state.briefing.how_to;
 	const int next = wrapped_text_layout(bf, bscale, bscale, state.briefing.text, x0, y0, x1,
-			y1, pages.starts[pages.page], lines);
+			y1, how_to ? 0 : pages.starts[pages.page], lines);
 	// The wrapper halves the colour keeping its alpha [orig: @0x580c99..0x580ca8].
 	const uint32_t color = half_bright_keep_alpha(0xFFFFFFFFu);
 	// The wrapper threads one five-dword state block through every line: the
@@ -333,7 +335,8 @@ void HudFrameCompiler::element_briefing(const HudFrameState &state, float w, flo
 		draw_list_.underlines.insert(draw_list_.underlines.end(), laid.underlines.begin(),
 				laid.underlines.end());
 	}
-	if (next != 0 && pages.page + 1 < HudBriefingPages::kPages) pages.starts[pages.page + 1] = next;
+	if (!how_to && next != 0 && pages.page + 1 < HudBriefingPages::kPages)
+		pages.starts[pages.page + 1] = next;
 	++draw_list_.elements_drawn;
 }
 

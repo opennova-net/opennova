@@ -423,6 +423,10 @@ Title make() {
 	t.loading_screen = &kLoadingScreen;
 	// DFX2-110: its own binding catalog (above).
 	t.controls = &kControls;
+	// DFX2-96: the I window's how-to, the briefing panel the Objectives window's.
+	// [orig: sub_5BCD20 @0x5BCD20 - sub_5B8160 @0x5BCF86, dword_24BAE80 -> sub_5B9BB0 @0x5BCFB5;
+	//  Input_HandleActionBinding @0x49AD50 case 58 @0x49B6DB..0x49B70F (dfx2.exe)]
+	t.hud_sp_how_to = true;
 	return t;
 }
 
