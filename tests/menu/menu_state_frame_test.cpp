@@ -265,6 +265,26 @@ const char *kLan = R"(<SCREEN>
 </SCREEN>
 )";
 
+// dfx2.exe's player.mnu shape: PLAYER_INFO with a one-pixel COMBO_LIST spin list and no NATIONALITY or
+// DIVISION; and Jointops.exe's character controls on a screen of another name.
+const char *kSpinPlayerInfo = R"(<SCREEN>
+	<NAME>player_info</NAME>
+	<WINDOW type="window" name="MAIN">
+		<WINDOW type="spinlist" name="COMBO_LIST"><POSITION><LEFT>525</LEFT><TOP>0</TOP><RIGHT>526</RIGHT><BOTTOM>20</BOTTOM></POSITION></WINDOW>
+		<WINDOW type="button" name="ACCEPT"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+	</WINDOW>
+</SCREEN>
+)";
+const char *kCharacterControlsElsewhere = R"(<SCREEN>
+	<NAME>PLAYER</NAME>
+	<WINDOW type="window" name="MAIN">
+		<WINDOW type="combobox" name="NATIONALITY"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+		<WINDOW type="combobox" name="COMBO_LIST"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+		<WINDOW type="button" name="ACCEPT"><POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION></WINDOW>
+	</WINDOW>
+</SCREEN>
+)";
+
 // The updater's buttons: STARTUP's and OPTIONS's UPDATE, front end only, with no availability gate;
 // and an APPMSG row's "UPDATE" (without case, untrimmed), on any screen.
 // [orig: UI_RegisterStartupCallbacks @ 0x555890 (UPDATE @ 0x5558f2); UI_RegisterOptionsCallbacks
@@ -341,6 +361,27 @@ void test_commands() {
 		CHECK(commands.owner() == "lan");
 		CHECK(commands.command_of("LAN", "START_GAME") == MenuCommand::HostGame);
 		CHECK(commands.command_of("LAN", "EXIT") == MenuCommand::None);
+	}
+	{
+		// The character screen is the screen named PLAYER_INFO, without case, whatever it holds
+		// [orig: UI_DispatchScreenEvent @ 0x54e9d4; @ 0x54bc2d (dfx2.exe)]: its delegate binds its
+		// ACCEPT alone.
+		Run run;
+		CHECK(run.open(kSpinPlayerInfo, "player.mnu"));
+		CHECK(is_player_info_document(run.rt));
+		MenuCommands commands;
+		commands.wire(run.rt, false);
+		CHECK(commands.owner() == "player_info");
+		CHECK(commands.command_of("PLAYER_INFO", "ACCEPT") == MenuCommand::SaveProfile);
+	}
+	{
+		Run run;
+		CHECK(run.open(kCharacterControlsElsewhere, "other.mnu"));
+		CHECK(!is_player_info_document(run.rt));
+		MenuCommands commands;
+		commands.wire(run.rt, false);
+		CHECK(commands.owner().empty());
+		CHECK(commands.command_of("PLAYER", "ACCEPT") == MenuCommand::None);
 	}
 	CHECK(is_mission_menu_file("GAME.MNU") && is_mission_menu_file("death.mnu") && !is_mission_menu_file("main.mnu") &&
 	      !is_mission_menu_file("mp.mnu"));

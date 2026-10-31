@@ -1,12 +1,13 @@
 class_name PlayerInfoMenuCompanion
 extends MenuCompanion
 
-# Drives the JO PLAYER_INFO screen (player.mnu) by control NAME: fills the
-# NATIONALITY / DIVISION / COMBO_LIST / PLAYERVOICE comboboxes from Avatars.def and
+# Drives the PLAYER_INFO screen (player.mnu) by control NAME: fills the
+# NATIONALITY / DIVISION / COMBO_LIST / PLAYERVOICE lists from Avatars.def and
 # runs the nationality -> division -> combo cascade plus the SIDE_BLUE/SIDE_RED team
-# filter. It is a companion the game-agnostic MenuShell (menu_shell.gd) delegates
-# to -- the same pattern as mp_menu_companion.gd -- claimed by the NATIONALITY + COMBO_LIST
-# controls unique to this screen, riding the shell's MenuDriver over the compiled
+# filter, each over the controls the screen holds. It is a companion the game-agnostic
+# MenuShell (menu_shell.gd) delegates to -- the same pattern as mp_menu_companion.gd --
+# claimed by the screen's name, as the game knows it (engine menu_commands.h
+# is_player_info_document), riding the shell's MenuDriver over the compiled
 # MenuFrame surface (widgets addressed by document id via _id/widget_id).
 #
 # Avatar cascade, voice rows and preview-trigger selection live in the native
@@ -67,11 +68,11 @@ func set_persisted_profile(profile: Dictionary) -> void:
 	_character_state.set_persisted_profile(profile)
 
 
-# True for the JO PLAYER_INFO screen's unique avatar controls.
+# True for a document holding the PLAYER_INFO screen, whatever controls it holds.
 func owns_menu(driver: MenuDriver) -> bool:
 	if driver == null:
 		return false
-	return driver.has_widget("NATIONALITY") and driver.has_widget("COMBO_LIST")
+	return driver.is_player_info_document()
 
 
 # Losing the document to another (or no) companion is the only teardown edge

@@ -219,6 +219,9 @@ public:
 	// as it is now), as its token ("apply_loadout", "cancel_loadout", ...;
 	// menu_commands.h menu_command_token); "" for none.
 	String screen_command(const String &p_screen, const String &p_name, bool p_in_mission) const;
+	// The open document is the character screen's: it holds a screen named PLAYER_INFO (engine
+	// menu_commands.h is_player_info_document).
+	bool is_player_info_document() const;
 	// The front-end OPTIONS screen, whose every show re-runs the options
 	// preparation (engine OptionsScreen::is_front_screen).
 	static bool is_front_options_screen(const String &p_screen);

@@ -1047,6 +1047,10 @@ String MenuDriver::screen_command(const String &p_screen, const String &p_name,
 			commands.command_of(to_std(p_screen), to_std(p_name))));
 }
 
+bool MenuDriver::is_player_info_document() const {
+	return opennova::menu::is_player_info_document(runtime_);
+}
+
 PackedStringArray MenuDriver::command_names(const String &p_set) {
 	opennova::menu::MenuNameSet set = opennova::menu::MenuNameSet::kCount;
 	if (!opennova::menu::menu_name_set_from_token(to_std(p_set), set)) return PackedStringArray();
@@ -1251,6 +1255,7 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_static_method("MenuDriver", D_METHOD("command_names", "set"), &MenuDriver::command_names);
 	ClassDB::bind_method(D_METHOD("screen_command", "screen", "name", "in_mission"),
 			&MenuDriver::screen_command);
+	ClassDB::bind_method(D_METHOD("is_player_info_document"), &MenuDriver::is_player_info_document);
 	ClassDB::bind_static_method("MenuDriver", D_METHOD("is_front_options_screen", "screen"),
 			&MenuDriver::is_front_options_screen);
 	ClassDB::bind_method(D_METHOD("activate_options", "profiles", "id"), &MenuDriver::activate_options);

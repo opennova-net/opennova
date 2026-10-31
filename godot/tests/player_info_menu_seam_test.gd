@@ -255,11 +255,17 @@ func test_join_profile_carries_an_unresolved_sides_record_word() -> void:
 func test_owns_menu_detects_player_info() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	assert_true(companion.owns_menu(_make_avatar_driver()),
-			"a menu carrying NATIONALITY + COMBO_LIST is the PLAYER_INFO screen")
-	var plain := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, MenuDriverFixture.screen_xml("PLAIN",
-			MenuDriverFixture.wnd("button", "OK", 10))), "plain.mnu")
-	assert_false(companion.owns_menu(plain),
-			"a plain menu is left to the shell / other companions")
+			"a menu holding the PLAYER_INFO screen is the character screen")
+	# dfx2.exe's player.mnu: no NATIONALITY or DIVISION, COMBO_LIST a spin list; the screen's
+	# name claims it all the same.
+	var spin := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self,
+			MenuDriverFixture.screen_xml("PLAYER_INFO", MenuDriverFixture.wnd("spinlist", "COMBO_LIST", 10)
+			+ MenuDriverFixture.wnd("button", "ACCEPT", 40))), "player.mnu")
+	assert_true(companion.owns_menu(spin), "the PLAYER_INFO screen without its nationality lists")
+	var elsewhere := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self,
+			MenuDriverFixture.screen_xml("PLAIN", _avatar_body())), "plain.mnu")
+	assert_false(companion.owns_menu(elsewhere),
+			"the character controls on a screen of another name are left to the shell")
 
 
 func test_populates_avatar_lists_and_combo_label() -> void:
