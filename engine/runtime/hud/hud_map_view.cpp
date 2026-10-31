@@ -687,6 +687,7 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 	input.player_x = frame.center_x;
 	input.player_y = frame.center_y;
 	input.flags = kDeathMapMask;
+	input.death_map_pass = true;
 	input.flip_180 = false;
 	input.window_scale = frame.scale;
 	input.window_marker_angle_bias_bam = static_cast<int32_t>(0x3FFFFFC0u - 0x40000000u);

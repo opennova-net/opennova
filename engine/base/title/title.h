@@ -338,6 +338,17 @@ struct Title {
 	//  (6027 @0x5A5DDE, 6028's sub_5958E0 @0x5A5E68) ahead of MapOverlay_RenderAllLayers
 	//  @0x5A5E8D, the usual walk @0x5A667B (dfx2.exe)]
 	bool map_capture_rings_under_layers = false;
+	// DFX2-50: the DEATH screen's map pass (MapOverlay_DrawView) walks pool 3 twice more: the
+	// 6027 / 6028 capture-zone rings ahead of its marker layers, and past its labels and laser
+	// leg the 6006 KOTH ring and the 2044 location labels, with no mask test (runtime/hud
+	// HudMinimapOverlays::death_map_zone_markers). Jointops.exe's pass walks pool 3 never.
+	// [orig: MapOverlay_DrawView @0x5A58E0 - MapOverlay_RenderAllLayers @0x5A5A11,
+	//  HUD_DrawEntityLabelsAndMarkers @0x5A5A29, Render_LaserSightEffect @0x5A5A40, then the zone
+	//  walk] [orig: the twin @0x5A48A0 - the capture walk @0x5A49C2..0x5A4A0D (sub_5958E0
+	//  @0x5A4A0D) ahead of MapOverlay_RenderAllLayers @0x5A4A26; the KOTH / location walk
+	//  @0x5A4A62..0x5A4ABA (Minimap_DrawKothZoneRing @0x5A4AA2, sub_595710 @0x5A4ABA) past the
+	//  laser leg @0x5A4A55 and its flush @0x5A4A5D (dfx2.exe)]
+	bool death_map_zone_markers = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

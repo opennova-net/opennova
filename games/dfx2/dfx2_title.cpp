@@ -252,6 +252,9 @@ Title make() {
 	// DFX2-49: the capture-zone rings under the map's marker layers too [orig: the twin of
 	//  HUD_DrawMapOverlay @0x5A4FC0 - @0x5A5DA3..0x5A5E68 (dfx2.exe)].
 	t.map_capture_rings_under_layers = true;
+	// DFX2-50: the DEATH map's zone markers [orig: the twin of MapOverlay_DrawView @0x5A48A0 -
+	//  @0x5A49C2..0x5A4A0D, @0x5A4A62..0x5A4ABA (dfx2.exe)].
+	t.death_map_zone_markers = true;
 	return t;
 }
 

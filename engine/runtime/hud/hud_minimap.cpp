@@ -914,8 +914,9 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	// A title whose map walks the capture-zone rings ahead of the marker banks too (DFX2-49).
 	// [orig: the twin of HUD_DrawMapOverlay @0x5a4fc0 - `test 810h` @0x5a5da3, ahead of
 	//  MapOverlay_RenderAllLayers @0x5a5e8d (dfx2.exe)]
-	if ((flags & 0x810u) != 0 && input.overlays != nullptr &&
-			input.overlays->capture_rings_under_layers)
+	if (input.overlays != nullptr &&
+			(((flags & 0x810u) != 0 && input.overlays->capture_rings_under_layers) ||
+					(input.death_map_pass && input.overlays->death_map_zone_markers)))
 		draw_capture_zone_rings(c);
 	// The marker banks, then the legs in retail pass order.
 	// [orig: HUD_DrawMapOverlay @0x5a6d17..0x5a789b]
@@ -938,6 +939,11 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	if (flags & 0x20000u) draw_player_waypoints(c);
 	if (flags & 0x20u) draw_entity_labels_and_markers(c);
 	if (flags & 0x80000u) draw_tracked_callout(c);
+	// dfx2.exe's DEATH map: the KOTH ring and the location labels past its labels and its laser
+	// leg (DFX2-50). [orig: the twin of MapOverlay_DrawView @0x5a48a0 - @0x5a4a62..0x5a4aba, past
+	//  sub_5A3850 @0x5a4a3e and Render_LaserSightEffect @0x5a4a55 (dfx2.exe)]
+	if (input.death_map_pass && input.overlays != nullptr && input.overlays->death_map_zone_markers)
+		draw_death_map_zone_markers(c);
 	// The nearest-FARP chevron: an idle or lit flash timer 14 and a FARP the
 	// HUD info build found this frame [orig: @0x5a77f8..0x5a7834].
 	if ((flags & 0x80u) != 0 && hud_item_flash_shown(input.item_flash[14]) &&

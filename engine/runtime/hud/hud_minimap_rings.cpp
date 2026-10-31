@@ -202,6 +202,44 @@ static void capture_zone_ring(MapCompile &c, const HudMinimapPoolEntity &e) {
 	ring_blip(c, e.x, e.y, radius, rgb | 0x50000000u, rgb | 0x40000000u, 6, 4);
 }
 
+// The KOTH zone ring over the score delta: ahead blue with a 0x60 fill, behind red with a 0x60
+// fill, level the active HUD colour, no fill; the radius entity+0, min 6 px.
+// [orig: Minimap_DrawKothZoneRing @0x5974E0 — dword_A85AFC - dword_A85B0C,
+//  0x4060FF / 0xFF2020 / g_HUDColors.active, alpha 96 / 255]
+static void koth_zone_ring(MapCompile &c, const HudMinimapOverlays &ov,
+		const HudMinimapPoolEntity &e) {
+	const int32_t delta = ov.zone_score_delta;
+	if (delta > 0) {
+		ring_blip(c, e.x, e.y, e.radius_q16, 0xFF4060FFu, 0x604060FFu, 6, 4);
+	} else if (delta < 0) {
+		ring_blip(c, e.x, e.y, e.radius_q16, 0xFFFF2020u, 0x60FF2020u, 6, 4);
+	} else {
+		ring_blip(c, e.x, e.y, e.radius_q16, c.input.overlay_color | 0xFF000000u, 0, 6, 4);
+	}
+}
+
+// The location label: the g_LocationNames entry at the entity's int16 +0x280 index, bold,
+// centred on the UNROTATED projection, (alpha << 24) + 0x9F9F9F — the half-bright drawer forces
+// that alpha opaque. [orig: @0x5a75a8..0x5a7600 (ctx+64's alpha); sub_5973B0 @0x5973B0, the
+// DEATH map's (its 255) in dfx2.exe's twin sub_595710 @0x595710; the index is stamped by
+// Entity_SpawnFromBMSRecord @0x40F180..0x40F20C]
+static void location_label(MapCompile &c, const HudMinimapOverlays &ov,
+		const HudMinimapPoolEntity &e) {
+	if (e.location_index < 0 || static_cast<size_t>(e.location_index) >= ov.location_names.size())
+		return;
+	float px = 0.0f, py = 0.0f;
+	view_project_unrotated(c.view, c.input, e.x, e.y, px, py);
+	HudMapLabel label;
+	label.x = static_cast<float>(static_cast<int>(px));
+	label.y = static_cast<float>(static_cast<int>(py));
+	std::snprintf(label.text, sizeof(label.text), "%s",
+			ov.location_names[static_cast<size_t>(e.location_index)].c_str());
+	label.color = 0xFF9F9F9Fu;
+	label.font = 0;
+	label.clip = 1;
+	c.out.labels.push_back(label);
+}
+
 // The pool-3 walk (mask & 0x810): the 6006 KOTH ring under bit4, the 2044
 // location labels under bit11, and the 6027/6028 capture-zone rings whenever
 // the walk runs.
@@ -211,46 +249,11 @@ void draw_pool3_walk(MapCompile &c) {
 	if (ov == nullptr) return;
 	for (const HudMinimapPoolEntity &e : ov->pool3) {
 		if (e.def_id == def::DEF_TYPE_KOTH_CENTRE) {
-			if ((c.flags & 0x10u) == 0) continue;
-			// The KOTH zone ring over the score delta: ahead blue with a
-			// 0x60 fill, behind red with a 0x60 fill, level the active HUD
-			// colour, no fill; the radius entity+0, min 6 px.
-			// [orig: Minimap_DrawKothZoneRing @0x5974E0 — dword_A85AFC - dword_A85B0C,
-			//  0x4060FF / 0xFF2020 / g_HUDColors.active, alpha 96 / 255]
-			const int32_t delta = ov->zone_score_delta;
-			if (delta > 0) {
-				ring_blip(c, e.x, e.y, e.radius_q16, 0xFF4060FFu, 0x604060FFu, 6, 4);
-			} else if (delta < 0) {
-				ring_blip(c, e.x, e.y, e.radius_q16, 0xFFFF2020u, 0x60FF2020u, 6, 4);
-			} else {
-				ring_blip(c, e.x, e.y, e.radius_q16,
-						c.input.overlay_color | 0xFF000000u, 0, 6, 4);
-			}
+			if ((c.flags & 0x10u) != 0) koth_zone_ring(c, *ov, e);
 			continue;
 		}
 		if (e.def_id == def::DEF_TYPE_NAMED_LOCATION) {
-			if ((c.flags & 0x800u) == 0) continue;
-			// The location label: the g_LocationNames entry at the entity's
-			// int16 +0x280 index, bold, centred on the UNROTATED projection,
-			// (ctx+64 alpha << 24) + 0x9F9F9F — the half-bright drawer forces
-			// that alpha opaque. [orig: @0x5a75a8..0x5a7600; the index is
-			// stamped by Entity_SpawnFromBMSRecord @0x40F180..0x40F20C]
-			if (e.location_index < 0 ||
-					static_cast<size_t>(e.location_index) >=
-							ov->location_names.size())
-				continue;
-			float px = 0.0f, py = 0.0f;
-			view_project_unrotated(c.view, c.input, e.x, e.y, px, py);
-			HudMapLabel label;
-			label.x = static_cast<float>(static_cast<int>(px));
-			label.y = static_cast<float>(static_cast<int>(py));
-			std::snprintf(label.text, sizeof(label.text), "%s",
-					ov->location_names[static_cast<size_t>(e.location_index)]
-							.c_str());
-			label.color = 0xFF9F9F9Fu;
-			label.font = 0;
-			label.clip = 1;
-			c.out.labels.push_back(label);
+			if ((c.flags & 0x800u) != 0) location_label(c, *ov, e);
 			continue;
 		}
 		if (e.def_id == 6027 || e.def_id == 6028)
@@ -267,6 +270,20 @@ void draw_capture_zone_rings(MapCompile &c) {
 	for (const HudMinimapPoolEntity &e : ov->pool3)
 		if (e.def_id == 6027 || e.def_id == 6028)
 			capture_zone_ring(c, e);
+}
+
+void draw_death_map_zone_markers(MapCompile &c) {
+	const HudMinimapOverlays *ov = c.input.overlays;
+	if (ov == nullptr) return;
+	// [orig: the twin of MapOverlay_DrawView @0x5a48a0 - the walk @0x5a4a62..0x5a4aba:
+	//  Minimap_DrawKothZoneRing @0x5a4aa2 for 6006, sub_595710(entity, 255) @0x5a4aba for 2044
+	//  (dfx2.exe)]
+	for (const HudMinimapPoolEntity &e : ov->pool3) {
+		if (e.def_id == def::DEF_TYPE_KOTH_CENTRE)
+			koth_zone_ring(c, *ov, e);
+		else if (e.def_id == def::DEF_TYPE_NAMED_LOCATION)
+			location_label(c, *ov, e);
+	}
 }
 
 } // namespace opennova::hud::minimap_detail

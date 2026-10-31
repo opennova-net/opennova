@@ -308,6 +308,8 @@ struct HudMinimapOverlays {
 	// The session's title walks the capture-zone rings under the marker layers too
 	// (Title::map_capture_rings_under_layers, DFX2-49).
 	bool capture_rings_under_layers = false;
+	// ... and its DEATH map pass walks the zone markers (Title::death_map_zone_markers, DFX2-50).
+	bool death_map_zone_markers = false;
 };
 
 // The HUD_BuildMapOverlayView parameter block's mask bytes (the M cycle
@@ -446,6 +448,8 @@ struct HudMinimapInput {
 	// [orig: HUD_DrawEntityLabelsAndMarkers @0x5A49E0 - the draw @0x5A4F95]
 	// [orig: sub_5A3850 @0x5A3850 - @0x5A3D53..0x5A3DD4, no draw (dfx2.exe)]
 	bool bank_names = true;
+	// The pass is MapOverlay_DrawView's (the DEATH map, DeathMapCompiler), not HUD_DrawMapOverlay's.
+	bool death_map_pass = false;
 	// The ring-edge distance label draws while this is ZERO — the retail
 	// global is BSS (uninitialized .data -> 0 = LIVE by default) and an
 	// authored NONZERO SPINMAPWPDISTOFF suppresses it (re-adjudicated

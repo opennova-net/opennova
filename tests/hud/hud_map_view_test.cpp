@@ -711,9 +711,67 @@ void test_death_title_pane() {
     CHECK(jo.render(death_rect(), 800, 0, 0).frame_color == 0u && jo.view.zoom_max == 10.0f);
 }
 
+// DFX2-50: dfx2.exe's DEATH map walks pool 3 twice more: the capture-zone rings ahead of the
+// marker layers, and past the labels the KOTH ring and the location labels, no mask test;
+// Jointops.exe's walks it never.
+// [orig: MapOverlay_DrawView @0x5a58e0] [orig: the twin @0x5a48a0 - @0x5a49c2..0x5a4a0d,
+//  @0x5a4a62..0x5a4aba (dfx2.exe)]
+void test_death_zone_markers() {
+    DeathMapView v;
+    v.on_load();
+    const int32_t cx = 100 * kWu;
+    const int32_t cy = 200 * kWu;
+    const DeathMapFrame frame = v.render(death_rect(), 800, cx, cy);
+    DeathMapFacts facts;
+    facts.player_present = true;
+    facts.player_x = cx;
+    facts.player_y = cy;
+    HudMinimapOverlays ov;
+    ov.location_names = {"Hill 60"};
+    ov.zone_score_delta = 3;
+    HudMinimapPoolEntity capture;
+    capture.def_id = 6027;
+    capture.x = cx;
+    capture.y = cy;
+    HudMinimapPoolEntity koth;
+    koth.def_id = 6006;
+    koth.x = cx;
+    koth.y = cy;
+    koth.radius_q16 = 20 * kWu;
+    HudMinimapPoolEntity loc;
+    loc.def_id = 2044;
+    loc.x = cx;
+    loc.y = cy;
+    ov.pool3 = {capture, koth, loc};
+    HudMinimapInput in;
+    in.surface_w = 1024.0f;
+    in.surface_h = 768.0f;
+    in.overlays = &ov;
+    DeathMapCompiler compiler;
+    HudMapWindowPass out;
+    const auto ring = [&](uint32_t color) {
+        int n = 0;
+        for (const HudMapSprite &s : out.map.sprites)
+            if (s.texture == kHudMapTextureNone && s.color == color) ++n;
+        return n;
+    };
+    compiler.compile(in, frame, facts, out);
+    CHECK(out.map.visible);
+    CHECK(ring(0xFFFF2020u) == 0 && ring(0xFF4060FFu) == 0 && out.map.labels.empty());
+    ov.death_map_zone_markers = true;
+    compiler.compile(in, frame, facts, out);
+    CHECK(ring(0xFFFF2020u) == 1); // the capture ring, under the layers
+    CHECK(ring(0xFF4060FFu) == 1); // the KOTH ring, team 1 ahead
+    bool label = false;
+    for (const HudMapLabel &l : out.map.labels)
+        if (std::strcmp(l.text, "Hill 60") == 0 && l.color == 0xFF9F9F9Fu) label = true;
+    CHECK(label);
+}
+
 int main() {
     test_death_title_pane();
     test_death_zoom_ease();
+    test_death_zone_markers();
     test_integer_pow();
     test_design_to_device();
     test_death_load();
