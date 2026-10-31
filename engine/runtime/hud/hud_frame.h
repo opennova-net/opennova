@@ -33,6 +33,9 @@
 #include <runtime/hud/hud_vehicle_panel.h> // the seat-marker policy
 #include <vector>
 
+namespace opennova {
+struct Title; // base/title/title.h
+} // namespace opennova
 namespace opennova::world {
 enum class SeatType : uint8_t; // world/entity.h
 }
@@ -1055,6 +1058,10 @@ inline uint32_t hud_overlay_master(bool no_hud) {
 
 struct HudFrameState {
 	HudCombatState combat;
+	// The title the session runs as: the draws where its executable's HUD parts from
+	// Jointops.exe's (Title::hud_kill_list_no_class and the other DFX2-81..DFX2-90 fields). Null
+	// draws Jointops.exe's, a default Title's.
+	const Title *title = nullptr;
 	// The frame's clocks, each reader taking the one its original reads: `ticks` the logic
 	// tick (g_CurrentTick, World::logic_tick: the fades' and flashes' stamps, the kill banner,
 	// the radar's blinks, the item flash timers) and the three per-frame counters

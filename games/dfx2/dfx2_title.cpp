@@ -176,6 +176,9 @@ Title make() {
 	// DFX2-90: the map key steps off <-> fullscreen [orig: sub_51DB80 @0x51DB80, called from the
 	//  dispatcher's case 28 @0x4DD702 (dfx2.exe)].
 	t.hud_map_cycle_skips_window = true;
+	// DFX2-83: the Tab board's rows carry no class suffix [orig: sub_423890 @0x423890 - the team
+	//  arm's format @0x423BB1 (dfx2.exe)].
+	t.hud_kill_list_no_class = true;
 	return t;
 }
 

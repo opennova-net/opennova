@@ -217,6 +217,12 @@ struct Title {
 	// Jointops.exe's steps off -> window -> fullscreen -> off (hud::HudMapControl::cycle).
 	// [orig: HUD_CycleMapMode @0x520BC0] [orig: sub_51DB80 @0x51DB80 (dfx2.exe)]
 	bool hud_map_cycle_skips_window = false;
+	// DFX2-83: the Tab board's rows carry no " (class)" suffix; Jointops.exe's stashes the class
+	// name of a row whose entity shares the local team and appends it to the next drawn row
+	// (hud::ScoreboardRowComposer).
+	// [orig: HUD_DrawKillList @0x423A30 (the stash @0x423D64..0x423DC3, " (%s)" @0x424104)]
+	// [orig: sub_423890 @0x423890 (dfx2.exe) - "%s<ch>%s<co> [%02ld]" @0x423BB1, no stash]
+	bool hud_kill_list_no_class = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

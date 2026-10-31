@@ -189,6 +189,10 @@ struct ScoreboardRowContext {
 	// dereferences g_LocalPlayerEntity unguarded @0x423d64; no entity never
 	// matches here).
 	int local_team = -1;
+	// The class suffix and its stash run at all: Jointops.exe's board, not dfx2.exe's
+	// (Title::hud_kill_list_no_class, DFX2-83) [orig: sub_423890 @0x423890 - the team arm's
+	// format @0x423BB1 with no class read (dfx2.exe)].
+	bool class_suffix = true;
 };
 
 // The row text composer — one per board draw, fed the rows that reach the

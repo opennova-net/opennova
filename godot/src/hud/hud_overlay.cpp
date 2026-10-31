@@ -1686,6 +1686,7 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 	state_.start_timer.footer =
 			opennova::gd_to_retail_text(overlay_text(p_gametext, "STROVER63", ""));
 	// The EXPPOINTS element's words and its Overlays strings (engine hud/hud_exp_points.h).
+	state_.title = facts.title;
 	state_.exp_points = facts.exp_points;
 	opennova::hud::hud_exp_points_text(game_text_lookup(p_gametext), state_.exp_points.text);
 	state_.title = facts.title;

@@ -46,6 +46,7 @@ Title make() {
 	t.profile_class_kits = jo_title().profile_class_kits;
 	t.mod_list_base = jo_title().mod_list_base;
 	t.hud_map_cycle_skips_window = jo_title().hud_map_cycle_skips_window;
+	t.hud_kill_list_no_class = jo_title().hud_kill_list_no_class;
 	return t;
 }
 
