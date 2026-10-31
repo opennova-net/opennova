@@ -246,10 +246,13 @@ void ClientRuntime::tick_remote_stance_sounds(world::World &world) {
 
 void ClientRuntime::apply_received_effects(world::World &world) {
     // The own client's 0x5A applies: the process's loadout name list, rebuilt from each list
-    // in receive order (D-NET-143) [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 -
-    //  @0x42920C..0x4293B9].
-    for (const WeaponLoadout &list : pending_own_weapon_loadouts_)
+    // in receive order (D-NET-143), then the select and mount of the weapon the session's
+    // protocol picks (apply_own_weapon_loadout_select carries the witness)
+    // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x42920C..0x4293B9].
+    for (const WeaponLoadout &list : pending_own_weapon_loadouts_) {
         apply_weapon_loadout_name_list(world, list);
+        apply_own_weapon_loadout_select(world, list, view_.protocol());
+    }
     pending_own_weapon_loadouts_.clear();
     // The own client's 0x49 echoes: one naming a person other than the local player dips that
     // person's arms for 80 ticks on the host's world, the dip its body tick then runs down; the

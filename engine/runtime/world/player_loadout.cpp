@@ -152,7 +152,46 @@ void select_current_slot(World &world, LocalPlayerWeapon &weapon, WeaponInventor
     local_player_mount_weapon_slot(world, weapon, inventory, local->view, inventory.equipped_combo);
 }
 
+// The AdmDef index of the weapon a loadout apply selects (LoadoutApplySelect carries the
+// witness): the body's held one, or `kit`'s last primary row, from AdmDef 0.
+uint8_t loadout_apply_select_adm(const World &world, const std::vector<WeaponKitEntry> &kit,
+                                 LoadoutApplySelect select) {
+    if (select == LoadoutApplySelect::HeldWeapon) {
+        const Entity *holder = world.registry.get(world.cached.local_player);
+        return holder != nullptr ? holder->equipped_adm_index : kAdmSlotNone;
+    }
+    uint8_t select_adm = 0;
+    for (const WeaponKitEntry &entry : kit) {
+        const int adm = world.tables.weapons.index_of(entry.name.c_str());
+        if (adm < 0) continue;
+        const WeaponTableEntry *def = world.tables.weapons.by_index(static_cast<uint8_t>(adm));
+        if (def != nullptr && def->weapon_class_slot == 1) select_adm = static_cast<uint8_t>(adm);
+    }
+    return select_adm;
+}
+
+// The apply's select target: the selected weapon's combo (its AdmDef's rank + 65 * category)
+// stored into the current slot word, no def leaving the word, which the select then reads;
+// then the select and the mount.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (AdmDef_GetEntryByIndex(+0x2B0)
+//  @0x4296B4..0x4296BC, the store @0x4296C8..0x4296D4, the word's read @0x4296DC);
+//  WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566250..0x566276, the word's read @0x56627E)]
+void store_select_and_mount(World &world, LocalPlayerWeapon &weapon, WeaponInventory &inventory,
+                            uint8_t select_adm) {
+    if (const WeaponTableEntry *selected = world.tables.weapons.by_index(select_adm))
+        inventory.current_slot =
+                selected->category * weapon_combo::kRanksPerCategory + selected->rank;
+    select_current_slot(world, weapon, inventory, /*mount=*/true);
+}
+
 } // namespace
+
+void local_loadout_apply_select(World &world, LocalPlayerWeapon &weapon,
+                                WeaponInventory &inventory,
+                                const std::vector<WeaponKitEntry> &kit,
+                                LoadoutApplySelect select) {
+    store_select_and_mount(world, weapon, inventory, loadout_apply_select_adm(world, kit, select));
+}
 
 void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
                            LocalPlayerWeapon &weapon, WeaponInventory &inventory,
@@ -319,20 +358,7 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // through the rebuild's stamp, the rebuild selects nothing, and the selected weapon
     // (`select`: the body's held AdmDef index, or the kit's last primary row) decides the
     // word ahead of the apply's own select below.
-    const Entity *holder = world.registry.get(world.cached.local_player);
-    uint8_t select_adm = holder != nullptr ? holder->equipped_adm_index : kAdmSlotNone;
-    if (select == LoadoutApplySelect::LastPrimaryRow) {
-        // The name-list walk keeps the last row whose def is a primary, from AdmDef 0
-        // (LoadoutApplySelect carries the witness).
-        select_adm = 0;
-        for (const WeaponKitEntry &entry : loadout.spawn_kit()) {
-            const int adm = world.tables.weapons.index_of(entry.name.c_str());
-            if (adm < 0) continue;
-            const WeaponTableEntry *def = world.tables.weapons.by_index(static_cast<uint8_t>(adm));
-            if (def != nullptr && def->weapon_class_slot == 1)
-                select_adm = static_cast<uint8_t>(adm);
-        }
-    }
+    const uint8_t select_adm = loadout_apply_select_adm(world, loadout.spawn_kit(), select);
     const int32_t current_slot = inventory.current_slot;
     local_loadout_rebuild(world, loadout, weapon, inventory, inventory_valid,
             /*select_spawn_default=*/false);
@@ -396,16 +422,9 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // entity's +0x37C (the run-promotion band) [orig:
     // NapiNPClientMsg_HandleWeaponLoadoutSync @0x4296f9 -> @0x425220].
     loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory, seat);
-    // The apply's select target: the selected weapon's combo (its AdmDef's rank + 65 *
-    // category; the held weapon's, or a protocol's pick, LoadoutApplySelect), stored into
-    // the current slot word; no def leaves the word, which the select then reads.
-    // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 (AdmDef_GetEntryByIndex(+0x2B0)
-    //  @0x4296B4..0x4296BC, the store @0x4296C8..0x4296D4, the word's read @0x4296DC);
-    //  WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566250..0x566276, the word's read @0x56627E)]
-    if (const WeaponTableEntry *selected = table.by_index(select_adm))
-        inventory.current_slot =
-                selected->category * weapon_combo::kRanksPerCategory + selected->rank;
-    select_current_slot(world, weapon, inventory, /*mount=*/true);
+    // The apply's select target into the current slot word, then the select and the mount
+    // (store_select_and_mount carries the witness).
+    store_select_and_mount(world, weapon, inventory, select_adm);
     return true;
 }
 

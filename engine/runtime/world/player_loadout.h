@@ -179,6 +179,18 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
                                 int32_t player_class, bool validate_banned,
                                 LoadoutApplySelect select);
 
+// A loadout apply's closing select over the table as it stands: the combo (rank + 65 *
+// category) of the weapon `select` names out of `kit` stored into the current slot word (no
+// def leaves the word), Player_SelectWeaponSlot of the word, then the EquippedSlot's mount.
+// local_loadout_apply_accept ends on it; a listen host's own client's S2C 0x5A apply runs it
+// over the local table its slot's grant built (inmatch::apply_own_weapon_loadout_select).
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x4296B4..0x4296F4]
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 - @0x42B4F3..0x42B52C (dfx2.exe)]
+void local_loadout_apply_select(World &world, LocalPlayerWeapon &weapon,
+                                WeaponInventory &inventory,
+                                const std::vector<WeaponKitEntry> &kit,
+                                LoadoutApplySelect select);
+
 // The armory PLAYER_CLASS spin catalog: the five soldier classes in the
 // authored spin order, each pairing its wire class value with the "Menu"
 // section GameText label key. [orig: UI_InitWeaponClassSelection @0x567250 —

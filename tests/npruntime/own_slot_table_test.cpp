@@ -292,6 +292,46 @@ void test_the_offline_accept_keeps_its_kit_for_the_next_deploy() {
 	CHECK(inmatch::local_player_slot(j.roster, j.world) == nullptr);
 }
 
+// A listen host's own client's 0x5A apply selects and mounts, on the local table its slot's
+// grant built, the weapon its protocol picks out of the list: JO's the weapon the body holds
+// (the pistol), DFX2's the list's last primary row (the rifle, DFX2-35), whichever the body
+// holds; the authority runs both legs, skipping only the spawn-buffer copy and the class store.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x4296B4..0x4296F4]
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 - the skips @0x42B218 / @0x42B24F,
+//  @0x42B0AB..0x42B0BD, @0x42B4F3..0x42B52C (dfx2.exe)]
+void test_the_own_lists_apply_selects_the_protocols_weapon() {
+	for (const bool dfx2 : {false, true}) {
+		Rig r(/*own=*/true);
+		r.world.tables.weapons.entries[kRifleAdm].weapon_class_slot = 1;
+		r.world.tables.weapons.entries[kPistolAdm].weapon_class_slot = 2;
+		r.entity().equipped_adm_index = kPistolAdm;
+		r.submit(8, static_cast<uint32_t>(kPistolCombo));
+		CHECK(r.local->inventory.equipped_combo == kPistolCombo);
+		const LoadoutSubmit slot_buffer_before = r.conn().reply.loadout_buffer;
+		WeaponLoadout list;
+		list.avatar_class = 8;
+		list.slots.push_back(WeaponLoadoutSlot{kRifleAdm, 3, 0xFF, 0});
+		list.slots.push_back(WeaponLoadoutSlot{kPistolAdm, 2, 0xFF, 0});
+		inmatch::apply_own_weapon_loadout_select(r.world, list,
+				opennova::title_protocol(dfx2 ? "dfx2" : "jo"));
+		const int32_t picked = dfx2 ? kRifleCombo : kPistolCombo;
+		CHECK(r.local->inventory.current_slot == picked);
+		CHECK(r.local->inventory.equipped_combo == picked);
+		// The table stands: both slots, the slot's buffer untouched.
+		CHECK(r.local_slot(kRifleCombo).adm_index == kRifleAdm);
+		CHECK(r.local_slot(kPistolCombo).adm_index == kPistolAdm);
+		CHECK(r.conn().reply.loadout_buffer.entries.size() == slot_buffer_before.entries.size());
+	}
+	// No local body: nothing.
+	Rig j(/*own=*/false);
+	j.world.cached.local_player = {};
+	const int32_t before = j.local->inventory.current_slot;
+	WeaponLoadout list;
+	list.slots.push_back(WeaponLoadoutSlot{kRifleAdm, 3, 0xFF, 0});
+	inmatch::apply_own_weapon_loadout_select(j.world, list, opennova::title_protocol("dfx2"));
+	CHECK(j.local->inventory.current_slot == before);
+}
+
 } // namespace
 
 int main() {
@@ -301,6 +341,7 @@ int main() {
 	test_the_round_init_seeds_the_own_buffer();
 	test_the_armory_submit_feeds_the_own_accept();
 	test_the_offline_accept_keeps_its_kit_for_the_next_deploy();
+	test_the_own_lists_apply_selects_the_protocols_weapon();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

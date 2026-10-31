@@ -176,6 +176,20 @@ world::LoadoutApplySelect grant_apply_select(const Protocol *protocol);
 //  @0x4B1100..0x4B1116]
 void apply_weapon_loadout_name_list(world::World &world, const WeaponLoadout &list);
 
+// A listen host's own client's S2C 0x5A apply past its name-list rebuild: with a local body,
+// the select over the local table (on the authority its slot's, which the slot's grant just
+// built) of the weapon the session's protocol picks out of the list (grant_apply_select:
+// JO's the held weapon, DFX2's the list's last primary row, DFX2-35) and the EquippedSlot's
+// mount, which run on the authority as on a joiner; only the spawn-buffer copy and the side
+// class store skip there. The apply's table rebuild from the list is not re-run here.
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - `cmp is_authority` @0x4293D1 /
+//  @0x429402 (the two skips), the select @0x4296B4..0x4296E3, Player_MountWeaponSlot @0x4296F4]
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 - the skips @0x42B218 / @0x42B24F,
+//  the last primary row @0x42B0AB..0x42B0BD, its select @0x42B4F3..0x42B51A,
+//  Player_MountWeaponSlot @0x42B52C (dfx2.exe)]
+void apply_own_weapon_loadout_select(world::World &world, const WeaponLoadout &list,
+		const Protocol *protocol);
+
 // NetPacket_SendLoadoutSubmit does not blindly serialize the requested combo.
 // Once the local slot table exists it keeps a side-legal slot, otherwise walks
 // that combo's 65-rank category for the first populated side-legal slot. A
