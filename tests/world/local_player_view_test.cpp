@@ -3363,8 +3363,12 @@ void test_scope_zero_request_at_the_cap_writes_the_words() {
 
 // The slot install seeds the zero-yaw term (MountSlot+8) from the seeded step,
 // outside the flags & 3 elevation gate and with the parallax sign kept
-// [orig: WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b]; an inventory-restored
-// step recomputes it the same way.
+// [orig: WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b]. An inventory-backed install
+// takes the slot's three zero words as they stand: the personal slot is the table's
+// entry, which the init or the zero adjust wrote, and the mount writes none of them
+// (its only slot store is the zoom's +0xC) [orig: Player_MountWeaponSlot @0x4DFA40 -
+// +0xC @0x4DFB0A / @0x4DFB13] [orig: Player_MountWeaponSlot @0x4DCAE0 - +0xC
+// @0x4DCBAA / @0x4DCBB3 (dfx2.exe)].
 void test_scope_zero_install_seeds_the_yaw_term() {
     LocalWorld lw;
     WeaponTableEntry row;
@@ -3387,13 +3391,27 @@ void test_scope_zero_install_seeds_the_yaw_term() {
     WeaponInventory inv;
     inv.reset(lw.w.tables.weapons);
     inv.equipped_combo = 3 * 65;
-    inv.slot(inv.equipped_combo)->adm_index =
-        static_cast<int16_t>(lw.w.tables.weapons.entries.size() - 1);
-    inv.slot(inv.equipped_combo)->scope_zero = -1;
+    const int16_t adm = static_cast<int16_t>(lw.w.tables.weapons.entries.size() - 1);
+    // dfx2.exe's init: the step -1 (the rangefinder's zero), the yaw the default step's
+    // (DFX2-120) [orig: WeaponSlot_InitFromDef @0x53C0C0 (@0x53C1E0..0x53C1F9) (dfx2.exe)].
+    weapon_slot_init_from_def(lw.w.tables.weapons.entries.back(), adm,
+        *inv.slot(inv.equipped_combo), 8, false, title_rules("dfx2").scope_zero_seed);
     LocalPlayerWeapon restored;
     local_weapon_install(lw.w, restored, data, false, false, &inv, view);
     CHECK(restored.slot.scope_zero == -1);
-    CHECK(restored.slot.zero_yaw == -13669483); // the 100 m floor, sign kept
+    CHECK(restored.slot.zero_pitch == 0);
+    CHECK(restored.slot.zero_yaw == -4557034); // the default step's, not the -1 step's floor
+    // The words as the zero adjust leaves them at step -1: the 100 m floor's yaw, negated
+    // for the negative parallax [orig: Player_AdjustWeaponZoomLevel @0x4dbcc0 - +8 @0x4dbdd5,
+    // the negate @0x4dbddf..0x4dbde3]; the mount keeps that sign.
+    WeaponInventorySlot &adjusted = *inv.slot(inv.equipped_combo);
+    adjusted.scope_zero = -1;
+    adjusted.zero_pitch = 0;
+    adjusted.zero_yaw = 13669483;
+    LocalPlayerWeapon readjusted;
+    local_weapon_install(lw.w, readjusted, data, false, false, &inv, view);
+    CHECK(readjusted.slot.scope_zero == -1);
+    CHECK(readjusted.slot.zero_yaw == 13669483);
 }
 
 // The zero-yaw term [orig: WeaponSlot_InitFromDef @0x53ef4f..0x53ef8b]: atan2
