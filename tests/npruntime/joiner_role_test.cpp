@@ -3376,11 +3376,14 @@ bool run_tail_armor_lands_on_l() {
 // with a def that L does not carry attaches it (L's +0x268, the object's +0x170
 // and its hidden bit); 0xFFFF drops what L carries through the drop's own legs
 // (the fall installed, the hidden bit cleared); a word naming no def'd entity
-// reads as none.
+// reads as none. A non-flag def's attach plays the SPGOAL_PU set at L; a flag's
+// plays nothing there.
 // [orig: NapiNPClientMsg_0x00A @0x4305F2..0x43069A; Entity_AttachCarriedObject
-//  @0x43C130; Entity_DropCarriedObject @0x439DF0]
+//  @0x43C130 (the flag ids @0x43C15A..0x43C172, Sound_PlayAtPosition
+//  @0x43C174..0x43C17E); Entity_DropCarriedObject @0x439DF0]
 bool run_tail_carried_word_lands_on_l() {
 	constexpr uint16_t kFlagType = 4091;
+	constexpr uint16_t kNotebookType = 862; // a Takeable object's def, no flag id
 	Harness h;
 	w::World &world = h.kernel->world;
 	world.registry.configure_pool(1, 16);
@@ -3388,20 +3391,26 @@ bool run_tail_carried_word_lands_on_l() {
 	h.role.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
 			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
 	h.role.run_tick(h.input);
-	def::DefItemDef defs[2]{};
+	def::DefItemDef defs[3]{};
 	defs[0].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
 	defs[0].type = 3;
 	defs[0].hp = 100;
 	defs[1].id = kFlagType + mission::kItemIdOffset;
-	def::DefItemsFile items{defs, 2};
+	defs[2].id = kNotebookType + mission::kItemIdOffset;
+	def::DefItemsFile items{defs, 3};
 	h.kernel->set_items_table(&items);
 	const w::EntityHandle flag_h{0x1003};
+	const w::EntityHandle note_h{0x1004};
 	PoolSpawnBatch batch;
 	PoolSpawnRecord spawn;
 	spawn.slot_id = flag_h.packed;
 	spawn.item_type_id = kFlagType;
 	spawn.pos_x = 10 << 16;
 	spawn.pos_y = -20 << 16;
+	batch.records.push_back(spawn);
+	spawn.slot_id = note_h.packed;
+	spawn.item_type_id = kNotebookType;
+	spawn.pos_x = 12 << 16;
 	batch.records.push_back(spawn);
 	h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(batch));
 	auto &self_row = h.role.runtime->state().upsert(0x0005);
@@ -3434,10 +3443,21 @@ bool run_tail_carried_word_lands_on_l() {
 					!local->mounted_child.valid(),
 			"carried: L carries nothing on 0xFFFF"))
 		return false;
+	// A presenting peer: the positional plays ready only with a listener.
+	world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+	(void)world.out.fire_sounds.drain();
+	auto spgoal_plays = [&] {
+		int count = 0;
+		for (const w::ReadyFireSound &sound : world.out.fire_sounds.drain())
+			if (sound.set_name == "SPGOAL_PU") ++count;
+		return count;
+	};
 	frame(flag_h.packed);
 	if (!expect(local->mounted_child == flag_h && flag->primary_occupant == local->handle &&
 					(flag->flags & w::kEntityFlagCarried) != 0,
 			"carried: the named flag attaches to L"))
+		return false;
+	if (!expect(spgoal_plays() == 0, "carried: a flag's attach plays no SPGOAL_PU"))
 		return false;
 	frame(flag_h.packed);
 	if (!expect(local->mounted_child == flag_h, "carried: the same word changes nothing"))
@@ -3449,7 +3469,14 @@ bool run_tail_carried_word_lands_on_l() {
 			"carried: 0xFFFF drops it through the drop's legs"))
 		return false;
 	frame(0x1009); // a slot no row holds
-	return expect(!local->mounted_child.valid(), "carried: a word naming no def'd entity is none");
+	if (!expect(!local->mounted_child.valid(), "carried: a word naming no def'd entity is none"))
+		return false;
+	w::Entity *note = world.registry.get(note_h);
+	(void)world.out.fire_sounds.drain();
+	frame(note_h.packed);
+	return expect(note != nullptr && local->mounted_child == note_h &&
+					note->primary_occupant == local->handle && spgoal_plays() == 1,
+			"carried: a non-flag def's attach plays SPGOAL_PU at L");
 }
 
 // D-NET-143 (L4-s9 FOUND 3): every S2C 0x5A the joiner applies rebuilds the process's
