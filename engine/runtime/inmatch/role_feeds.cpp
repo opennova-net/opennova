@@ -347,7 +347,6 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	// The EXPPOINTS element's words (DFX2-36): the 0x81 score and its fanfare arms, the tracker's
 	// valid word and its two values [orig: dword_A7BA40 / dword_A7BA4C / dword_A7BA54 /
 	//  dword_A7BA58, read by sub_59B7E0 @0x59B998 / @0x59BA38..0x59BA48 (dfx2.exe)].
-	out.title = view.title;
 	out.exp_points.element = view.title != nullptr && view.title->hud_exp_points;
 	out.title = view.title;
 	out.lone_gunner = view.kernel != nullptr && world::local_rides_solo_turret(view.kernel->world);

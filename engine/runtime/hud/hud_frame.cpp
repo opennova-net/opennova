@@ -6,8 +6,6 @@
 
 #include <base/title/title.h> // Title::hud_waypoint_active_tint
 
-#include <base/title/title.h> // the HUD's title draws (HudFrameState::title)
-
 #include <runtime/world/entity.h> // SeatType
 #include <runtime/hud/hud_game_text.h>
 

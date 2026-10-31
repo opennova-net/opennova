@@ -280,8 +280,6 @@ struct HudRoleFacts {
 	// gunner (world::local_rides_solo_turret; DFX2-91); false with no kernel.
 	const Title *title = nullptr;
 	bool lone_gunner = false;
-	// The RoleView's title, the HUD's own draws (hud::HudFrameState::title).
-	const Title *title = nullptr;
 };
 // `voice_menus`: bit 0 asks for the emotes menu, bit 1 for the radio menu.
 inline constexpr uint32_t kHudVoiceMenuEmotes = 1u;
