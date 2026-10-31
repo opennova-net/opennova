@@ -1720,8 +1720,16 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             if (!gravity_skip) inf.vel[2] -= kGravityStepPlayer;
             if (tick_entity != nullptr) {
                 uint32_t flags = tick_entity->flags | tick_entity->engine_flags;
+                // The body's MoveOrder jump bit (+0x12C & 0x20): the local player's packed key,
+                // another body's uplinked byte (DFX2-111's trigger).
+                // [orig: Player_PackInputStateToEntity @0x4DF6FA..0x4DF701; the twin of
+                //  Entity_UpdateInfantryPlayerBody @0x4B4140 - @0x4B7BCD (dfx2.exe)]
+                const bool move_order_jump = inf.is_local_player
+                        ? inf.jump_held
+                        : (tick_entity->net_move_input & Entity::kMoveOrderJump) != 0;
                 const ParachuteEvents events = parachute_tick(inf.parachute, flags,
-                        tick_entity->carry_flags, inf.vel[2], is_authority, logic_tick);
+                        tick_entity->carry_flags, inf.vel[2], is_authority, logic_tick,
+                        world.rules.title().parachute_opens_on_jump, move_order_jump);
                 tick_entity->flags = (tick_entity->flags & ~kEntityFlagParachute) |
                         (flags & kEntityFlagParachute);
                 tick_entity->engine_flags = (tick_entity->engine_flags & ~kEntityFlagParachute) |

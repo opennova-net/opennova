@@ -200,6 +200,9 @@ world::TitleRules make() {
 	// DFX2-37: the lone gunner's fire [orig: the twin of Input_HandleActionBinding_0 @0x4DD4C0
 	// (dfx2.exe) - @0x4DD8FE..0x4DD92C, @0x4DDABB..0x4DDADB].
 	r.emplaced_solo_holds_fire = true;
+	// DFX2-111: the canopy opens on the jump bit [orig: the twin of Entity_UpdateInfantryPlayerBody
+	// @0x4B4140 - @0x4B7BCD (dfx2.exe)].
+	r.parachute_opens_on_jump = true;
 	// Section 7.12: the zoom-out cap, 0x80000 for the radar and the big map alike
 	// [orig: Input_HandleActionBinding @0x49ad50 - case 361, `cmp eax, 80000h` @0x49bf27 /
 	// @0x49bf57 (dfx2.exe)].

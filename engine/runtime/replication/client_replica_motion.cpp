@@ -742,7 +742,8 @@ void row_gradient_slide(ClientEntityState &es, const terrain::TerrainHeightField
 	es.rm_entity_flags &= ~0x10000u;
 }
 
-void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
+void row_root_motion_tick(ClientEntityState &es, const world::TitleRules &rules,
+                          world::IRootMotionSource &src,
                           world::AnimVariantRings *rings,
                           const terrain::TerrainHeightField *terrain,
                           const RowConformIo &conform_io,
@@ -1058,7 +1059,8 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
             // [orig: @0x4b7b18..0x4b7b70 (the edges), @0x4b7bcd..0x4b7be4
             //  (the flap), @0x4b7c4c..0x4b7c6f (the free fall)]
             const world::ParachuteEvents chute = world::parachute_tick(es.rm_parachute,
-                    es.rm_entity_flags, es.rm_chute_carry_flags, es.rm_vel_z, false, tick);
+                    es.rm_entity_flags, es.rm_chute_carry_flags, es.rm_vel_z, false, tick,
+                    rules.parachute_opens_on_jump, false);
             const auto chute_slot = [&](uint8_t slot) {
                 play_slot_at(slot, pre_integrate[0], pre_integrate[1], pre_integrate[2]);
             };
@@ -1677,7 +1679,8 @@ void ClientReplicaPipeline::visit_remote_row(ClientEntityState &es, uint16_t sel
 		// The own row's channel shadows the World body's, which serves the rings
 		// for that body: a second serve would double its plays (D-NET-196).
 		if (root_motion_ != nullptr)
-			row_root_motion_tick(row, *root_motion_, is_self ? nullptr : anim_rings_,
+			row_root_motion_tick(row, world::require_title_rules(rules_, "ClientReplicaPipeline"),
+			                     *root_motion_, is_self ? nullptr : anim_rings_,
 			                     remote_motion_terrain_, conform_io,
 			                     rm_key, is_self, starved, death_state,
 			                     player_pass ? &player_io : nullptr, &replica_contact_resolver_,

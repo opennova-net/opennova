@@ -40,6 +40,7 @@
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/infantry_ladder.h>
 #include <runtime/world/local_player.h>
+#include <runtime/world/parachute.h>
 #include <runtime/world/player_input.h>
 
 #include "channel_clip_source.h"
@@ -6472,6 +6473,78 @@ int main() {
         e->inf.vel[1] = 0;
         run_ticks(ai, w, 3, 4);
         CHECK(e->inf.vel[0] == (63 * 6400) >> 6); // 6300 — no steer, no deadzone
+    }
+
+    // ---- DFX2-111: the canopy's trigger. Jointops.exe's authority opens a falling body's canopy
+    //      (vz <= -0x3800) on the carried parachute (+0x2C & 0x10), which the open canopy then
+    //      clears on every peer; dfx2.exe's on the MoveOrder jump bit (+0x12C & 0x20), clearing
+    //      nothing. [orig: Entity_UpdateInfantryPlayerBody @0x4B7AE5..0x4B7AFA, @0x4B7BC9]
+    //      [orig: the twin @0x4B4140 - @0x4B7BC1..0x4B7BD9 (dfx2.exe)]
+    {
+        const auto open = [](bool on_jump, uint32_t carry, bool jump, int32_t vz, bool authority,
+                                 uint32_t &carry_out) {
+            ParachuteState state;
+            uint32_t flags = kEntityFlagInAir;
+            int32_t vel_z = vz;
+            carry_out = carry;
+            (void)parachute_tick(state, flags, carry_out, vel_z, authority, 1, on_jump, jump);
+            return (flags & kEntityFlagParachute) != 0;
+        };
+        uint32_t carry = 0;
+        // Jointops.exe: the carried bit opens it, and the open canopy spends the bit.
+        CHECK(open(false, 0x10u, false, -0x3800, true, carry) && (carry & 0x10u) == 0);
+        CHECK(!open(false, 0u, true, -0x3800, true, carry));
+        CHECK(!open(false, 0x10u, false, -0x37FF, true, carry)); // not falling fast enough
+        // dfx2.exe: the jump bit opens it, with no parachute carried; a carried bit stands.
+        CHECK(open(true, 0u, true, -0x3800, true, carry));
+        CHECK(!open(true, 0x10u, false, -0x3800, true, carry));
+        CHECK(open(true, 0x10u, true, -0x3800, true, carry) && (carry & 0x10u) != 0);
+        // Only the authority opens it.
+        CHECK(!open(true, 0u, true, -0x3800, false, carry));
+    }
+
+    // ---- DFX2-111 through the body tick: a falling local body holding jump, with no parachute
+    //      carried, opens its canopy under dfx2.exe's rules alone (its MoveOrder jump bit, the
+    //      packed key); a carried parachute opens nothing there.
+    for (const char *code : {"jo", "dfx2"}) {
+        for (const bool carried : {false, true}) {
+            const bool dfx2 = std::string(code) == "dfx2";
+            Field flat([](int) { return static_cast<uint16_t>(0); });
+            auto storage = std::make_unique<World>();
+            World &w = *storage;
+            w.rules.title_rules = &title_rules(code);
+            w.registry.configure_pool(0, 4);
+            Entity player;
+            player.kind = EntityKind::Organic;
+            player.item_type = 3;
+            player.flags = kEntityFlagPlayer | kEntityFlagInAir;
+            player.carry_flags = carried ? 0x10u : 0u;
+            player.position = {100, 100, 80};
+            player.health = 100;
+            const auto h = w.registry.spawn(0, player);
+            AiSystem ai;
+            ai.bind_registry(&w.registry);
+            ai.terrain = &flat.field;
+            TestSource src;
+            src.clips = {31, 43, 44, 47};
+            ai.root_motion = &src;
+            AiEntity *e = soldier(ai);
+            CHECK(e->handle == h);
+            e->health = 100;
+            e->self->position.x.q16 = fx(100); e->self->position.y.q16 = fx(100);
+            e->self->position.z.q16 = fx(80);
+            e->inf.is_local_player = true;
+            e->inf.airborne = true;
+            e->inf.anim_state = anim_state::kJumpLoop;
+            e->inf.jump_held = !carried;
+            e->inf.vel[2] = -0x3800 + 208;
+            run_ticks(ai, w, 1, 2);
+            const Entity &live = *w.registry.get(h);
+            const bool deployed = (live.flags & kEntityFlagParachute) != 0;
+            CHECK(deployed == (dfx2 ? !carried : carried));
+            // Jointops.exe's open spends the carried bit; dfx2.exe's leaves it.
+            if (carried) CHECK(((live.carry_flags & 0x10u) != 0) == dfx2);
+        }
     }
 
     // ---- stance: crouch/prone select the stance gait + idle clips (player). The

@@ -307,6 +307,18 @@ struct TitleRules {
 	//  each `cmp eax, ebx; jle` with ebx 1 @0x4DD4E6]
 	bool emplaced_solo_holds_fire = false;
 
+	// --- DFX2-111: the parachute's open. -------------------------------------------------------
+	// joiner-side: every peer's player body pass runs the canopy tail (world::parachute_tick).
+	// The authority opens a falling body's canopy (vz <= -0x3800) on its carried-parachute bit
+	// (+0x2C & 0x10), which every peer's open canopy then clears, under Jointops.exe; on its
+	// MoveOrder jump bit (+0x12C & 0x20) under dfx2.exe, which carries and clears nothing, so a
+	// jump opens it, with no parachute held, as often as it falls.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the test @0x4B7AE5..0x4B7AFA, the clear
+	//  @0x4B7BC9] [orig: Entity_UpdateInfantryPlayerBody's twin @0x4B4140 - `test byte ptr
+	//  [esi+12Ch], 20h` @0x4B7BCD, the open @0x4B7BD6..0x4B7BD9, no clear in the open canopy's
+	//  arm @0x4B7C57..0x4B7CA4 (dfx2.exe)]
+	bool parachute_opens_on_jump = false;
+
 	// --- Section 7.12: the radar and big-map zoom cap (the local player's own view). -------------
 	// The zoom-out key's cap (Q16, a world-extent multiplier) over the corner radar's zoom and, while
 	// a map mode is up, the big map's (hud::HudMapControl::zoom_step); the x1.15 / x0.85 steps and
