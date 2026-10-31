@@ -34,8 +34,9 @@ void ArmoryLoadout::populate(MenuRuntime &menu, const def::DefWeaponsFile &weapo
 	const int32_t team_mask = armory_team_mask(entity_team);
 	// DFX2-73: dfx2.exe's populate inserts no NONE row [orig: UI_PopulateThreeCategoryLists
 	//  @0x565d10 - the sorts @0x565e33..0x565e4d, then the ammo populate @0x565e55 (dfx2.exe)].
-	const std::string *none =
-			title != nullptr && !title->armory_lists_none_row ? nullptr : &none_label;
+	const std::string *none = require_title(title, "ArmoryLoadout::populate").armory_lists_none_row
+			? &none_label
+			: nullptr;
 	for (int i = 0; i < 3; ++i)
 		slot_rows[i] = loadout_fill_slot(menu, weapons, kCategories[i], kCategorySlots[i],
 				class_mask, team_mask, availability, none, text);
@@ -48,7 +49,7 @@ void ArmoryLoadout::populate(MenuRuntime &menu, const def::DefWeaponsFile &weapo
 }
 
 bool ArmoryLoadout::every_grenade_position() const {
-	return title != nullptr && title->death_screen_loadout;
+	return require_title(title, "ArmoryLoadout::every_grenade_position").death_screen_loadout;
 }
 
 void ArmoryLoadout::flip_class(MenuRuntime &menu, const def::DefWeaponsFile &weapons,

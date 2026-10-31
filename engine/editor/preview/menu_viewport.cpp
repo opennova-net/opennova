@@ -643,7 +643,7 @@ ViewportAction MenuViewport::follow_(const ViewportInput &input, PreviewClock &)
 	++configures_;
 	screen_variables_made_ = false;
 	const MenuScreenStatus compiled = render_.configure(*document, row->id, files, style_vars_,
-			menu_font_scale_of(view.project.document ? view.project.document->target_game : std::string()));
+			menu_font_scale_of(view.project.document->target_game));
 	if (compiled != MenuScreenStatus::Ready) return stop_(compiled, render_.detail());
 	forced_index_ = -1;
 	if (options_.force_window) {
@@ -728,11 +728,11 @@ MenuTrySource MenuViewport::try_source_(const SessionView &view, const MnuDocume
 	// in file order (Mission_CompareMapNames @ 0x5628e0), each row's session word stamped
 	// (mission_catalog::game_type_of, as the game's catalog binding stamps it).
 	const std::shared_ptr<const AssetScan> scan = view.project.scan;
-	// In the project's game's order (Title::mission_list_order carries the witness); a project
-	// document names a known game (project_document.cpp's check).
-	const Title *game = view.project.document ? title_by_code(view.project.document->target_game) : nullptr;
-	const MissionListOrder order = (game != nullptr ? *game : default_title()).mission_list_order;
-	source.title = game;
+	// In the project's game's order (Title::mission_list_order carries the witness): Try runs past the
+	// viewport's NoProject stop, and a project document names a known game (project_document.cpp's check).
+	const Title &game = require_title_code(view.project.document->target_game, "MenuViewport::try_source_");
+	const MissionListOrder order = game.mission_list_order;
+	source.title = &game;
 	source.missions = [scan, &files, order]() {
 		std::vector<menu::MissionChoice> choices;
 		if (!scan) return choices;

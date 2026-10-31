@@ -327,6 +327,9 @@ public:
 // ---- lifecycle -----------------------------------------------------------------
 
 MenuDriver::MenuDriver() : seam_(std::make_unique<FrameSeam>(this)) {
+	// The single-player screen's title (MenuFlow::set_title): the game the process was launched as
+	// until a document opens over its root (open_document).
+	flow_.set_title(ResourceRoot::session_title(Ref<ResourceRoot>()));
 	runtime_.set_sink([this](const opennova::menu::MenuEvent &p_event) {
 		on_runtime_event_(p_event);
 	});
@@ -400,6 +403,7 @@ bool MenuDriver::open_document(const Ref<MnuDocument> &p_doc, const Ref<Resource
 		const String &p_menu_file, const String &p_target_screen) {
 	doc_ = p_doc;
 	root_ = p_root;
+	flow_.set_title(ResourceRoot::session_title(root_));
 	style_ = p_style;
 	override_text_ = p_override_text;
 	// The STARTUP label's line (D-MNU-76): the launch's game and its installed release, ONE's
@@ -973,7 +977,7 @@ bool MenuDriver::activate_single_player_tab(const String &p_name) {
 void MenuDriver::set_single_player_source(const Ref<PlayerProfiles> &p_profiles,
 		const Ref<RtxtStringFile> &p_menu_text) {
 	const opennova::Title &title = ResourceRoot::session_title(root_);
-	flow_.set_title(&title);
+	flow_.set_title(title);
 	if (!title.sp_campaign_tabs) return;
 	sp_menu_text_ = p_menu_text;
 	std::string def;

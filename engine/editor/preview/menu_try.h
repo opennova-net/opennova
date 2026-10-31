@@ -59,7 +59,8 @@ struct MenuTrySource {
 	// The project's game (its target title): its Mods list's base row (Title::mod_list_base), the
 	// binding catalog the sandbox profile's table and the Options screens' records follow
 	// (controls::title_catalog) and its single-player screen (menu::MenuFlow::set_title, the
-	// campaign tabs); null: none, the default title's catalog and no campaign tabs.
+	// campaign tabs). The caller names it (the menu viewport: the open project's, past its NoProject
+	// stop); Try reads it through require_title, so a source with none aborts, named.
 	const Title *title = nullptr;
 };
 

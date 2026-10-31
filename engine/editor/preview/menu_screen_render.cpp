@@ -37,8 +37,7 @@ MenuScreenRender::~MenuScreenRender() {
 }
 
 float menu_font_scale_of(const std::string &game) {
-	const Title *title = title_by_code(game);
-	return (title != nullptr ? *title : default_title()).menu_font_scale;
+	return require_title_code(game, "menu_font_scale_of").menu_font_scale;
 }
 
 MenuScreenStatus MenuScreenRender::configure(const MnuDocument &document, NodeId screen_row, const FileSource &files,

@@ -31,7 +31,8 @@ enum class MenuScreenStatus : uint8_t {
 const char *menu_screen_status_token(MenuScreenStatus status);
 
 // The menu font scale a project's game draws its menus at (Title::menu_font_scale, D-FNT-7): the
-// title whose code is `game`, the default title's for a code no title has (as a session's).
+// title whose code is `game` (an open project's target game); a code no installed title has aborts,
+// named (require_title_code).
 float menu_font_scale_of(const std::string &game);
 // The line a menu viewport shows for a status (`detail`: the first serialize issue, the screen's
 // name); "" when ready.

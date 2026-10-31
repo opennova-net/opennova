@@ -128,12 +128,19 @@ TypedArray<WeaponKitEntry> ArmoryLoadout::get_page(int p_player_class) const {
 	return kit_of(value_.buffers.page(p_player_class));
 }
 
+ArmoryLoadout::ArmoryLoadout() {
+	// The game the process was launched as (ResourceRoot::session_title with no root), until a
+	// screen names its root's (set_title_root): the engine's loadout reads no default of its own.
+	value_.title = &ResourceRoot::session_title(Ref<ResourceRoot>());
+}
+
 void ArmoryLoadout::set_title_root(const Ref<ResourceRoot> &p_root) {
 	value_.title = &ResourceRoot::session_title(p_root);
 }
 
 bool ArmoryLoadout::death_screen_loadout() const {
-	return value_.title != nullptr && value_.title->death_screen_loadout;
+	return opennova::require_title(value_.title, "ArmoryLoadout::death_screen_loadout")
+			.death_screen_loadout;
 }
 
 void ArmoryLoadout::_bind_methods() {

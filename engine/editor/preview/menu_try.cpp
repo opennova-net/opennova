@@ -125,7 +125,7 @@ bool MenuTry::configure_(const std::string &screen, menu::MenuFrameCompiler &com
 	// Every configure a first load of its textures, as the device's own (the editor's menu device).
 	compiler.reset_texture_loads();
 	// The project's game's menu font scale (Title::menu_font_scale, D-FNT-7).
-	compiler.set_font_scale(source_->title != nullptr ? source_->title->menu_font_scale : 1.0f);
+	compiler.set_font_scale(require_title(source_->title, "MenuTry::configure_").menu_font_scale);
 	assets_.configure(compiler, document, found, *source_->files, decoder_, source_->vars ? *source_->vars : kNoVars);
 	return true;
 }
@@ -150,7 +150,7 @@ bool MenuTry::start(const MenuTrySource &source, const std::string &file, const 
 	settings_.clear();
 	sounds_.clear();
 	profile_ = playersav::ProfileRecord{};
-	catalog_ = &controls::title_catalog(source.title != nullptr ? *source.title : default_title());
+	catalog_ = &controls::title_catalog(require_title(source.title, "MenuTry::start"));
 	profile_.bindings = profile::default_binding_table(*catalog_);
 	runtime_.screen_history().clear();
 	runtime_.set_version_line(source.version_line);
@@ -196,15 +196,16 @@ bool MenuTry::open_(const std::string &file, const std::string &screen) {
 void MenuTry::prepare_() {
 	options_.prepare(runtime_, &profile_, *catalog_);
 	options_.apply_policy(runtime_);
-	if (source_ != nullptr && source_->title != nullptr) options_.apply_title(runtime_, *source_->title);
+	const Title &title = require_title(source_->title, "MenuTry::prepare_");
+	options_.apply_title(runtime_, title);
 	options_.seed_profile(runtime_, &profile_);
 	commands_.wire(runtime_, in_mission_);
 	flow_.clear_rows();
 	// The single-player screen's inputs, as the game's shell hands them at each open
 	// (MenuDriver::set_single_player_source): the project's game, and under its campaign tabs
 	// campaign.def, the menu table and the sandbox profile's completion bytes.
-	flow_.set_title(source_ != nullptr ? source_->title : nullptr);
-	if (source_ != nullptr && source_->title != nullptr && source_->title->sp_campaign_tabs && source_->files) {
+	flow_.set_title(title);
+	if (title.sp_campaign_tabs && source_->files) {
 		std::vector<uint8_t> def;
 		source_->files->read(campaign::kCampaignFile, def);
 		// The menu table the reader reads, g_TextMenuUi: Game.bin, the game shell's gameui table
@@ -231,7 +232,7 @@ void MenuTry::prepare_() {
 	if (!commands_.mod_lists().empty() && source_) {
 		expansion_ = source_->expansion;
 		mods_.set_records(source_->expansions ? source_->expansions() : std::vector<ExpansionRecord>());
-		const char *base = source_->title != nullptr ? source_->title->mod_list_base : nullptr;
+		const char *base = title.mod_list_base;
 		for (const int id : commands_.mod_lists()) mods_.populate(runtime_, id, expansion_, base);
 	}
 }
