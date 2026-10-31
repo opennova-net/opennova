@@ -461,6 +461,9 @@ Title make() {
 	// DFX2-53: each player drawn as the first combo of its viewer-relative side [orig:
 	//  Terrain_RenderSectorEntitiesBySide @0x5C6C20 - @0x5C6EA6..0x5C6F42 (dfx2.exe)].
 	t.player_avatar_by_viewer_side = true;
+	// DFX2-114: the GAMEINFO session board [orig: sub_59ABF0 @0x59ABF0, called from sub_5A71E0
+	//  @0x5A7609 (dfx2.exe)].
+	t.hud_game_info_board = true;
 	return t;
 }
 

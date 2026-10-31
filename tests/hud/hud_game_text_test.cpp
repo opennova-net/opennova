@@ -203,9 +203,12 @@ int main() {
 				{ "client/strcli17", "Yellow Team" },
 				{ "client/strcli18", "Violet Team" },
 				{ "client/strcli20", " - Attacking" },
+				{ "Overlays/STROVER64", "Team Deathmatch" },
+				{ "Overlays/STROVER29", "Deathmatch" },
+				{ "Client/STRCLI07", "(of" },
 		});
 		HudSessionText t;
-		hud_session_text(session, t);
+		hud_session_text(session, 0x10000u, t);
 		CHECK(t.timer == "Timer" && t.players_remaining == "Players remaining:" &&
 				t.players == "Number of players:" && t.spectators == "Number of Spectators:" &&
 				t.in_the_zone == "In the Zone");
@@ -213,6 +216,14 @@ int main() {
 				t.team_names[2] == "Rebel Team" && t.team_names[3] == "Yellow Team" &&
 				t.team_names[4] == "Violet Team" && t.team_names[5].empty());
 		CHECK(t.attacking == " - Attacking" && t.defending.empty());
+		// dfx2.exe's GAMEINFO board (DFX2-114): the game type's Overlays label by
+		// HUD_GetGameTypeOverlayLabel's rung, "" for an unlisted type; the "(of" pair
+		// [orig: sub_59ABF0 @0x59AE0E, @0x59B263, @0x59B467 (dfx2.exe)].
+		CHECK(t.game_type_label == "Team Deathmatch" && t.of_team_a == "(of" && t.of_team_b.empty());
+		hud_session_text(session, 8u, t);
+		CHECK(t.game_type_label == "Deathmatch");
+		hud_session_text(session, 0x12345u, t);
+		CHECK(t.game_type_label.empty());
 	}
 
 	// The subgoal announcements by section; a miss posts nothing.

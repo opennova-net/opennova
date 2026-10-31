@@ -460,16 +460,34 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 		s.remaining_count = sb.alive_player_count;            // g_ScoreboardDeadRowCount
 		s.row_count = static_cast<int>(sb.rows.size());       // g_ScoreboardRowCount
 		s.spectator_count = sb.spectator_count;               // g_ScoreboardSpectatorCount
-		// Teams 1 and 2 of the 0x16 team table, score1 read signed like the
-		// movsx that stores it [orig: the team rows 0xA85AEC + 16t, the
-		// stores @0x42fe00..0x42fe42; read @0x59CDF4 / @0x59CEA8 / @0x59CF54].
-		for (size_t t = 0; t < 2; ++t) {
-			if (sb.teams.size() <= t + 1) break;
-			s.team_score1[t] = static_cast<int16_t>(sb.teams[t + 1].score1);
-			s.team_koth[t] = sb.teams[t + 1].koth_hold;
+		// The 0x16 team table, score1 read signed like the movsx that stores it, and its
+		// count byte [orig: the team rows 0xA85AEC + 16t, the stores @0x42fe00..0x42fe42;
+		// g_ScoreboardTeamCount @0x42fdda; read @0x59CDF4 / @0x59CEA8 / @0x59CF54].
+		for (size_t t = 0; t < s.teams.size() && t < sb.teams.size(); ++t) {
+			s.teams[t].score1 = sb.teams[t].score1;
+			s.teams[t].ctf_flag = sb.teams[t].ctf_flag;
+			s.teams[t].koth_hold = sb.teams[t].koth_hold;
 		}
+		s.team_count = static_cast<int>(sb.team_count);
 		if (view.joiner) s.time_limit_minutes = cs.session_time_limit_minutes; // dword_A821C0
+		// dfx2.exe's GAMEINFO board (DFX2-114): the 0x16 records (no entity read: the board
+		// takes the record's own name, score, slot id and bit 0), the timed flag, the local
+		// body's slot byte, and a joiner's session record, "" until its first S2C 0x58
+		// [orig: sub_59ABF0 - dword_A7BB30 + 56r @0x59B4E4, g_ScoreboardFlags @0x59B575,
+		//  g_LocalPlayerEntity+0x154 @0x59B54B, g_ServerMissionName @0x59AE5C (dfx2.exe);
+		//  Server_BuildStatusReport @0x530A60 - the memset @0x530A6B and the authority gate
+		//  ahead of the name @0x530AA1, rebuilt at each Game_StartMission]
+		(void)replication::project_scoreboard(cs, s.rows);
+		s.timed = sb.timed;
+		s.local_slot = view.runtime->local_body_slot();
+		if (view.joiner) s.mission_name = cs.session_status.mission_name;
 	}
+	// The authority's own report's name, at most 63 characters [orig: Napi_CopyString(report +
+	// 36, dword_A761D4, 64) @0x530AA1], and the mount's expansion [orig: g_ExpansionName
+	// @0x59AE4E (dfx2.exe)].
+	if (!view.joiner && view.host != nullptr)
+		s.mission_name = view.host->config.mission_name.substr(0, 63);
+	s.expansion = view.kernel->mounted_expansion();
 	// The authority reads its own g_KothLimitMinutes [orig: @0x59CCDB..0x59CCE3].
 	if (!view.joiner && view.host != nullptr)
 		s.time_limit_minutes = static_cast<int32_t>(view.host->config.time_limit_minutes);

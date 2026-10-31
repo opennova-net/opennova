@@ -422,6 +422,8 @@ public:
 
 	// --- the mounted root and the mission ------------------------------------
 	ResourceIndex index;
+	// The expansion the opened mission's files mount (g_ExpansionName; empty for the base game).
+	const std::string &mounted_expansion() const { return files_.expansion_name; }
 	std::string root_dir;
 	std::string mission_name;
 	std::string mission_basename;

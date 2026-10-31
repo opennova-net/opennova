@@ -63,6 +63,7 @@ Title make() {
 	t.loading_screen = jo_title().loading_screen;
 	t.death_map_no_names = jo_title().death_map_no_names;
 	t.player_avatar_by_viewer_side = jo_title().player_avatar_by_viewer_side;
+	t.hud_game_info_board = jo_title().hud_game_info_board;
 	return t;
 }
 

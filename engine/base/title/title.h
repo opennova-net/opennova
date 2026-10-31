@@ -455,6 +455,16 @@ struct Title {
 	//  player's) @0x5C6EE1..0x5C6F25, MinimapSlot_FindOrAllocByEntityId into +0x3C @0x5C6F3D, read
 	//  @0x5C6F45; Entity_GetProfileSlotSound @0x525490 (dfx2.exe)]
 	bool player_avatar_by_viewer_side = false;
+	// DFX2-114: the GAMEINFO overlay is dfx2.exe's session board. Under the MSNTITLE slot, the
+	// game type's Overlays label (in a session) and "<mission> (<expansion>)" at GAMEINFO; then,
+	// under TRGTCNT, one line lower, a non-team game's four leading rows (the local row after
+	// them when it is not one), else the Tab board's team lines (TKOTH's two or four timers); all
+	// in the restamped colour (hud::HudFrameCompiler::element_game_info). Jointops.exe's draws
+	// TKOTH's two timers alone, at GAMEINFO, in the colour from before its restamp.
+	// [orig: HUD_DrawGameTimerOverlay @0x59CC80 (the timers @0x59CE8F..0x59D007)]
+	// [orig: sub_59ABF0 @0x59ABF0 (dfx2.exe) - the mission line @0x59ADF7..0x59AEAB, the lists
+	//  @0x59AEB7..0x59B70F]
+	bool hud_game_info_board = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

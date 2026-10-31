@@ -930,6 +930,11 @@ struct HudSessionText {
 	std::array<std::string, 6> team_names;
 	std::string attacking;         // client/strcli20
 	std::string defending;         // client/strcli21
+	// dfx2.exe's GAMEINFO board (DFX2-114): the session game type's Overlays label
+	// (HUD_GetGameTypeOverlayLabel) and the "(of" pair Client/STRCLI07 / STRCLI08.
+	std::string game_type_label;
+	std::string of_team_a;
+	std::string of_team_b;
 };
 
 // THE MP SESSION LINES' per-frame facts: the CLOCK timer and player count,
@@ -947,10 +952,25 @@ struct HudSessionState {
 	// T: g_KothLimitMinutes on the authority, the S2C 0x64 copy dword_A821C0
 	// on a joiner [orig: HUD_DrawGameTimerOverlay @0x59CCDB..0x59CCEB].
 	int32_t time_limit_minutes = 0;
-	// Teams 1 and 2 of the 0x16 team table: score1 (movsx) and the KOTH hold
-	// byte [orig: dword_A85AFC / dword_A85B08, dword_A85B0C / dword_A85B18].
-	std::array<int32_t, 2> team_score1{};
-	std::array<int32_t, 2> team_koth{};
+	// The 0x16 team table by team byte 0..4: score1 (movsx), the KOTH hold byte and the CTF
+	// byte [orig: the rows 0xA85AEC + 16t - team 1 dword_A85AFC / dword_A85B08, team 2
+	// dword_A85B0C / dword_A85B18], and its count byte [orig: g_ScoreboardTeamCount @0x42fdda].
+	std::array<ScoreboardTeamScore, 5> teams{};
+	int team_count = 0;
+	// dfx2.exe's GAMEINFO board's further facts (Title::hud_game_info_board, DFX2-114): the
+	// session record's mission name (at most 63 characters: the authority's own report, a
+	// joiner's S2C 0x58 copy, "" before one), the mounted expansion, the 0x16 rows (the record's
+	// name, score1, slot id and bit 0), the timed flag (g_ScoreboardFlags & 2) and the local
+	// player entity's slot byte (+0x154; 0xFF while destroyed, -1 with no runtime).
+	// [orig: sub_59ABF0 @0x59ABF0 - g_ServerMissionName / g_ExpansionName @0x59AE4E..0x59AE84,
+	//  the rows dword_A7BB30 + 56r @0x59B4E4..0x59B527, g_ScoreboardFlags @0x59B575, entity+0x154
+	//  @0x59B54B (dfx2.exe); Server_BuildStatusReport @0x530A60 (the authority's name
+	//  @0x530AA1)]
+	std::string mission_name;
+	std::string expansion;
+	std::vector<ScoreboardEntry> rows;
+	bool timed = false;
+	int local_slot = -1;
 	// CaptureZone_FindMaxProximityCoverage(local) [orig: @0x5BF4D0].
 	int32_t zone_coverage = 0;
 	int team = 0;                        // byte_27234FE (hudInfo+0x176)
@@ -972,6 +992,16 @@ struct HudSessionState {
 	uint8_t spectate_submode = 0;
 	HudSessionText text;
 };
+
+// dfx2.exe's GAMEINFO leader lines for game types 0, 1 and 8 (DFX2-114): four places, each
+// non-spectator row taking the FIRST place whose score it beats and replacing that place's
+// row (no shift: a row a later one displaces drops out), then the places in order; when no
+// placed row is the local player's (its slot byte), the first non-spectator row of that slot
+// follows them. Each is "%3i %s" (score1, name), or under the timed flag "%2i:%02i %s" of
+// 60 * T less score1. The 0x8000000 debug arm is dead.
+// [orig: sub_59ABF0 @0x59ABF0 - the places @0x59B4B3..0x59B527, the lines @0x59B530..0x59B617,
+//  the local row @0x59B61D..0x59B70F (dfx2.exe)]
+std::vector<std::string> game_info_leader_lines(const HudSessionState &session);
 
 // One weapon category's slot-bar scan result (world/hud_slot_bar_feed.h owns
 // the witnessed scan). The icon is the device's texture at
@@ -1724,6 +1754,8 @@ private:
 	// The MP session lines (hud_frame_session_lines.cpp) and the HUDLS bar
 	// (hud_frame_slot_bar.cpp).
 	void element_game_info(const HudFrameState &state, float w, float h);
+	// dfx2.exe's GAMEINFO board below the zone line (DFX2-114); true when it drew a line.
+	bool game_info_board(const HudFrameState &state, float w, float h);
 	void element_clock(const HudFrameState &state, float w, float h);
 	void element_team_id_line(const HudFrameState &state, float w, float h);
 	void element_weapon_slot_bar(const HudFrameState &state, float w, float h);

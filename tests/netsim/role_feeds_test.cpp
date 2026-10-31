@@ -854,6 +854,15 @@ int main() {
 		st.scoreboard.teams[1].score1 = static_cast<uint16_t>(0xFFFEu); // -2 through movsx
 		st.scoreboard.teams[1].koth_hold = 4;
 		st.scoreboard.teams[2].score1 = 90;
+		st.scoreboard.teams[2].ctf_flag = 1;
+		st.scoreboard.team_count = 4;
+		st.scoreboard.timed = true;
+		st.scoreboard.rows[1].slot_id = 3;
+		st.scoreboard.rows[1].score1 = -5;
+		st.scoreboard.rows[1].spectator = true;
+		st.scoreboard.rows[1].name = "Ann";
+		st.scoreboard.rows[1].clan = "CL";
+		st.session_status.mission_name = "Hill";
 		mission::MissionKernel kernel;
 		kernel.world.rules.mp_session = true;
 		kernel.world.registry.configure_pool(0, 8);
@@ -870,8 +879,18 @@ int main() {
 		CHECK(f.session.in_session && f.session.round_time_remaining == -1 &&
 				f.session.permanent_death && f.session.remaining_count == 3 &&
 				f.session.row_count == 6 && f.session.spectator_count == 2);
-		CHECK(f.session.time_limit_minutes == 15 && f.session.team_score1[0] == -2 &&
-				f.session.team_koth[0] == 4 && f.session.team_score1[1] == 90);
+		CHECK(f.session.time_limit_minutes == 15 && f.session.teams[1].score1 == -2 &&
+				f.session.teams[1].koth_hold == 4 && f.session.teams[2].score1 == 90 &&
+				f.session.teams[2].ctf_flag == 1 && f.session.team_count == 4);
+		// dfx2.exe's GAMEINFO board's facts (DFX2-114): the 0x16 records as the board projects
+		// them, the timed flag, the local body's slot byte, a joiner's 0x58 mission name and the
+		// kernel's mounted expansion (none here) [orig: sub_59ABF0 @0x59AE5C, @0x59B4E4,
+		// @0x59B54B, @0x59B575 (dfx2.exe)].
+		CHECK(f.session.rows.size() == 6 && f.session.rows[1].slot_id == 3 &&
+				f.session.rows[1].score1 == -5 && f.session.rows[1].spectator &&
+				f.session.rows[1].name == "CL Ann");
+		CHECK(f.session.timed && f.session.local_slot == rt.local_body_slot() &&
+				f.session.mission_name == "Hill" && f.session.expansion.empty());
 		CHECK(f.session.team == 2 && f.session.attack_defend == 1 && f.session.zone_coverage == 0);
 		// No inventory: every slot-bar category empty.
 		CHECK(f.slot_bar[6].adm_index == -1 && f.slot_bar[0].count == 0);
