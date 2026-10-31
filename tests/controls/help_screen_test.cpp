@@ -4,7 +4,11 @@
 // rendered strings (no keyhelp table installed: the marker-stripped
 // fallbacks) [orig: KeyBinding_BuildHelpScreenTable @0x497340;
 // KeyBinding_BuildCategoryPages @0x4966c0; HelpScreen_BuildPage @0x4971b0;
-// HelpScreen_CyclePage @0x4972e0].
+// HelpScreen_CyclePage @0x4972e0]. Each title's catalog sorts on its own rows'
+// help words: dfx2.exe's rows are numbered apart from Jointops.exe's
+// [orig: KeyBinding_CompareEntries @0x4965f0] [orig: KeyBinding_CompareEntries
+// @0x496600 (dfx2.exe)].
+#include <base/title/title.h>
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/controls.h>
 #include <runtime/controls/help_screen.h>
@@ -12,6 +16,7 @@
 
 #include <cstdio>
 #include <string>
+#include <vector>
 
 using namespace opennova::controls;
 
@@ -85,11 +90,49 @@ void test_prune_follows_live_bindings() {
 	CHECK(hs.rows()[0].text != "Forward");
 }
 
+// The texts of the page titled `title`, in their sorted order (none: no such page).
+std::vector<std::string> page_texts(HelpScreen &hs, const std::string &title) {
+	std::vector<std::string> out;
+	for (int p = 0; p < hs.page_count(); ++p, hs.cycle_page(true)) {
+		if (hs.title() != title) continue;
+		for (const HelpScreenRow &row : hs.rows())
+			if (!row.text.empty()) out.push_back(row.text);
+	}
+	return out;
+}
+
+// The Map page under each title's own catalog, its rows by their own +0x10 words (Map 4001,
+// Radar Zoom In 4002, Radar Zoom Out 4003, Hud Detail 4004, Next Waypoint 4005, Next Flag
+// 4006; Jointops.exe's Commander Menu 2023 ahead of them). dfx2.exe numbers them 46..50 and
+// 96 where Jointops.exe numbers 48..52 and 98, so a lookup of the help order by row number
+// read Jointops.exe's words for other rows (Radar Zoom In, Next Waypoint, Hud Detail, Next
+// Flag, Radar Zoom Out, Map).
+void test_each_title_sorts_on_its_own_help_words() {
+	clear_key_strings();
+	const opennova::Title *jo = opennova::title_by_code("jo");
+	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+	CHECK(jo != nullptr && dfx2 != nullptr);
+	if (jo == nullptr || dfx2 == nullptr) return;
+	const std::vector<std::string> map = {"Map", "Radar Zoom In", "Radar Zoom Out", "Hud Detail",
+			"Next Waypoint", "Next Flag"};
+	BindingSet jo_bindings(title_catalog(*jo));
+	HelpScreen jo_hs;
+	jo_hs.build(jo_bindings);
+	std::vector<std::string> jo_map = map;
+	jo_map.insert(jo_map.begin(), "Commander Menu");
+	CHECK(page_texts(jo_hs, "Help - Map") == jo_map);
+	BindingSet dfx2_bindings(title_catalog(*dfx2));
+	HelpScreen dfx2_hs;
+	dfx2_hs.build(dfx2_bindings);
+	CHECK(page_texts(dfx2_hs, "Help - Map") == map);
+}
+
 } // namespace
 
 int main() {
 	test_pages_from_defaults();
 	test_prune_follows_live_bindings();
+	test_each_title_sorts_on_its_own_help_words();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;
