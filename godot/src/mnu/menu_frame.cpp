@@ -5,6 +5,7 @@
 #include "mnu/menu_draw_list_stats.h"
 #include "util/string_convert.h"
 
+#include <base/title/title.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_state_frame.h>
 #include <runtime/menu/options_policy.h>
