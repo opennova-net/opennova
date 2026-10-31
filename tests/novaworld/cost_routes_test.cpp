@@ -12,8 +12,8 @@
 
 #include "http_listener.h"
 #include "infra/cost_store.h"
-#include "net_http.h"
-#include "net_sockets.h"
+#include <net/http/http_exchange.h>
+#include <net/socket/socket.h>
 #include "program/server_config.h"
 
 #include <net/novaworld/db/database.h>

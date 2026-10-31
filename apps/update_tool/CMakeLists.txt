@@ -19,7 +19,7 @@ target_include_directories(opennova_update_tool_core
 target_link_libraries(opennova_update_tool_core
     PUBLIC
         opennova_net         # the wire and the server machine (net/update); formats below it
-        opennova_app_common  # the TCP sockets and the update listener's (PUBLIC-links ws2_32 on Windows)
+        opennova_app_common  # the update listener (and opennova_net: the TCP sockets)
 )
 
 target_compile_features(opennova_update_tool_core PUBLIC cxx_std_17)

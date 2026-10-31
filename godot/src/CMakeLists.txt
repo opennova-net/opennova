@@ -58,6 +58,7 @@ add_library(opennova_bindings OBJECT
     network/novaworld_client.cpp
     network/host_session_options.cpp
     network/novaworld_server_row.cpp
+    network/novaworld_service_target.cpp
     network/novaworld_gate_info.cpp
     network/novaworld_server_browser.cpp
     network/ping_sweep_worker.cpp
@@ -71,6 +72,7 @@ add_library(opennova_bindings OBJECT
     network/net_session_policy.cpp
     network/connection_error.cpp
     network/join_screen_status.cpp
+    network/join_flow.cpp
     network/join_target.cpp
     terrain/terrain.cpp
     terrain/terrain_surface_inputs.cpp

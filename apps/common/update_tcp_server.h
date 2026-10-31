@@ -10,7 +10,7 @@
 // (ADR 0061 d3) run it alike, each over its own catalog, so it lives with the app layer's
 // sockets.
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <net/update/update_server.h>
 

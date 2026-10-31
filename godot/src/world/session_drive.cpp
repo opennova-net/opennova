@@ -1174,21 +1174,19 @@ void SessionDrive::publish_host_mission_start(const Ref<Simulation> &p_sim,
 					opennova::mission::mission_base_name(mission_file),
 					std::vector<uint8_t>(table.ptr(), table.ptr() + table.size()))
 					.get_string("info", "title");
-	const std::string header_name = document.get_mission_name();
-	const int32_t climate = static_cast<int32_t>(document.header.climate);
-	const int32_t last_round_ticks = p_sim->previous_round_time_remaining_ticks();
+	opennova::inmatch::MissionStartListing mission;
+	mission.mission_text_title = title;
+	mission.header_name = document.get_mission_name();
+	mission.climate = static_cast<int32_t>(document.header.climate);
+	mission.last_round_ticks = p_sim->previous_round_time_remaining_ticks();
 	const ObjectID sim_id = ObjectID(p_sim->get_instance_id());
-	const opennova::hud::GameTextLookup gametext = game_text_lookup(client->get_gametext());
-	host.set_column_source([sim_id, gametext, title, header_name, climate,
-								   last_round_ticks](opennova::HostRegistration &r) {
-		const Simulation *sim = Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id));
-		const opennova::inmatch::NapiNPServerCtx *ctx = sim != nullptr ? sim->host_ctx() : nullptr;
-		if (ctx == nullptr) return false;
-		opennova::inmatch::read_session_listing_columns(r, *ctx, gametext);
-		opennova::inmatch::apply_mission_start_columns(r, title, header_name, climate,
-				last_round_ticks);
-		return true;
-	});
+	// The one mission-start read both hosts publish (inmatch::set_mission_start_columns).
+	opennova::inmatch::set_mission_start_columns(host,
+			[sim_id]() -> opennova::inmatch::NapiNPServerCtx * {
+				Simulation *sim = Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id));
+				return sim != nullptr ? sim->host_ctx() : nullptr;
+			},
+			game_text_lookup(client->get_gametext()), std::move(mission));
 	const Ref<HostSessionOptions> session = p_sim->get_host_session_config();
 	if (session.is_valid() && session->get_serve_and_play())
 		set_nw_self_slot(p_sim, session->get_player_name());

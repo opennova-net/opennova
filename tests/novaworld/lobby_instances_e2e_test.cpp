@@ -52,7 +52,7 @@
 #include <net/npwire/session_keys.h>
 #include <net/protocol/protocol.h>
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include "common/test_database.h"
 #include "common/test_expect.h"

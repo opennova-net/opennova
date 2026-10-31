@@ -16,9 +16,9 @@
 // These are the Godot-free, socket-free pieces of the in-game-browser login
 // flow: assembling the credential POST body the engine sends to NWLogin.dll,
 // and the cookie jar the engine carries across every subsequent request. The
-// transport (the actual HTTP GET/POST) lives in the host: the Godot binding
-// drives it with HTTPRequest, the server answers it with Crow. This keeps the
-// protocol/crypto in one place.
+// transport (the actual HTTP GET/POST) is the menu browser's
+// (net/novaworld/browser_transport.h), which the game and serve both run; the
+// server answers it with Crow. This keeps the protocol/crypto in one place.
 //
 // Witnessed against retail Jointops.exe (grill NW-S5/B, 2026-06-12):
 //   * POST builder GopherWebWidget_SendHttpPost @ 0x658b30 sends

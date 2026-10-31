@@ -5,7 +5,7 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <array>
 #include <cstdint>

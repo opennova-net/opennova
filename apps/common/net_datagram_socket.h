@@ -6,7 +6,7 @@
 #include <net/npwire/idatagram_socket.h> // opennova::IDatagramSocket
 #include <net/npwire/peer_addr.h>     // opennova::PeerAddr
 
-#include "net_sockets.h" // opennova::net (apps/common)
+#include <net/socket/socket.h> // opennova::net (apps/common)
 
 namespace opennova::net {
 

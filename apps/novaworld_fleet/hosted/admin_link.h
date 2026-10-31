@@ -25,7 +25,7 @@
 //
 // Each link runs a thread of its own: at most ONNET_HOSTED_CAP links live
 // (default 5), the apps' socket layer is blocking with per-socket timeouts
-// (apps/common/net_sockets.h), and
+// (net/socket/socket.h), and
 // a thread per link keeps one dead or slow machine (a connect or a reply
 // timing out) from holding up another server's commands, which one shared
 // thread over blocking sockets would queue behind it.
@@ -59,7 +59,7 @@
 #include "hosted/model/admin_link_status.h"
 #include "hosted/model/hosted_repository.h"
 
-#include "net_sockets.h"
+#include <net/socket/socket.h>
 
 #include <net/novaworld/db/database.h>
 

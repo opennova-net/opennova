@@ -36,8 +36,8 @@
 
 #include "lister.h"
 
-#include "net_http.h"
-#include "net_sockets.h"
+#include <net/http/http_exchange.h>
+#include <net/socket/socket.h>
 
 #include <base/io/log.h>
 #include <net/napi/session.h>

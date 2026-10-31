@@ -12,8 +12,8 @@
 // session's facts the authority's NovaWorld exit reads, and the PlayerList rows. The embedder keeps
 // the session's driver (the game's NovaWorld menu session; opennova-serve's Lister: the gate, the
 // login and HOSTKEY, the host request, the pump, when columns and roster go out), the
-// ServerCommands' cfg block and save, the mission start's publish and a listen host's own
-// PlayerList slot.
+// ServerCommands' cfg block and save, when the mission start publishes (its columns are this
+// file's: set_mission_start_columns) and a listen host's own PlayerList slot.
 //
 // A second listing (opennova-serve's --also-master-host, none of retail's: a stock host lists on
 // one service; D-NET-1385) is listing 1: its role reads the same columns and runs the same
@@ -106,6 +106,33 @@ private:
 	std::shared_ptr<Ends> ends_ = std::make_shared<Ends>();
 	NwuHostRole *second_ = nullptr; // set_second's, which a bind hands its ends
 };
+
+// What the mission start's server-info update reads besides the session: the mission text's
+// [info] title, the BMS header's name and climate the validate read, and the last round's clock
+// (server_info.h apply_mission_start_columns carries the witness).
+struct MissionStartListing {
+	std::string mission_text_title;
+	std::string header_name;
+	int32_t climate = 0;
+	int32_t last_round_ticks = 0;
+};
+
+// The mission start's Host-list columns over `r`: the match's session columns
+// (read_session_listing_columns), then the mission start's own over them, last, so a map change's
+// context, which may still hold the last map's mission and clock, never outreads them.
+void read_mission_start_columns(HostRegistration &r, const NapiNPServerCtx &ctx,
+		const hud::GameTextLookup &gametext, const MissionStartListing &mission);
+
+// THE MISSION START'S UPDATE, the one both NovaWorld hosts run (the game's listen host at its
+// load's head, opennova-serve's at its boot's mission_start_update, for each listing that hosts):
+// `role`'s column read becomes read_mission_start_columns over the match `match` resolves, and
+// the embedder then publishes (NwuHostRole::publish_mission_start: both lists whole, the first
+// mission's METPROTOCOL ID report). The read stands until a bind replaces it with the match's
+// alone (HostListingBinding::bind). With no context the read leaves the role's columns.
+// [orig: Game_StartMission @0x524360 - Lobby_UpdateServerInfo called @0x5248F5,
+//  CPlayerManager_RebuildLists(1) called @0x524903]
+void set_mission_start_columns(NwuHostRole &role, HostListingBinding::MatchContext match,
+		hud::GameTextLookup gametext, MissionStartListing mission);
 
 // The NWU session's facts onto the authority's context, once an update: its in-use word, its
 // hosting / playing word and its own exit store, which the 62-frame NovaWorld exit reads, and its

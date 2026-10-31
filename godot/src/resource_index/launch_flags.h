@@ -52,10 +52,6 @@ public:
 	// ONE's version, the build this program is (base/version/one_build.h one_build()): "0.0.22",
 	// a staging run's "0.0.22.123". The game MCP endpoint's serverInfo names it.
 	static String one_version();
-	// The relaunch markers' spellings (boot_policy.h kLaunchFlagAfterUpdate,
-	// kLaunchFlagNovaWorldJoin), which the updater's install hands back to the game.
-	static String after_update_flag();
-	static String novaworld_join_flag();
 	// True when `/game` was passed, even without a value.
 	static bool game_given();
 	static bool no_update();
@@ -123,6 +119,15 @@ public:
 	// The /sstga arm's file: the frame (`rgba`, width x height RGBA8, the top row first) as the
 	// run-length TGA (engine formats/tga/tga.h tga_write_screenshot carries the witness).
 	static PackedByteArray screen_shot_tga_file(const PackedByteArray &rgba, int width, int height);
+
+	// The updater's command lines (boot_policy.h updater_check_arguments /
+	// updater_install_arguments): the check's, and the install's with the relaunch's
+	// arguments (`run_args`, less an earlier launch's markers) and this one's.
+	static PackedStringArray updater_check_arguments(const String &product,
+			const String &runtime_dir, const String &resource_dir);
+	static PackedStringArray updater_install_arguments(const String &product,
+			const String &runtime_dir, const String &resource_dir, int64_t parent_pid,
+			const PackedStringArray &run_args, bool bootstrap, int64_t join_rid);
 
 	// The whole parsed set, for a C++ consumer that reads several switches at once (the
 	// NovaWorld connect's command line, NovaWorldClient::start).

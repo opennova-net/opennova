@@ -13,7 +13,7 @@
 
 #include <net/novaworld/db/database.h>
 #include <net/npwire/cs_config.h>
-#include <net_sockets.h>
+#include <net/socket/socket.h>
 #include <net/novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
 #include <net/novaworld/host_repository.h>       // hostdb::PlayerRow
 #include <net/novaworld/lobby_repository.h>
