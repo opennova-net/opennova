@@ -225,8 +225,19 @@ void test_the_armory_line(const fnt_font_t *font) {
 
 } // namespace
 
+// DFX2-95: dfx2.exe's end-game (I) screen footer sits in the text box's corners; Jointops.exe's
+// (and Acid Gambit's, its HUD) centres both lines (hud_overlay_windows_test pins the layout)
+// [orig: sub_5BBF20 @0x5BCC3D..0x5BCCF0 (dfx2.exe)] [orig: HUD_DrawEndGameScreen
+// @0x5BDD67..0x5BDE31].
+void test_the_end_game_footer_is_dfx2s() {
+	CHECK(title("dfx2").hud_end_game_footer_corners);
+	CHECK(!title("jo").hud_end_game_footer_corners);
+	CHECK(!title("acidgambit").hud_end_game_footer_corners);
+}
+
 int main() {
 	test_the_lone_gunner_panel_is_dfx2s();
+	test_the_end_game_footer_is_dfx2s();
 	fnt_font_t font = test_font::uniform_test_font();
 	test_the_lone_gunner_panel(&font);
 	test_the_waypoint_tint(&font);

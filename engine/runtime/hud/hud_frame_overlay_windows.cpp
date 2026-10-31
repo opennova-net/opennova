@@ -8,7 +8,7 @@
 // The overlay-panel pass's voice-macro menus and the SP pause text live here
 // too (HUD_DrawOverlayPanels @0x5c0060).
 
-#include <base/title/title.h> // Title::hud_lone_gunner_panel, Title::hud_map_legend
+#include <base/title/title.h> // Title::hud_lone_gunner_panel, hud_map_legend, hud_end_game_footer_corners
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_medic_cross.h>
 
@@ -387,16 +387,31 @@ void HudFrameCompiler::element_end_game_screen(const HudFrameState &state, float
 		pages.starts[eg.page + 1] = next;
 	// The footer, bold, half-bright white [orig: KeyHelp Text/PAGE and Text/CHANGE_SCREEN].
 	const uint32_t footer_color = half_bright_argb(0xFFFFFFFFu);
-	// Both centred on the screen, at design (512, 700) and (512, 720) plus the safe top
-	// [orig: HUD_DrawTextCentered_HalfBright @0x5bdd7d..0x5bddc4 / @0x5bddee..0x5bde31;
-	//  HUD_DrawTextCentered_HalfBright @0x580680 (flags 1: draw flags 1)].
-	const float x = static_cast<float>(design_to_screen_x(512, sw));
-	emit_slot_text(label_font_bold_, label_scale_, eg.page_line.c_str(), x,
-			static_cast<float>(design_to_screen_y(700, sh)) + kSafeTop, footer_color,
-			kFontAlignCenter);
-	emit_slot_text(label_font_bold_, label_scale_, eg.footer.c_str(), x,
-			static_cast<float>(design_to_screen_y(720, sh)) + kSafeTop, footer_color,
-			kFontAlignCenter);
+	if (state.title != nullptr && state.title->hud_end_game_footer_corners) {
+		// DFX2-95: "Page n of 4" right-aligned at the box's right edge and the hint left-aligned
+		// at its left, both at its bottom plus the safe top; the corners already scaled are
+		// scaled again, and the bottom once from 644 [orig: sub_5BBF20 @0x5BBF20 - the unscaled
+		// bottom var_1288 @0x5BBF8F..0x5BBF9A; HUD_DrawTextRightAligned_HalfBright(bold, x, y,
+		// text, -1, 1) @0x5BCC3D..0x5BCC84; HUD_DrawTextLeft_HalfBright(bold, x, y, text, -1, 1)
+		// @0x5BCCAE..0x5BCCF0; the flags 1 select nothing, HUD_DrawTextRightAligned_HalfBright
+		// @0x57ECD0 testing 0x100 and 2 (dfx2.exe)].
+		const float y = static_cast<float>(design_to_screen_y(644, sh)) + kSafeTop;
+		emit_slot_text(label_font_bold_, label_scale_, eg.page_line.c_str(),
+				static_cast<float>(design_to_screen_x(x2, sw)), y, footer_color, kFontAlignRight);
+		emit_slot_text(label_font_bold_, label_scale_, eg.footer.c_str(),
+				static_cast<float>(design_to_screen_x(x1, sw)), y, footer_color, 0u);
+	} else {
+		// Both centred on the screen, at design (512, 700) and (512, 720) plus the safe top
+		// [orig: HUD_DrawTextCentered_HalfBright @0x5bdd7d..0x5bddc4 / @0x5bddee..0x5bde31;
+		//  HUD_DrawTextCentered_HalfBright @0x580680 (flags 1: draw flags 1)].
+		const float x = static_cast<float>(design_to_screen_x(512, sw));
+		emit_slot_text(label_font_bold_, label_scale_, eg.page_line.c_str(), x,
+				static_cast<float>(design_to_screen_y(700, sh)) + kSafeTop, footer_color,
+				kFontAlignCenter);
+		emit_slot_text(label_font_bold_, label_scale_, eg.footer.c_str(), x,
+				static_cast<float>(design_to_screen_y(720, sh)) + kSafeTop, footer_color,
+				kFontAlignCenter);
+	}
 	++draw_list_.elements_drawn;
 }
 

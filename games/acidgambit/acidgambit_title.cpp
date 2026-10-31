@@ -34,6 +34,7 @@ Title make() {
 	t.hud_waypoint_active_tint = jo_title().hud_waypoint_active_tint;
 	t.hud_objective_done_fill = jo_title().hud_objective_done_fill;
 	t.hud_drops_armory_prompt = jo_title().hud_drops_armory_prompt;
+	t.hud_end_game_footer_corners = jo_title().hud_end_game_footer_corners;
 	t.hud_fonts = jo_title().hud_fonts;
 	// Its mission catalog's order is Joint Operations', as its code is.
 	t.mission_list_order = jo_title().mission_list_order;

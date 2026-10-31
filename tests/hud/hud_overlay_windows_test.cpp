@@ -248,10 +248,11 @@ void test_briefing_markup_draws_plain(const fnt_font_t *font) {
 // The I window in a session, the end-game screen: it stands in for the briefing panel at the
 // window's slot; its box alone while the status record is not valid; its page wrapped in the
 // bold slot with the 240 tab stop, its tags inert unless the residue reads 0, an overflow
-// written as the next page's start; the footer centred at (512, 700) / (512, 720)
+// written as the next page's start; Jointops.exe's footer centred at (512, 700) / (512, 720),
+// dfx2.exe's in the text box's bottom corners, each corner scaled twice (DFX2-95)
 // [orig: HUD_DrawGameplayOverlays @0x5be135..0x5be145; HUD_DrawEndGameScreen @0x5bd070 -
 //  the gate @0x5bd10f, the tab width @0x5bd12d..0x5bd14a, the wrap @0x5bdd36 and its store
-//  @0x5bdd4b, the footer @0x5bdd7d..0x5bde31].
+//  @0x5bdd4b, the footer @0x5bdd7d..0x5bde31] [orig: sub_5BBF20 @0x5BCC3D..0x5BCCF0 (dfx2.exe)].
 void test_end_game_screen(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, font);
@@ -293,10 +294,11 @@ void test_end_game_screen(const fnt_font_t *font) {
 	compiler.compile(state, 1024.0f, 768.0f);
 	CHECK(compiler.briefing_pages().starts[2] > 0);
 	CHECK(compiler.briefing_pages().starts[1] == 0);
-	// The footer: both lines centred at x 512, at y 700 and 720.
+	// Jointops.exe's footer: both lines centred at x 512, at y 700 and 720.
 	state.end_game.text.clear();
 	state.end_game.page_line = "P";
 	state.end_game.footer = "F";
+	float jo_y = 0.0f;
 	{
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 		CHECK(list.glyphs.size() - list.top_begin.glyphs == 2);
@@ -306,6 +308,38 @@ void test_end_game_screen(const fnt_font_t *font) {
 			CHECK(std::fabs((page.x_top_left + page.x_top_right) * 0.5f - 512.0f) < 1.5f);
 			CHECK(std::fabs((hint.x_top_left + hint.x_top_right) * 0.5f - 512.0f) < 1.5f);
 			CHECK(std::fabs(hint.y_top - page.y_top - 20.0f) < 0.01f);
+			jo_y = page.y_top;
+		}
+	}
+	// dfx2.exe's: the page line right-aligned at the box's right edge, the hint left-aligned at
+	// its left, both 56 above Jointops.exe's page line, at the bottom 644.
+	opennova::Title dfx2;
+	dfx2.hud_end_game_footer_corners = true;
+	state.title = &dfx2;
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(list.glyphs.size() - list.top_begin.glyphs == 2);
+		if (list.glyphs.size() - list.top_begin.glyphs == 2) {
+			const GameFontQuad &page = list.glyphs[list.top_begin.glyphs];
+			const GameFontQuad &hint = list.glyphs[list.top_begin.glyphs + 1];
+			CHECK(std::fabs(page.x_top_right - 812.0f) < 1.5f);
+			CHECK(std::fabs(hint.x_top_left - 211.5f) < 1.0f);
+			CHECK(std::fabs(page.y_top - hint.y_top) < 0.01f);
+			CHECK(std::fabs(page.y_top - (jo_y - 56.0f)) < 0.01f);
+		}
+	}
+	// Off 1024 wide the corners already scaled are scaled again.
+	{
+		const HudDrawList &list = compiler.compile(state, 800.0f, 600.0f);
+		CHECK(list.glyphs.size() - list.top_begin.glyphs == 2);
+		if (list.glyphs.size() - list.top_begin.glyphs == 2) {
+			const float twice =
+					static_cast<float>(design_to_screen_x(design_to_screen_x(812, 800), 800));
+			const float left =
+					static_cast<float>(design_to_screen_x(design_to_screen_x(212, 800), 800));
+			CHECK(std::fabs(list.glyphs[list.top_begin.glyphs].x_top_right - twice) < 1.5f);
+			const GameFontQuad &hint = list.glyphs[list.top_begin.glyphs + 1];
+			CHECK(std::fabs(hint.x_top_left - (left - 0.5f)) < 1.0f);
 		}
 	}
 }

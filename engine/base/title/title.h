@@ -179,6 +179,14 @@ struct Title {
 	// [orig: HUD_DrawGameplayOverlays @0x5BDE60 (@0x5BDEE9..0x5BDF45)] [orig: sub_5BCD20
 	//  @0x5BCD20 (@0x5BCDAA..0x5BCE30) (dfx2.exe)]
 	bool hud_drops_armory_prompt = false;
+	// DFX2-95: the executable's in-session end-game (I) screen puts its footer in the text box's
+	// bottom corners: "Page n of 4" right-aligned at its right edge and the paging hint
+	// left-aligned at its left, both at the box's bottom (each point scaled again). False
+	// (Jointops.exe): both lines centred on the screen, at y 700 and 720. On the Title: the
+	// executable's own HUD (HudFrameCompiler::element_end_game_screen).
+	// [orig: HUD_DrawEndGameScreen @0x5BD070 (@0x5BDD67..0x5BDE31)] [orig: sub_5BBF20 @0x5BBF20
+	//  (@0x5BCC3D..0x5BCCF0) (dfx2.exe)]
+	bool hud_end_game_footer_corners = false;
 	// DFX2-41: the deploy screen picks the loadout. death.mnu's DEATH screen carries PRIMARY /
 	// SECONDARY / ACCESSORY lists its activation fills for the player's class, and the screen's
 	// close on its triggers' clear submits them (the loadout apply, a C2S 0x2F in session); its
