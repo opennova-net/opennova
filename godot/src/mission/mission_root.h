@@ -53,17 +53,15 @@ class MissionEnvironment;
 // Per-tick order (single-sourced here, faithful to the original main loop's
 // server-tick-then-render):
 //   advance logic (sim) -> present entity state onto nodes -> drain + emit side effects.
-// [orig: WacScript_AdvanceTick runs the logic systems; the client then renders the entities. Terrain/foliage/audio
-//  are Godot render passes the caller composes around this.]
+// (The logic systems run in the engine's tick, WacScript_AdvanceTick's; the client then renders the
+// entities. Terrain/foliage/audio are Godot render passes the caller composes around this.)
 //
 // Cadence: inmatch::Session banks wall clock and dispatches 0..N 62.5 Hz ticks;
 // tick() asks that same session for one deterministic local/test step. The
 // engine's WAC/BMS dividers remain inside their systems.
 //
-// Fixed-timestep accumulator. The original decouples the simulation from rendering: the master
-// loop accumulates real elapsed time and dispatches the logic update once per 16 ms (62.5 Hz),
-// independently of the variable render rate — multiple ticks on a long frame, zero on a short one.
-// [orig: Game_MainLoop @ 0x52b630 -> Game_ProcessMainFrame @ 0x5263f0 (one current_tick++ @ 0x24c1968)]
+// Fixed-timestep accumulator: the engine's (world/tick_accumulator.h carries the witness) — the
+// logic update once per 16 ms (62.5 Hz), independent of the variable render rate.
 // The 0.016 s tick quantum is single-sourced natively as
 // world::TickAccumulator::kTickDt (Simulation.tick_dt()); the accumulator
 // arithmetic itself is native.

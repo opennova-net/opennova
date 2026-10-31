@@ -2,12 +2,30 @@
 
 #include <runtime/renderer/material_eval.h>
 
+#include <array>
 #include <bitset>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace opennova::renderer {
+
+// The three CTRL registers a combo part's authored `camo` bytes drive
+// (TEX_CAMO1..3, the control-catalog ordinals 93..95), and the values one
+// part's store writes. Retail zero-extends the bytes into the shared CTRL bus
+// immediately before submitting THAT part, so head, body and arms each carry
+// their own triplet — no scaling, no tint: the bytes are texture-variant
+// selectors [orig: Avatar_SetHeadCamoCtrl @0x57a370 / Avatar_SetBodyCamoCtrl
+// @0x57a390 / Avatar_SetArmsCamoCtrl @0x57a3b0 -> CTRL slots 0x83FFD0/D8/E0;
+// world submits @0x5c7fec (the head) / @0x5c800f (the body), preview
+// @0x56113c/@0x56110b, first-person arms @0x4df008/@0x4df070].
+inline constexpr std::array<int, 3> kAvatarPartCamoRegisters = {
+	threedi::THREEDI_CTRL_TEX_CAMO1, threedi::THREEDI_CTRL_TEX_CAMO2,
+	threedi::THREEDI_CTRL_TEX_CAMO3};
+// Each byte a zero-extended store, the movzx + mov dword.
+inline std::array<int32_t, 3> avatar_part_camo_values(const std::array<int, 3> &camo) {
+	return {camo[0] & 0xff, camo[1] & 0xff, camo[2] & 0xff};
+}
 
 // One retained model's signed CTRL bus. Presence is distinct from zero; owner
 // tags protect teardown, never stack overwritten values. The local part player

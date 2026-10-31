@@ -112,10 +112,9 @@ Ref<ShaderMaterial> SlotShadow::get_drape_material() {
 	// fragments and the sky dome write, which leaves exactly retail's final
 	// pixel, and this rung keeps it after the sky group and the viewmodel.
 	drape_material_->set_render_priority(opennova::renderer::kRungSlotDrape);
-	// The depth-clip stage's texture: the witnessed 32x4 ARGB step, sampled
-	// CLAMP + bilinear by the shader's sampler hints [orig:
-	// Shadow_SystemInitResources @0x5d6260..0x5d62d7 — the planner carries
-	// the fill law, opennova::renderer::shadowztex_pixels].
+	// The depth-clip stage's texture: the engine's 32x4 ARGB step
+	// (opennova::renderer::shadowztex_pixels, which carries the witness),
+	// sampled CLAMP + bilinear by the shader's sampler hints.
 	const auto px = opennova::renderer::shadowztex_pixels();
 	PackedByteArray bytes;
 	bytes.resize(static_cast<int64_t>(px.size()) * 4);
@@ -235,7 +234,7 @@ void SlotShadow::set_terrain_data(const Ref<TerrainData> &p_terrain) {
 	if (terrain_data_ != p_terrain) {
 		// The patch heights sample the terrain: a new field rebuilds them.
 		for (PatchMesh &patch : patch_meshes_) {
-			patch.built = false;
+			patch.build.built = false;
 		}
 	}
 	terrain_data_ = p_terrain;
@@ -551,11 +550,10 @@ void SlotShadow::_release_captures() {
 	_release_patches();
 }
 
-// The drape patch of one order [orig: RenderSlot_DrawSilhouetteDrape
-// @0x5d5ca0 -> RenderSlot_RebuildPatchVertexBuffer @0x5d5130, the rebuild
-// gate @0x5d51a3..0x5d51bc: origin, lod and resolution unchanged keep the
-// vertices]. The vertices are world positions (identity instance); the
-// shared drape material reads the order from its instance uniform.
+// The drape patch of one order, rebuilt as the engine's gate says
+// (renderer::slot_patch_needs_rebuild carries the witness). The vertices are
+// world positions (identity instance); the shared drape material reads the
+// order from its instance uniform.
 void SlotShadow::_draw_patch(int p_order, const opennova::renderer::SlotPatch &p_patch,
 		int p_lod) {
 	RenderingServer *rs = RenderingServer::get_singleton();
@@ -570,15 +568,14 @@ void SlotShadow::_draw_patch(int p_order, const opennova::renderer::SlotPatch &p
 		rs->instance_geometry_set_cast_shadows_setting(slot.instance,
 				RenderingServer::SHADOW_CASTING_SETTING_OFF);
 		rs->instance_geometry_set_shader_parameter(slot.instance, "u_slot", p_order);
-		slot.built = false;
+		slot.build.built = false;
 		slot.visible = true;
 	}
 	// Also draped again where the heights under it were patched since (an editor's sculpt; the game's never
 	// change in a match).
 	const TerrainData *terrain = terrain_data_.is_valid() ? terrain_data_.ptr() : nullptr;
 	const uint64_t heights_serial = terrain != nullptr ? terrain->get_heights_serial() : 0;
-	if (!slot.built || slot.origin_x != p_patch.min_x ||
-			slot.origin_north != p_patch.max_north || slot.lod != p_lod || slot.heights_serial != heights_serial) {
+	if (opennova::renderer::slot_patch_needs_rebuild(slot.build, p_patch, p_lod, heights_serial)) {
 		opennova::renderer::slot_patch_vertices(p_patch, p_lod,
 				[terrain](float x, float z) {
 					return terrain != nullptr ? terrain->get_height_world(Vector3(x, 0.0f, z))
@@ -608,11 +605,7 @@ void SlotShadow::_draw_patch(int p_order, const opennova::renderer::SlotPatch &p
 		rs->mesh_clear(slot.mesh);
 		rs->mesh_add_surface_from_arrays(slot.mesh, RenderingServer::PRIMITIVE_TRIANGLES, arrays);
 		rs->mesh_surface_set_material(slot.mesh, 0, get_drape_material()->get_rid());
-		slot.origin_x = p_patch.min_x;
-		slot.origin_north = p_patch.max_north;
-		slot.lod = p_lod;
-		slot.heights_serial = heights_serial;
-		slot.built = true;
+		slot.build = opennova::renderer::slot_patch_built(p_patch, p_lod, heights_serial);
 	}
 	if (!slot.visible) {
 		rs->instance_set_visible(slot.instance, true);
@@ -655,7 +648,7 @@ PackedVector3Array SlotShadow::get_patch_vertices(int p_order) const {
 		return out;
 	}
 	const PatchMesh &slot = patch_meshes_[p_order];
-	if (!slot.visible || !slot.built) {
+	if (!slot.visible || !slot.build.built) {
 		return out;
 	}
 	out.resize(static_cast<int64_t>(slot.vertices.size()));
@@ -686,29 +679,6 @@ void SlotShadow::_invalidate_uniform_stamps() {
 	last_light_pos_ = PackedVector4Array();
 	last_light_diffuse_ = PackedVector4Array();
 	drape_mat_stamps_.fill(SlotParamStamp{});
-}
-
-// World -> (u, v) projector for a camera-style pose (local -Z forward): the
-// drape samples the capture along the same slot direction it was rendered
-// from [orig: the shared unscaled direction of the capture and drape
-// matrices, RenderSlot_SetupShadowCascadeMatrices @0x58d300 /
-// RenderSlot_BuildShadowCascadeUVMatrices @0x58cf10 lookat_dir1; the person 4x
-// belongs to the separate depth-clip stage — render_slot_shadow.h]. The
-// stage-0 texgen has no depth bound: the capture's own near/far band never
-// clips the drape (the clamped sampler covers the rest of the patch).
-Projection SlotShadow::_drape_projection(const Transform3D &p_pose,
-		float p_half_u, float p_half_v) const {
-	const Transform3D view = p_pose.affine_inverse();
-	const float inv_u = 1.0f / (2.0f * MAX(p_half_u, 0.001f));
-	const float inv_v = 1.0f / (2.0f * MAX(p_half_v, 0.001f));
-	// Columns (godot-cpp Projection(x, y, z, w) takes column vectors):
-	// u = x*inv_u + 0.5, v = 0.5 - y*inv_v (image y-down).
-	const Projection to_uv(
-			Vector4(inv_u, 0, 0, 0),
-			Vector4(0, -inv_v, 0, 0),
-			Vector4(0, 0, 0, 0),
-			Vector4(0.5f, 0.5f, 0, 1));
-	return to_uv * Projection(view);
 }
 
 void SlotShadow::_mark_captured_casters() {
@@ -870,15 +840,12 @@ bool SlotShadow::plan_frame() {
 
 	_part("plan");
 	const uint64_t local_id = uint64_t(local_player_id_);
-	// The frame-open slot projection direction: get_light_direction now
-	// serves the Godot-axes vector (the util/axes.h x/z swap IS the witnessed
-	// (g2, g1, g0) surface->light mapping of the raw getter tuple), so the
-	// planner law only clamps and negates it
-	// [orig: Environment_GetLightDirectionFloat @0x57d870 into
-	// Render_ShadowPass @0x5d7b70, see docs/render/render-lighting-re.md].
-	const Vector3 tuple = env->get_light_direction();
-	const std::array<float, 3> sun_dir = opennova::renderer::slot_projection_direction(
-			{float(tuple.x), float(tuple.y), float(tuple.z)});
+	// The frame-open slot projection direction, the engine's from the
+	// environment's raw light tuple.
+	const opennova::env::Vec3 tuple = env->state().light_direction();
+	const std::array<float, 3> sun_dir =
+			opennova::renderer::slot_projection_direction_from_environment_tuple(
+					tuple.x, tuple.y, tuple.z);
 	const Vector3 sun_rgb = env->get_sun_light();
 	const Vector3 sky_rgb = env->get_sky_ambient();
 	// The drape fogs with the device's primary fog config — the terrain's —
@@ -1036,7 +1003,15 @@ bool SlotShadow::plan_frame() {
 				terms.light.position[2], terms.light.range);
 		light_diffuse[order] = Vector4(terms.light.diffuse[0], terms.light.diffuse[1],
 				terms.light.diffuse[2], terms.light.quadratic);
-		const Projection drape_mat = _drape_projection(pose, half_extent, half_extent);
+		// The drape's texgen rows (the engine's slot_drape_texgen), as the
+		// shader's column-major matrix.
+		const opennova::renderer::SlotDrapeTexgen texgen = opennova::renderer::slot_drape_texgen(
+				capture.axes, capture.center, half_extent);
+		const Projection drape_mat(
+				Vector4(texgen.u_axis[0], texgen.v_axis[0], 0, 0),
+				Vector4(texgen.u_axis[1], texgen.v_axis[1], 0, 0),
+				Vector4(texgen.u_axis[2], texgen.v_axis[2], 0, 0),
+				Vector4(texgen.u_offset, texgen.v_offset, 0, 1));
 		SlotParamStamp &mat_stamp = drape_mat_stamps_[order];
 		if (!mat_stamp.valid || mat_stamp.mat != drape_mat) {
 			drape->set_shader_parameter(slot_uniforms().mat[order], drape_mat);
@@ -1207,15 +1182,9 @@ void SlotShadow::_rebuild_caster_records() {
 		CasterRecord record;
 		record.id = ObjectID(model->get_instance_id());
 		record.slot_record = i < caster_count;
-		// The two radii the slot reads: the model sphere (gpm[5]) sizes the
-		// capture extent and the depth clip; the entity bound (entity+0 —
-		// the sphere raised to the husk's, + 0x1000, and 0 without a
-		// collision block) sizes the lod/patch and the light query [orig:
-		// RenderSlot_RenderEntityAndChildren @0x5d7835 reads the model's
-		// +0x14; RenderSlot_AllocSlot @0x5d5773 and the light query read
-		// entity+0, Entity_InitFromModel @0x40dc30]. A model the placer did
-		// not stamp falls back to half its render-bounds diagonal for both,
-		// re-read live each frame.
+		// The two radii the slot reads, the placer's stamps (the engine's
+		// SlotCasterFacts carries the witness); a model the placer did not
+		// stamp falls back to its render bounds, re-read live each frame.
 		record.capture_radius = model->get_model_sphere_radius();
 		record.slot_radius = model->get_entity_bound_radius();
 		record.radius_fallback = record.capture_radius <= 0.0f;

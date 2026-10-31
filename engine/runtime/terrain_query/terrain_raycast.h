@@ -41,8 +41,12 @@
 // forever [orig: the OOB masks @ 0x31a0010/0x319fc0c, the ~(cell >> 31)
 // clamp-to-edge @ 0x60cd50..0x60cd62]. Our editor shells instead report
 // kOutOfExtent from the sampler and the core marches on WITHOUT any terrain
-// test there — no hit, and no height-0 floor. A D-TERRAIN row gets minted at
-// the B1b record update if the divergence is observable in a shipped surface.
+// test there — no hit, and no height-0 floor. Of the same class: an editor
+// shell with no substrate at all (no live image, no baked CPT) misses, where
+// retail's null-atlas test returns HIT before the march (the runtime's
+// terrain_field_ray_hit keeps that leg [orig: @ 0x60ccf7]). A D-TERRAIN row
+// gets minted at the B1b record update if the divergence is observable in a
+// shipped surface.
 
 #include <cstdint>
 

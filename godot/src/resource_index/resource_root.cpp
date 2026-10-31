@@ -453,9 +453,8 @@ Error ResourceRoot::mount_runtime_archives_(const String &path, const String &ex
 		return ERR_CANT_OPEN;
 	}
 	if (scanned == opennova::ResourceIndex::InstallScan::NoArchive) {
-		// Retail aborts subsystem initialization when the fixed boot table opens no archives
-		// (a corrupt sole archive included), and the partial loose mount goes with it.
-		// [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44, see docs/vfs/vfs-pff-mount-re.md]
+		// The boot's no-archive refusal: the engine's scan_install dropped the partial
+		// mount (it carries the witness); this root lets go of its own state with it.
 		clear();
 		last_error_ = "No game data archives could be opened";
 		return ERR_FILE_NOT_FOUND;

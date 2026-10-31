@@ -6,6 +6,7 @@
 
 #include <base/io/fixed.h>
 #include <runtime/world/model_geometry.h> // model_has_collision / model_is_skinned (ADR 0016: one impl)
+#include <runtime/world/entity_pose.h> // model_bone_table
 #include <runtime/renderer/model_mesh_prepare.h>
 
 #include "render/retained_array_mesh.h"
@@ -224,34 +225,36 @@ int ObjectData::get_part_anim_count(int p_lod_index) const {
 }
 
 PackedVector3Array ObjectData::get_bone_origins(int p_lod_index) const {
+	// The engine's model bone table (world::model_bone_table carries the
+	// witness), engine-native: the mesh carries the (-x,y,z) flip, the bones do
+	// not (ADR 0007 conv #1).
 	PackedVector3Array out;
-	if (!source_model_ || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= native_model().lod_count) {
+	std::vector<opennova::anim::Vec3> origins;
+	std::vector<int> parents;
+	if (!source_model_ || p_lod_index < 0 ||
+			!opennova::world::model_bone_table(native_model(), origins, parents,
+					static_cast<size_t>(p_lod_index))) {
 		return out;
 	}
-	const ThreediLod &lod = native_model().lods[p_lod_index];
-	out.resize(static_cast<int64_t>(lod.render_object_count));
-	for (size_t i = 0; i < lod.render_object_count; ++i) {
-		const ThreediRenderObject &part = lod.render_objects[i];
-		// Raw native rel (parent-relative -- the parent-local FK offset the sampler wants),
-		// NOT godot_vec3-flipped: bones stay engine-native (ADR 0007 conv #1 -- the mesh carries the
-		// (-x,y,z) flip, the bones do not), matching how BadBone.position is consumed as-is by
-		// sample_clip. Verified: this reproduces retail's modelDef+56 pivot (the rigid gun renders
-		// correctly). [orig: BoneAnim_BuildWorldMatrices @0x40c400 reads the model pivot raw.]
-		out[static_cast<int64_t>(i)] = Vector3(part.rel[0], part.rel[1], part.rel[2]);
+	out.resize(static_cast<int64_t>(origins.size()));
+	for (size_t i = 0; i < origins.size(); ++i) {
+		out[static_cast<int64_t>(i)] = Vector3(origins[i].x, origins[i].y, origins[i].z);
 	}
 	return out;
 }
 
 PackedInt32Array ObjectData::get_bone_parents(int p_lod_index) const {
 	PackedInt32Array out;
-	if (!source_model_ || p_lod_index < 0 || static_cast<size_t>(p_lod_index) >= native_model().lod_count) {
+	std::vector<opennova::anim::Vec3> origins;
+	std::vector<int> parents;
+	if (!source_model_ || p_lod_index < 0 ||
+			!opennova::world::model_bone_table(native_model(), origins, parents,
+					static_cast<size_t>(p_lod_index))) {
 		return out;
 	}
-	const ThreediLod &lod = native_model().lods[p_lod_index];
-	out.resize(static_cast<int64_t>(lod.render_object_count));
-	for (size_t i = 0; i < lod.render_object_count; ++i) {
-		// Raw parent index (the root references itself in the file; the sampler normalizes).
-		out[static_cast<int64_t>(i)] = lod.render_objects[i].parent_index;
+	out.resize(static_cast<int64_t>(parents.size()));
+	for (size_t i = 0; i < parents.size(); ++i) {
+		out[static_cast<int64_t>(i)] = parents[i];
 	}
 	return out;
 }

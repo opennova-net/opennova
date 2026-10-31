@@ -16,8 +16,8 @@
 // runtime frame. Presenters drive it through direct typed calls — there is
 // no script bridge, no virtual dispatch layer, and no capability probing.
 //
-// Behavioral witnesses live at each method ([orig:] blocks carried from the
-// GDScript origin); docs/adr/0007 + docs/world/world-wac-ai-re.md §14 for
+// Behavioral witnesses live with the engine code each method calls;
+// docs/adr/0007 + docs/world/world-wac-ai-re.md §14 for
 // the skeletal semantics, docs/render/render-lighting-re.md for lighting.
 
 #include <godot_cpp/classes/array_mesh.hpp>
@@ -124,11 +124,10 @@ public:
 	// Which camera population this model's surface instances belong to. Retail
 	// decides "drawn by this camera" with one branch per submit (the FP body is
 	// a suppressed submit, the FP gun a viewmodel-first draw); Godot keeps that
-	// decision as per-instance layer/cast state, so the decision is STORED here
-	// and written on its edges + inside rebuild_scene, never per frame
-	// [orig: BoneCallback_org0_World @0x4e3940 the body submit gate;
-	// Player_RenderFirstPersonViewModel @0x4ded60, see
-	// docs/world/world-wac-ai-re.md section 13.1].
+	// decision as per-instance layer/cast state, so the verdict (the engine's:
+	// world::presents_third_person and the first-person viewmodel submit in
+	// world/player_present, which carry the witnesses) is STORED here
+	// and written on its edges + inside rebuild_scene, never per frame.
 	// Which part of a composed player avatar this model is, when it is one:
 	// the placer's body/head submits (the head follows the body's every
 	// presentation call) and the FP rig's arms (which carry the per-submit
@@ -918,12 +917,8 @@ public:
 	bool is_shadow_caster_enabled() const;
 	void set_static_shadow_caster_enabled(bool p_enabled);
 	bool is_static_shadow_caster_enabled() const;
-	// Render-slot ground-shadow profile (SlotShadow consumes): person-type
-	// casters are the depth-clip stage's steepened class (that stage owns the
-	// 4x, not the drape — render_slot_shadow.h) [orig: RenderSlot_DrawSilhouetteDrape
-	// @ 0x5d5ca0 (the itemdef +0x5C == 3 test @ 0x5d5d81); see
-	// docs/render/render-lighting-re.md]. The items.def `shadow` decal line is
-	// parsed but draws nothing in JO (render_slot_shadow.h, the blob leg).
+	// Render-slot ground-shadow profile (SlotShadow consumes): the person
+	// class (the engine's mission::item_slot_shadow_person carries the witness).
 	void set_slot_shadow_person(bool p_person);
 	bool is_slot_shadow_person() const;
 	// Whether a render slot captured this caster in the latest slot frame
@@ -946,16 +941,12 @@ public:
 	// All native and GDScript presentation owners use this one operation.
 	Transform3D compose_entity_transform(const Basis &p_basis,
 			const Vector3 &p_origin) const;
-	// The two radii retail's shadow slot reads, world units, stamped by the
-	// placer from the .3di: the MODEL SPHERE (the header's origin sphere,
-	// gpm[5] — world model_bound_radius_from_3di) sizes the silhouette
-	// capture extent and the depth clip; the ENTITY BOUND (entity+0: that
-	// sphere raised to the husk model's, + the 0x1000 pad, written only for a
-	// model with a collision block) sizes the slot lod/patch and the light
-	// query [orig: Entity_InitFromModel @0x40dc30; RenderSlot_AllocSlot
-	// @0x5d5773 reads entity+0; RenderSlot_RenderEntityAndChildren
-	// @0x5d7835 reads gpm[5]; see docs/render/render-lighting-re.md]. A model
-	// sphere of 0 = unstamped (SlotShadow falls back to the render bounds).
+	// The two radii the shadow slot reads, world units, stamped by the placer
+	// from the .3di: the MODEL SPHERE (the header's origin sphere, gpm[5] —
+	// world model_bound_radius_from_3di) and the ENTITY BOUND (entity+0); the
+	// engine's renderer::SlotCasterFacts carries the witness for what each
+	// sizes. A model sphere of 0 = unstamped (SlotShadow falls back to the
+	// render bounds).
 	void set_shadow_bound_radii(float p_model_sphere, float p_entity_bound);
 	void set_bound_radii_q16(int32_t p_model_sphere, int32_t p_entity_bound);
 	int32_t get_entity_bound_radius_q16() const { return entity_bound_radius_q16_; }
@@ -1019,10 +1010,9 @@ public:
 			const Vector4 *p_color);
 	void apply_point_light_selection_to_robj(int p_robj_index, int p_count,
 			const Vector4 *p_posr, const Vector4 *p_color);
-	// One authored LGHT record's live world position. Record offsets are model
-	// space; a nonzero attach subobject follows the same rest-to-live transform
-	// as user points [orig: Entity_SpawnGlowEffects @0x56c836 plus the
-	// per-frame attachment mover, see docs/render/render-lighting-re.md].
+	// One authored LGHT record's live world position: its model-space offset
+	// through the model matrix alone, as the glow spawn places every model
+	// light (the engine's renderer/light_scene.h carries the witness).
 	Vector3 get_model_light_world_position(int p_index) const;
 	// Retail submits MATCHTERRAIN only for a skinned entity whose MoveOrder
 	// stance bits are crouch/prone. The live presentation row owns that gate.

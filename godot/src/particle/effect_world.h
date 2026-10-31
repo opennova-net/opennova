@@ -124,12 +124,9 @@ public:
 	// Effect_SGvBody (the blood puffs) and the Effect_FX50Cal* impact
 	// family. Skipping it does not fail loudly: an unknown effect name
 	// interns as an invisible `stockeffect` clone (D-PTL-8), so every flesh
-	// hit silently renders nothing.
-	// [orig: CEffectSystem_Init @ 0x5f6070 scans loose `ptl\*.ptl` @0x5f6228
-	//  (its loose gore leg, `ptl\` + the extension with no wildcard @0x5f6387,
-	//  reads nothing), then matches each archive entry against ".ptl" OR the
-	//  selected extension @0x5f64f3 and parses it through
-	//  CEffectWorld_ParseSectionCallback @ 0x5ecb40.]
+	// hit silently renders nothing. The walk and its order are the engine's
+	// (ResourceIndex::effect_files), each file parsed by formats/particle's
+	// section parser; both carry the witnesses.
 	// Order: the catalog registers EVERY particledef across ALL documents
 	// before it resolves ANY effectdef, so cross-file pdefs resolve
 	// regardless of file order; order only picks which duplicate id wins

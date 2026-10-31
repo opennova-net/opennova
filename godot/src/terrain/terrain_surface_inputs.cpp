@@ -12,6 +12,7 @@
 
 #include <runtime/terrain/texture_preprocess.h>
 #include <runtime/renderer/device_texture.h>
+#include <runtime/renderer/texture_filter.h>
 
 #include <algorithm>
 #include <cmath>
@@ -102,6 +103,22 @@ Ref<Texture2D> texture_from_retail_mips(
 	}
 	return ImageTexture::create_from_image(image);
 }
+
+// The engine's level set as a device texture: its levels as given, or the base
+// with the box chain where the creator fills it.
+Ref<Texture2D> texture_from_surface_levels(
+		const opennova::terrain::TerrainSurfaceLevels &p_levels) {
+	if (p_levels.levels.empty()) {
+		return {};
+	}
+	return p_levels.device_chain
+		? texture_from_rgba8(p_levels.levels.front(), true)
+		: texture_from_retail_mips(p_levels.levels);
+}
+
+// The DBlendmap's chain, as its creation flags ask.
+constexpr bool kDetailBlendMipped = opennova::renderer::pixel_texture_mipped(
+	opennova::terrain::kDetailBlendMapCreationFlags);
 
 bool live_depth_to_u16(const Ref<TerrainData> &p_data,
 		std::vector<uint16_t> &r_depth, uint32_t &r_width, uint32_t &r_height) {
@@ -251,12 +268,8 @@ bool TerrainSurfaceInputs::rebuild_blend() {
 		? image_to_rgba8(live_blend, source)
 		: terrain_data->texture_rgba8(terrain_data->get_detailblendmap(), source);
 	if (have_source) {
-		// Retail creates the DBlendmap quadrants with flags 0x100001: no
-		// mip-suppression bit, so they carry the full box-filtered auto chain.
-		// [orig: PolyTrn_InitTextures @ 0x60b2c9..0x60b2dd;
-		// GTexture_CreateFromPixelData_0 @ 0x6877c7..0x6878be, see docs/terrain/terrain-re.md]
 		normalized_blend = opennova::terrain::normalize_detail_blend_map(source);
-		normalized_blend_texture = texture_from_rgba8(normalized_blend, true);
+		normalized_blend_texture = texture_from_rgba8(normalized_blend, kDetailBlendMipped);
 	}
 	return normalized_blend_texture.is_valid();
 }
@@ -276,7 +289,7 @@ bool TerrainSurfaceInputs::update_blendmap_region(const Ref<Image> &p_map, const
 			return false;
 		}
 		normalized_blend = opennova::terrain::normalize_detail_blend_map(source);
-		normalized_blend_texture = texture_from_rgba8(normalized_blend, true);
+		normalized_blend_texture = texture_from_rgba8(normalized_blend, kDetailBlendMipped);
 		return normalized_blend_texture.is_valid();
 	}
 	// The rect's texels normalized alone (the normalisation is a texel's own), into the map the texture holds.
@@ -302,7 +315,7 @@ bool TerrainSurfaceInputs::update_blendmap_region(const Ref<Image> &p_map, const
 	std::memcpy(bytes.ptrw(), normalized_blend.pixels.data(), normalized_blend.pixels.size());
 	Ref<Image> image = Image::create_from_data(int(normalized_blend.width), int(normalized_blend.height), false,
 			Image::FORMAT_RGBA8, bytes);
-	if (image.is_null() || image->generate_mipmaps() != OK) {
+	if (image.is_null() || (kDetailBlendMipped && image->generate_mipmaps() != OK)) {
 		return false;
 	}
 	held->update(image);
@@ -409,21 +422,16 @@ bool TerrainSurfaceInputs::rebuild_detail_textures() {
 		}
 	}
 
-	// The second detail is the ps.1.4 splat's stage-3 dp3 input, paired with
-	// its own far texture when authored, otherwise carrying plain box mips.
-	// [orig: PolyTrn_InitTextures @ 0x60af97/0x60aff9 (load + optional
-	// create-with-blend); stage bind @ 0x6043ff, see docs/terrain/terrain-re.md]
+	// The second detail, with its far texture when authored (the engine's
+	// build_second_detail_levels).
 	opennova::terrain::Rgba8Image detail2_source;
 	if (terrain_data->texture_rgba8(terrain_data->get_detailmap2(), detail2_source)) {
 		opennova::terrain::Rgba8Image far2_source;
-		if (terrain_data->texture_rgba8(terrain_data->get_detailmapdist2(), far2_source)) {
-			paired_detail2_texture = texture_from_retail_mips(
-				opennova::terrain::build_paired_detail_mip_chain(
-					detail2_source, far2_source));
-		}
-		if (paired_detail2_texture.is_null()) {
-			paired_detail2_texture = texture_from_rgba8(detail2_source, true);
-		}
+		const bool have_far2 =
+			terrain_data->texture_rgba8(terrain_data->get_detailmapdist2(), far2_source);
+		paired_detail2_texture = texture_from_surface_levels(
+			opennova::terrain::build_second_detail_levels(
+				detail2_source, have_far2 ? &far2_source : nullptr));
 	}
 	return detail_coefficient_texture.is_valid() ||
 		detail_layer_textures[0].is_valid() ||

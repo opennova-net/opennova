@@ -48,8 +48,7 @@ private:
 	Ref<ResourceRoot> resource_root_;
 	// One material per (normal-pass shader, fog-black) pair, created on first use.
 	std::array<Ref<ShaderMaterial>, 6> materials_;
-	// smoktest.pcx, the pool+0x3000 texture [orig: CEffectEmitterPool_CreateShaders @ 0x5DC8F0 (the store
-	// @ 0x5dc926)].
+	// smoktest.pcx, the pool+0x3000 texture (renderer::kEmitterPoolTexture carries the witness).
 	Ref<Texture2D> smoke_texture_;
 	bool smoke_texture_loaded_ = false;
 };

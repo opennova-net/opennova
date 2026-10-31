@@ -147,10 +147,15 @@ struct SlotCasterFacts {
 	// renders with that caster and takes no slot of its own.
 	bool parented_under_caster = false;
 	bool is_person = false;
-	// The model sphere (gpm[5]) and the entity bound (entity+0), world units;
-	// a sphere of 0 is a draw the placer did not stamp, whose slot takes
-	// `fallback_radius` (half its render-bounds diagonal, at least 0.5 u) for
-	// both.
+	// The model sphere (gpm[5]) and the entity bound (entity+0), world units:
+	// the sphere sizes the capture extent and the depth clip, the bound (the
+	// sphere raised to the husk's, + 0x1000, and 0 without a collision block)
+	// the lod, the patch and the light query [orig:
+	// RenderSlot_RenderEntityAndChildren @0x5d7835 reads the model's +0x14;
+	// RenderSlot_AllocSlot @0x5d5773 and the light query read entity+0,
+	// Entity_InitFromModel @0x40dc30]. A sphere of 0 is a draw the placer did
+	// not stamp, whose slot takes `fallback_radius` (half its render-bounds
+	// diagonal, at least 0.5 u) for both.
 	float model_sphere_radius = 0.0f;
 	float entity_bound_radius = 0.0f;
 	float fallback_radius = 0.0f;

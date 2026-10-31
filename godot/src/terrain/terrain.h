@@ -191,11 +191,10 @@ private:
 	// the shared LightScene + the frame time each light frame (the SlotShadow
 	// precedent), and render_frame re-draws every patch with the <= 16 pool
 	// lights its own draw list overlaps — packed into one RGBAF rows texture
-	// indexed by the pool slot each patch instance carries [orig: the
-	// per-light else-arm of Terrain_RenderSectorBatch @0x6092A0 ->
-	// Light_SetupTerrainProjectedPass @0x5AA830; the collect/gates/constants
-	// are portable in opennova::renderer::LightScene::collect_terrain_pass_rows, see
-	// docs/render/render-lighting-re.md]. Godot instance uniforms carry
+	// indexed by the pool slot each patch instance carries (the collect, gates
+	// and constants are the engine's
+	// opennova::renderer::LightScene::collect_terrain_pass_rows and
+	// light_terrain_pass.h, which carry the witness). Godot instance uniforms carry
 	// neither arrays nor samplers and this shader already spends seven of the
 	// sixteen instance slots, so the rows ride a texture rather than the object
 	// pass's four scalar pairs — retail draws each of the sixteen, not four.

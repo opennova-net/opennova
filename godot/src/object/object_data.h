@@ -200,7 +200,7 @@ public:
 	bool has_collision() const;
 	// The model carries GPM-family occlusion/portal records (OVRT/OPLN/OFAC/OOBJ)
 	// — the placer de-batches such buildings so their sections can be masked
-	// per frame [orig: the model +0xDC/+0xE0 record gate all consumers use].
+	// per frame (the model's +0xDC/+0xE0 record gate every consumer uses).
 	bool has_occlusion() const;
 	Array get_collision_volumes() const;
 	// Effective PANM source selection mirrors retail: a LOD-local block wins,
@@ -221,9 +221,8 @@ public:
 	// Per-part parent index (raw ThreediRenderObject.parent_index), indexed by part index, for
 	// the given LOD -- the model's authoritative bone hierarchy, paired with get_bone_origins as
 	// the model bone table. The root part's parent is itself in the file; SkeletalAnim/
-	// sample_clip normalize that to -1. [orig: the modelDef+56 row's +20 parent index read by
-	// BoneAnim_BuildWorldMatrices @0x40c400 -- the FK hierarchy comes from the MODEL, never
-	// the .bad.]
+	// sample_clip normalize that to -1. The FK hierarchy comes from the MODEL, never the .bad
+	// (world::model_bone_table carries the witness).
 	PackedInt32Array get_bone_parents(int p_lod_index = 0) const;
 	// p_native_frame: emit vertices/normals/tangents in the NATIVE model frame (no (-x,y,z)
 	// runtime mirror) with triangle winding reversed to stay front-facing under Godot's CCW cull.

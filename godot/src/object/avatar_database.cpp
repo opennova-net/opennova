@@ -10,6 +10,7 @@
 #include <formats/avatars/avatars.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/inmatch/join_character_profile.h>
+#include <runtime/renderer/model_controls.h>
 #include <net/npwire/character_id.h>
 
 #include <algorithm>
@@ -20,9 +21,9 @@ using namespace opennova::threedi;
 
 PackedStringArray AvatarDatabase::part_camo_registers() {
 	PackedStringArray out;
-	out.push_back(threedi_ctrl_register_name(THREEDI_CTRL_TEX_CAMO1));
-	out.push_back(threedi_ctrl_register_name(THREEDI_CTRL_TEX_CAMO2));
-	out.push_back(threedi_ctrl_register_name(THREEDI_CTRL_TEX_CAMO3));
+	for (const int ordinal : opennova::renderer::kAvatarPartCamoRegisters) {
+		out.push_back(threedi_ctrl_register_name(ordinal));
+	}
 	return out;
 }
 
@@ -32,10 +33,11 @@ void AvatarDatabase::apply_part_camo(ObjectModel *p_model, const Vector3i &p_cam
 		return;
 	}
 	const PackedStringArray registers = part_camo_registers();
+	const std::array<int32_t, 3> values =
+			opennova::renderer::avatar_part_camo_values({p_camo.x, p_camo.y, p_camo.z});
 	p_model->begin_ctrl_update();
 	for (int i = 0; i < 3; ++i) {
-		// A zero-extended byte store, exactly the retail movzx + mov dword.
-		p_model->set_ctrl_override(p_owner, registers[i], p_camo[i] & 0xff);
+		p_model->set_ctrl_override(p_owner, registers[i], values[static_cast<size_t>(i)]);
 	}
 	p_model->end_ctrl_update();
 }

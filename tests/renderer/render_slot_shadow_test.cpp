@@ -4,6 +4,7 @@
 
 #include <runtime/renderer/render_slot_shadow.h>
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
@@ -39,6 +40,43 @@ int main() {
 		// Above the floor the tuple passes through negated.
 		const auto high = slot_projection_direction({0.5f, 0.7f, 0.1f});
 		CHECK(near_f(high[1], -0.7f));
+		// The environment getter's raw tuple g maps to (g2, g1, g0) first.
+		const auto raw = slot_projection_direction_from_environment_tuple(0.1f, 0.7f, 0.5f);
+		CHECK(near_f(raw[0], -0.5f) && near_f(raw[1], -0.7f) && near_f(raw[2], -0.1f));
+	}
+
+	// --- the drape mesh's rebuild gate [orig: RenderSlot_RebuildPatchVertexBuffer
+	// @0x5d5130, the gate @0x5d51a3..0x5d51bc].
+	{
+		const SlotPatch patch = slot_patch_bounds(10.0f, -20.0f, 8);
+		SlotPatchBuild build;
+		CHECK(slot_patch_needs_rebuild(build, patch, 8, 0));  // never built
+		build = slot_patch_built(patch, 8, 0);
+		CHECK(!slot_patch_needs_rebuild(build, patch, 8, 0));  // origin, lod, heights kept
+		CHECK(slot_patch_needs_rebuild(build, patch, 9, 0));   // the lod moved
+		CHECK(slot_patch_needs_rebuild(build, slot_patch_bounds(30.0f, -20.0f, 8), 8, 0));
+		CHECK(slot_patch_needs_rebuild(build, patch, 8, 1));   // the heights were patched
+	}
+
+	// --- the drape's stage-0 texgen: the capture center maps to (0.5, 0.5),
+	// one half extent along the capture's x to u = 1, along its y to v = 0.
+	{
+		const SlotCaptureViewAxes axes = slot_capture_view_axes({0.3f, -1.0f, 0.2f});
+		const std::array<float, 3> c = {4.0f, 1.0f, -6.0f};
+		const SlotDrapeTexgen t = slot_drape_texgen(axes, c, 2.0f);
+		const auto u_of = [&](const std::array<float, 3> &p) {
+			return t.u_axis[0] * p[0] + t.u_axis[1] * p[1] + t.u_axis[2] * p[2] + t.u_offset;
+		};
+		const auto v_of = [&](const std::array<float, 3> &p) {
+			return t.v_axis[0] * p[0] + t.v_axis[1] * p[1] + t.v_axis[2] * p[2] + t.v_offset;
+		};
+		CHECK(near_f(u_of(c), 0.5f, 1.0e-4f) && near_f(v_of(c), 0.5f, 1.0e-4f));
+		const std::array<float, 3> right = {c[0] + axes.x[0] * 2.0f, c[1] + axes.x[1] * 2.0f,
+				c[2] + axes.x[2] * 2.0f};
+		CHECK(near_f(u_of(right), 1.0f, 1.0e-4f) && near_f(v_of(right), 0.5f, 1.0e-4f));
+		const std::array<float, 3> up = {c[0] + axes.y[0] * 2.0f, c[1] + axes.y[1] * 2.0f,
+				c[2] + axes.y[2] * 2.0f};
+		CHECK(near_f(v_of(up), 0.0f, 1.0e-4f) && near_f(u_of(up), 0.5f, 1.0e-4f));
 	}
 
 	// --- registration LOD laws [orig: RenderSlot_AllocSlot @ 0x5d5690].

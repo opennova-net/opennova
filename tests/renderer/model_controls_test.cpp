@@ -1,6 +1,7 @@
 #include <runtime/renderer/model_controls.h>
 #include "common/test_expect.h"
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <vector>
@@ -13,6 +14,16 @@ int main() {
 	constexpr int other = THREEDI_CTRL_DOOR_01;
 	constexpr int first = THREEDI_CTRL_VEHICLE_SPECIAL1;
 	constexpr int second = THREEDI_CTRL_VEHICLE_SPECIAL2;
+	{
+		// A combo part's camo store: TEX_CAMO1..3, each byte zero-extended.
+		using opennova::renderer::kAvatarPartCamoRegisters;
+		TEST_EXPECT(kAvatarPartCamoRegisters[0] == THREEDI_CTRL_TEX_CAMO1 &&
+				kAvatarPartCamoRegisters[1] == THREEDI_CTRL_TEX_CAMO2 &&
+				kAvatarPartCamoRegisters[2] == THREEDI_CTRL_TEX_CAMO3);
+		const std::array<int32_t, 3> values =
+				opennova::renderer::avatar_part_camo_values({3, 0x1ff, -1});
+		TEST_EXPECT(values[0] == 3 && values[1] == 0xff && values[2] == 0xff);
+	}
 	{
 		ModelControls bus;
 		TEST_EXPECT(!bus.store(-1, 5) && !bus.store(THREEDI_CTRL_REGISTER_COUNT, 5));

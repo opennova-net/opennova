@@ -104,11 +104,11 @@ void render_matrix_from_deformation(
 // from the canonical first RLOD's render objects (raw, engine frame — the
 // same rows the binding's get_bone_origins/get_bone_parents exposed).
 bool model_bone_table(const Threedi3di3 &model,
-		std::vector<anim::Vec3> &r_origins, std::vector<int> &r_parents) {
+		std::vector<anim::Vec3> &r_origins, std::vector<int> &r_parents, size_t lod_index) {
 	r_origins.clear();
 	r_parents.clear();
-	if (model.lod_count == 0 || model.lods == nullptr) return false;
-	const ThreediLod &lod = model.lods[0];
+	if (lod_index >= model.lod_count || model.lods == nullptr) return false;
+	const ThreediLod &lod = model.lods[lod_index];
 	if (lod.render_object_count == 0 || lod.render_objects == nullptr)
 		return false;
 	r_origins.reserve(lod.render_object_count);

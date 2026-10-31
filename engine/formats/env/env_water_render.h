@@ -299,6 +299,8 @@ struct WaterStripRows {
 	// [flt_7C59B0=-0.5, flt_7DBF94=-5, flt_7C68E8=0.05, flt_7DBF68=300,
 	//  flt_7C6FA4=0.15, flt_7C3B90=2, flt_7C3DD4=1/128]. The underwater view
 	// flips t2's V to 1 - V on all three vertices [orig: @ 0x5c306f..0x5c3085].
+	// The surface shader consumes them as texm3x2pad t1, t0_bx2 / texm3x2tex
+	// t2, t0_bx2 [orig: Water_InitSurfaceShaders @ 0x5c19b0].
 	std::vector<float> t1; // 3 per vertex                     (+0x20)
 	std::vector<float> t2; // 3 per vertex                     (+0x2C)
 };

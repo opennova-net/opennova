@@ -138,8 +138,8 @@ func test_interior_parts_carry_the_authored_light_transfer_as_instance_state() -
 	var exterior_count := 0
 	for instance in _part_instances(parts[0] as Node3D):
 		exterior_count += 1
-		_assert_entity_light(instance, Vector4(1.0, 0.0, 1.0, 0.0),
-				"ROBJ 0 surfaces receive the full outdoor daylight")
+		_assert_entity_light(instance, Vector4(1.0, 0.0, 0.2, 0.0),
+				"ROBJ 0 surfaces take no interior lerp (the daylight lane is unread without it)")
 	assert_gt(exterior_count, 0, "the exterior part draws at least one surface")
 
 	var interior_count := 0

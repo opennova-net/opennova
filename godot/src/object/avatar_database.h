@@ -85,14 +85,8 @@ public:
 	enum { ALIGN_GOOD = opennova::avatars::AVATAR_ALIGN_GOOD, ALIGN_EVIL = opennova::avatars::AVATAR_ALIGN_EVIL };
 	// AvatarDiagnosticSeverity.
 	enum { DIAG_WARNING = opennova::avatars::AVATAR_DIAG_WARNING, DIAG_ERROR = opennova::avatars::AVATAR_DIAG_ERROR };
-	// The three CTRL registers a combo part's authored `camo` bytes drive
-	// (TEX_CAMO1..3 = .3di control-catalog ordinals 93..95). Retail zero-extends
-	// the bytes into the shared CTRL bus immediately before submitting THAT
-	// part, so head, body and arms each carry their own triplet — no scaling, no
-	// tint: the bytes are texture-variant selectors [orig: Avatar_SetHeadCamoCtrl
-	// @0x57a370 / Avatar_SetBodyCamoCtrl @0x57a390 / Avatar_SetArmsCamoCtrl
-	// @0x57a3b0 -> CTRL slots 0x83FFD0/D8/E0; world submits @0x5c7fec/@0x5c800f,
-	// preview @0x56113c/@0x56110b, first-person arms @0x4df008/@0x4df070, see docs/playerinfo/avatars-re.md].
+	// The three CTRL registers a combo part's authored `camo` bytes drive, by
+	// name (the engine's renderer::kAvatarPartCamoRegisters carries the witness).
 	static PackedStringArray part_camo_registers();
 	// Store one part's raw camo bytes (AvatarPartRow.camo) on `p_model` under
 	// `p_owner`.

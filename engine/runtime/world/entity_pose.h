@@ -120,11 +120,18 @@ PoseTransform canopy_attach(const PosedBoneFrames &root, float canopy_yaw_deg);
 PoseTransform carried_attach(const PosedBoneFrames &left_hand, const float carrier_bms_deg[3]);
 
 // The model's bone table for a skeletal rig: parent-relative pivots and parent
-// indices from the canonical first RLOD's render objects (raw, engine frame).
-// The same rows anim::SkeletalClips::load_from_adm consumes; public so a test can
-// stand a rig up from a mounted model without the collision resolve.
+// indices from one RLOD's render objects (the canonical first by default), raw
+// in the engine frame: the pivots are not the mesh's (-x,y,z) flip, and the
+// root's parent is itself as the file stores it (the sampler normalizes it to
+// -1). The MODEL is the rig source, never the lossy .bad records [orig:
+// BoneAnim_BuildWorldMatrices @0x40c400 reads the model pivot raw and the
+// modelDef+56 row's +20 parent index]. The same rows
+// anim::SkeletalClips::load_from_adm consumes; public so a test can stand a rig
+// up from a mounted model without the collision resolve. False (both empty)
+// for a model without that RLOD or with no render objects in it.
 bool model_bone_table(const opennova::threedi::Threedi3di3 &model,
-		std::vector<anim::Vec3> &r_origins, std::vector<int> &r_parents);
+		std::vector<anim::Vec3> &r_origins, std::vector<int> &r_parents,
+		size_t lod_index = 0);
 
 class EntityPoseProvider : public world::IPoseProvider {
 public:

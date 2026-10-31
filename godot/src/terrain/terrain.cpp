@@ -610,12 +610,8 @@ opennova::TerrainViewInput Terrain::_view_input_for(Camera3D *p_camera) {
 	view_input.cam_x = static_cast<float>(cam_pos.x);
 	view_input.cam_y = static_cast<float>(cam_pos.y);
 	view_input.cam_z = static_cast<float>(cam_pos.z);
-	// The map's live water height, unconditionally: retail's compare reads
-	// g_EnvWaterHeightFixed with no render gate, so the engine side gets the
-	// authored value whenever a Water node exists (a missing node passes 0,
-	// and non-negative terrain keeps a dry map's compare inert).
-	// [orig: cameraY < g_EnvWaterHeightFixed @0x60fea5, no zero guard —
-	//  see docs/terrain/terrain-re.md, the underwater selector section]
+	// The map's live water height, ungated (TerrainViewInput::water_height); a
+	// missing Water node passes the dry map's 0.
 	view_input.water_height = cached_water_node != nullptr
 			? cached_water_node->get_water_height()
 			: 0.0f;
@@ -818,8 +814,7 @@ void Terrain::_apply_frame_draw_list(const opennova::TerrainDrawList &draw_list)
 			// written-back smoothed currents, and its per-pass builder adds
 			// what the raw smoother lacks: the NVG sky blend, the thermal
 			// ramps, the underwater g_EnvWaterColorLit fog. The terrain surface
-			// consumes only c1 = light + c0 = sky [orig: @ 0x604420, see
-			// docs/terrain/terrain-re.md].
+			// consumes only c1 = light + c0 = sky (env::TerrainEnvUniforms).
 			cached_env_node->apply_terrain_uniforms(terrain_material);
 		}
 	}
@@ -833,11 +828,10 @@ const std::vector<opennova::TerrainTilePageBinding> &Terrain::_compose_pages(
 	// supplies the environment bytes that are actually baked into each page.
 	// Quantization inside the adapter prevents sub-byte weather drift from
 	// invalidating the whole working set. The page path consumes the RAW
-	// getter tuple: the static projector's (g2,g1,g0) reduction and the DOT3
-	// (g2,g0,g1) byte pack are both ports of retail's packing of that tuple
-	// [orig: Environment_GetLightDirectionFloat @0x57D870 read by the
-	// collector @0x60D2F5/0x60D2FF and the tile DOT3 pack @0x60E231..0x60E331;
-	// see docs/terrain/terrain-re.md] — never the Godot-axes vector
+	// getter tuple: the static projector's (g2,g1,g0) reduction
+	// (terrain_static_shadow_world_light_from_environment_tuple) and the DOT3
+	// (g2,g0,g1) byte pack (the composer's) are both the engine's ports of
+	// retail's packing of that tuple — never the Godot-axes vector
 	// get_light_direction() serves, which would swap x/z a second time.
 	Vector3 page_tile_tint(1.0f, 1.0f, 1.0f);
 	// With no loaded environment the page lights by the tuple an environment
@@ -1105,7 +1099,7 @@ int Terrain::_render_light_rows(const opennova::TerrainDrawList &draw_list, Ligh
 	// EffectWorld_AmbientScale = the engine's light block gain
 	// (EnvironmentState::light_gain, the modulator unpack the object pass
 	// feeds too); the recip factor unpacks the loaded g_EnvTerrainColorRecip
-	// [orig: @0x5aa1ef..0x5aa23f].
+	// (renderer::TerrainLightPassInputs::terrain_factor carries the witness).
 	Vector3 gain(1.0f, 1.0f, 1.0f);
 	uint32_t recip_packed = opennova::renderer::kTerrainFactorDefaultPacked;
 	if (cached_env_node != nullptr) {

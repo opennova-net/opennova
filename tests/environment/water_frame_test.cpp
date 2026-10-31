@@ -10,6 +10,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <vector>
 
 namespace {
 
@@ -125,7 +126,25 @@ void test_noise_clock() {
 
 } // namespace
 
+// The strip's batches as one list: each <= 5-row window's 8n - 10 strip
+// entries unrolled, the degenerate stitches dropped, every index inside the
+// strip's 3 vertices a row.
+void test_strip_triangle_list() {
+	expect(water_strip_triangle_list(1).empty(), "a one-row strip draws nothing");
+	const std::vector<uint32_t> two = water_strip_triangle_list(2);
+	expect(two.size() % 3 == 0 && !two.empty(), "a two-row strip is whole triangles");
+	for (const int rows : {2, 5, 9}) {
+		const std::vector<uint32_t> list = water_strip_triangle_list(rows);
+		bool inside = list.size() % 3 == 0;
+		for (const uint32_t index : list) {
+			inside = inside && index < static_cast<uint32_t>(rows * 3);
+		}
+		expect(inside, "every strip index names one of the strip's vertices");
+	}
+}
+
 int main() {
+	test_strip_triangle_list();
 	test_main_scene_passes();
 	test_inset_passes();
 	test_pass_fog_end();

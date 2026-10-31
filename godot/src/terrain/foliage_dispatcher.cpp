@@ -1240,8 +1240,8 @@ opennova::foliage::WorldSamplers FoliageDispatcher::_world_samplers() {
   frame_stats_.path_blocker_available = tile_info_.is_valid();
   world.path_blocked = [this](float p_world_x, float p_world_z, float p_radius) {
     // til_world_z_from_fixed already decodes the format's stored-negated
-    // z_fixed into the terrain/Godot plane. Do not mirror the query again.
-    // [orig: Foliage_PathBlockedByPlacedTile @ 0x606490, see docs/foliage/foliage-re.md]
+    // z_fixed into the terrain/Godot plane. Do not mirror the query again
+    // (the engine's til_blocks_foliage carries the witness).
     return tile_info_.is_valid() &&
            tile_info_->blocks_foliage(p_world_x, p_world_z, p_radius);
   };
@@ -1695,9 +1695,8 @@ void FoliageDispatcher::_apply_draw_list(
       stamp.alpha_reference = command.alpha_reference;
     }
     if (detail && (fresh || stamp.high_pass_cutoff != command.high_pass_cutoff)) {
-      // The near secondary LOW draw runs under strict D3DCMP_LESS in retail;
-      // the cutoff discard keeps it off every texel the HIGH pass accepted.
-      // [orig: Foliage_SetupDetailSlotDraw @ 0x6008fc..0x600912, see docs/foliage/foliage-re.md]
+      // The engine's strict-LESS cutoff for the near secondary LOW draw
+      // (renderer::FoliageFrame's command build carries the witness).
       server->instance_geometry_set_shader_parameter(
           draw, uniform.high_pass_cutoff, command.high_pass_cutoff);
       ++frame_stats_.backend_uniform_writes;

@@ -78,6 +78,32 @@ bool refresh_heightfield_normal_map(
 // [orig: PolyTrn_InitTextures @ 0x60b1f0]
 Rgba8Image normalize_detail_blend_map(const Rgba8Image &blendmap);
 
+// The DBlendmap quadrants' creation flags: 0x100001, no level-count word, so
+// the device texture carries the full box-filtered chain the creator fills
+// (renderer::pixel_texture_mipped).
+// [orig: PolyTrn_InitTextures @ 0x60b2c9..0x60b2dd;
+//  GTexture_CreateFromPixelData_0 @ 0x6877c7..0x6878be]
+inline constexpr uint32_t kDetailBlendMapCreationFlags = 0x100001u;
+
+// A terrain surface texture's levels as retail creates it: `levels` loaded as
+// given, and `device_chain` where the creator's box filter makes the rest of
+// the chain from levels[0] (GTexture_CreateFromPixelData_0's level-0 load and
+// D3DXFilterTexture). No levels: no texture.
+struct TerrainSurfaceLevels {
+	std::vector<Rgba8Image> levels;
+	bool device_chain = false;
+};
+
+// The second detail map (the ps.1.4 splat's stage-3 dp3 input): paired with
+// its far texture when one is authored (build_paired_detail_mip_chain, each
+// level loaded with D3DX_FILTER_NONE), otherwise the plain load carrying box
+// mips.
+// [orig: PolyTrn_InitTextures @ 0x60af97/0x60aff9 (load + optional
+//  create-with-blend); stage bind @ 0x6043ff]
+TerrainSurfaceLevels build_second_detail_levels(
+		const Rgba8Image &base,
+		const Rgba8Image *far_detail);
+
 // Build the exact retail level set for a base/far texture pair. Each input is
 // downsampled independently before RGB blending; output alpha always comes
 // from the base chain.

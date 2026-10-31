@@ -35,6 +35,7 @@
 #include "util/texture_path_resolver.h"
 #include <runtime/environment/weather_ctrl_registers.h>
 #include <runtime/renderer/foliage_frame.h>
+#include <runtime/renderer/light_runtime.h>
 #include <runtime/renderer/model_panm_cache.h>
 #include <runtime/renderer/object_lod.h>
 #include <runtime/world/entity_pose.h>
@@ -143,8 +144,8 @@ void ObjectModel::add_presentation_link(ObjectModel *p_model,
 void ObjectModel::set_shadow_caster_enabled(bool p_enabled) {
 	set_shadow_caster_layer_enabled(LAYER_DYNAMIC_SHADOW_CASTER, p_enabled);
 	// Dynamic casters join the render-slot ground-shadow group the SlotShadow
-	// device plans over [orig: slot registration at entity init —
-	// Entity_InitFromModel, see docs/render/render-lighting-re.md].
+	// device plans over (slot registration at entity init:
+	// mission::item_casts_dynamic_shadow).
 	update_slot_shadow_group();
 }
 
@@ -504,23 +505,26 @@ void ObjectModel::set_interior_section_light_transfer(float p_daylight) {
 // pushes them per batch entry at flush from the entity's proximity slice
 // (effectScale) and its interior parent (flag bit 1 + the parent's daylight
 // openness), while the world block itself stays a per-pass global. A portal
-// building is not an ordinary entity submission: its exterior shell (ROBJ 0)
-// always keeps effectScale 1 with no interior lerp, and only ROBJ 1+ takes
-// its own ItemDef light transfer. Re-stamped by rebuild_scene (fresh
-// instances) and on every context edge; never per frame [orig:
-// Render_SetupEntityLightingAndShaderConstants @0x5d98a0 and the model+536
-// daylight push per visible building in Terrain_RenderSectorModels
-// @0x5c5d30, see docs/render/render-lighting-re.md; the math itself is
-// opennova::renderer::compute_entity_lighting].
+// building's parts draw as the building batch does, its own daylight aux and
+// the lerp on ROBJ 1+ only (the engine's renderer::static_row_entity_lighting;
+// the math is renderer::compute_entity_lighting: both carry the witnesses).
+// Re-stamped by rebuild_scene (fresh instances) and on every context edge;
+// never per frame.
 void ObjectModel::stamp_entity_lighting_instances() {
 	const StringName name("u_entity_light");
 	// w: bit 1 the BySide person wave, bit 2 the mirror CLIP arming.
 	const float clip_bit = water_mirror_clip_armed_ ? 2.0f : 0.0f;
-	const Vector4 entity = interior_section_lighting_
-			? Vector4(1.0f, 0.0f, 1.0f, clip_bit)
-			: Vector4(lighting_effect_scale_, interior_lerp_ ? 1.0f : 0.0f,
-					interior_daylight_, (thermal_entity_wave_ ? 1.0f : 0.0f) + clip_bit);
-	const Vector4 section(1.0f, 1.0f, interior_section_daylight_, clip_bit);
+	const auto lane = [&](int p_robj) {
+		if (interior_section_lighting_) {
+			const opennova::renderer::EntityLightingState state =
+					opennova::renderer::static_row_entity_lighting(true, p_robj,
+							interior_section_daylight_, false);
+			return Vector4(state.effect_scale, state.interior_lerp ? 1.0f : 0.0f,
+					state.interior_daylight, clip_bit);
+		}
+		return Vector4(lighting_effect_scale_, interior_lerp_ ? 1.0f : 0.0f,
+				interior_daylight_, (thermal_entity_wave_ ? 1.0f : 0.0f) + clip_bit);
+	};
 	const auto apply_to = [&](Node *p_parent, const Vector4 &p_value) {
 		if (p_parent == nullptr) {
 			return;
@@ -536,10 +540,9 @@ void ObjectModel::stamp_entity_lighting_instances() {
 		}
 	};
 	for (const KeyValue<int, Node3D *> &kv : robj_nodes_) {
-		apply_to(kv.value,
-				interior_section_lighting_ && kv.key != 0 ? section : entity);
+		apply_to(kv.value, lane(kv.key));
 	}
-	apply_to(skeleton_, entity);
+	apply_to(skeleton_, lane(0));
 }
 
 void ObjectModel::set_focal_sway(bool active, const Basis &basis, const Vector3 &world_offset) {
@@ -1368,9 +1371,10 @@ void ObjectModel::refresh_foliage_mask_frame(float p_camera_y, float p_water_hei
 // Event-driven scheduling for the per-frame runtime advance. Models self-park:
 // every mutation that can create per-frame work wakes the model (adds it to the
 // shared set), and advance_runtime_frame parks it again the first frame nothing
-// is live.
-// [orig: Terrain_RenderSectorModels @0x5c5d30 computes runtime constants only
-//  for models the batch draws]
+// is live. This is the device's scheduling of its node work, not a port: which
+// models' render-derived work runs is advance_runtime_frame's renderable gate
+// (retail computes runtime constants only for the models a batch draws; the
+// engine's collect carries the witness).
 void ObjectModel::wake_runtime_frame() {
 	if (!awake_) {
 		awake_ = true;
