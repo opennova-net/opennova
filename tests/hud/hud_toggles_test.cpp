@@ -1034,17 +1034,23 @@ void test_objectives_window() {
 	k.objectives = true;
 	CHECK((hud_toggles_poll(s, k) & kBriefingToggled) != 0);
 	CHECK(!s.briefing_panel_open && s.briefing_mode == kBriefingModeOpen);
-	// The windows: Jointops.exe's I window draws the briefing panel out of a session, dfx2.exe's
-	// the how-to; the panel's own window wins; a session's I window draws neither here.
+	// The I window: Jointops.exe's draws the briefing panel out of a session, dfx2.exe's the
+	// how-to, either's the end-game screen in one. The briefing panel's own word is not the
+	// I window's: it changes none of this (it draws at its own slot, after the win conditions).
+	// [orig: HUD_DrawGameplayOverlays @0x5BE12C..0x5BE145, @0x5BE16B..0x5BE174]
+	// [orig: sub_5BCD20 @0x5BCF6D..0x5BCF86, @0x5BCFAC..0x5BCFB5 (dfx2.exe)]
 	HudToggleState w;
 	w.briefing_mode = kBriefingModeOpen;
-	CHECK(hud_briefing_window(w, false, false) == HudBriefingWindow::Briefing);
-	CHECK(hud_briefing_window(w, false, true) == HudBriefingWindow::HowTo);
-	CHECK(hud_briefing_window(w, true, true) == HudBriefingWindow::None);
-	w.briefing_panel_open = true;
-	CHECK(hud_briefing_window(w, true, true) == HudBriefingWindow::Briefing);
+	for (const bool panel : {false, true}) {
+		w.briefing_panel_open = panel;
+		CHECK(hud_briefing_window(w, false, false) == HudBriefingWindow::Briefing);
+		CHECK(hud_briefing_window(w, false, true) == HudBriefingWindow::HowTo);
+		CHECK(hud_briefing_window(w, true, false) == HudBriefingWindow::EndGame);
+		CHECK(hud_briefing_window(w, true, true) == HudBriefingWindow::EndGame);
+	}
 	w.briefing_mode = 0;
-	CHECK(hud_briefing_window(w, false, true) == HudBriefingWindow::Briefing);
+	CHECK(hud_briefing_window(w, false, true) == HudBriefingWindow::None);
+	CHECK(hud_briefing_window(w, true, true) == HudBriefingWindow::None);
 	w.briefing_panel_open = false;
 	CHECK(hud_briefing_window(w, false, true) == HudBriefingWindow::None);
 	// The escape chain closes it after the briefing window, ahead of the objectives.

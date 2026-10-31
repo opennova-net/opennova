@@ -627,8 +627,8 @@ void hud_toggles_reset_mission(HudToggleState &s) {
 }
 
 HudBriefingWindow hud_briefing_window(const HudToggleState &s, bool in_session, bool sp_how_to) {
-	if (s.briefing_panel_open) return HudBriefingWindow::Briefing;
-	if (s.briefing_mode == 0 || in_session) return HudBriefingWindow::None;
+	if (s.briefing_mode == 0) return HudBriefingWindow::None;
+	if (in_session) return HudBriefingWindow::EndGame;
 	return sp_how_to ? HudBriefingWindow::HowTo : HudBriefingWindow::Briefing;
 }
 

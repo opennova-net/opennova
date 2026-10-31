@@ -210,8 +210,6 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_briefing", "briefing_mode", "briefing_panel_open", "sim",
 								 "gametext"),
 			&HudOverlay::set_briefing);
-	ClassDB::bind_method(D_METHOD("set_end_game_screen", "shown", "sim", "gametext"),
-			&HudOverlay::set_end_game_screen);
 	ClassDB::bind_method(D_METHOD("cycle_briefing_page", "direction", "in_session"),
 			&HudOverlay::cycle_briefing_page);
 	ClassDB::bind_method(D_METHOD("set_tip", "tip", "countdown", "local_dead", "gametext",

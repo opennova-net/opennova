@@ -263,11 +263,11 @@ public:
 			const PackedStringArray &p_texts);
 	void set_map_legend(bool p_shown, const String &p_title, const PackedStringArray &p_labels);
 	static PackedStringArray map_legend_keys();
-	// The briefing words' panel (engine hud_toggles.h hud_briefing_window) under the session
-	// title: the briefing panel's mission text, or the how-to's gametext line.
+	// The briefing words, each its own window: the I window's (engine hud_toggles.h
+	// hud_briefing_window under the session title: the end-game screen, the briefing panel's
+	// mission text or the how-to's gametext line) and the briefing panel's own word (the
+	// mission text).
 	void set_briefing(int p_briefing_mode, bool p_briefing_panel_open, const Ref<Simulation> &p_sim,
-			const Ref<RtxtStringFile> &p_gametext);
-	void set_end_game_screen(bool p_shown, const Ref<Simulation> &p_sim,
 			const Ref<RtxtStringFile> &p_gametext);
 	void cycle_briefing_page(int p_direction, bool p_in_session);
 	// The tip panel (engine hud/tip_system.h): the showing tip, its
@@ -601,6 +601,9 @@ private:
 	opennova::hud::HudFrameCompiler compiler_;
 	opennova::hud::HudLayout layout_;
 	opennova::hud::HudFrameState state_;
+	// The I window's in-session end-game screen (set_briefing).
+	void set_end_game_screen_(bool p_shown, const Ref<Simulation> &p_sim,
+			const Ref<RtxtStringFile> &p_gametext);
 	uint32_t voice_menus_ = 0; // inmatch::kHudVoiceMenu* bits (set_overlay_panel_windows)
 	// The role's inset friendly name (set_role_facts), set into the combat state
 	// set_combat_state copies from the view.

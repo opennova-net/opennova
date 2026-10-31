@@ -257,15 +257,12 @@ void test_end_game_screen(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
 	configure(compiler, font);
 	HudFrameState state;
-	state.briefing.shown = true;
-	state.briefing.text = "brief";
 	state.end_game.shown = true;
 	{
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 		CHECK(box_quads_from(list, list.top_begin.quads) > 0);
-		CHECK(list.glyphs.size() == list.top_begin.glyphs); // neither the page nor the briefing
+		CHECK(list.glyphs.size() == list.top_begin.glyphs); // the box alone, no page
 	}
-	state.briefing.shown = false;
 	state.end_game.valid = true;
 	// A tab steps to the next 240 from the text's left edge, 212.
 	state.end_game.text = "A\tB";
@@ -341,6 +338,85 @@ void test_end_game_screen(const fnt_font_t *font) {
 			const GameFontQuad &hint = list.glyphs[list.top_begin.glyphs + 1];
 			CHECK(std::fabs(hint.x_top_left - (left - 0.5f)) < 1.0f);
 		}
+	}
+}
+
+// The briefing words' windows, each at its own slot (DFX2-96): the I window (in a session the
+// end-game screen, out of one the briefing panel, dfx2.exe's the single-player how-to), the win
+// conditions, then the briefing panel's own window in a session or out of one, then the help
+// screen. Jointops.exe never sets the panel's word, so its walk is the I window, the win
+// conditions and the help screen; dfx2.exe's Objectives window draws the panel over the win
+// conditions, and in a session beside the end-game screen.
+// [orig: HUD_DrawGameplayOverlays @0x5BE12C..0x5BE145, HUD_DrawWinConditions @0x5BE163,
+//  @0x5BE16B..0x5BE174, HelpScreen_Draw @0x5BE179]
+// [orig: sub_5BCD20 @0x5BCF6D..0x5BCF86, sub_5B9890 @0x5BCFA4, @0x5BCFAC..0x5BCFB5,
+//  HelpScreen_Draw @0x5BCFBA (dfx2.exe)]
+void test_briefing_windows_order(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	configure(compiler, font);
+	HudFrameState state;
+	state.objectives.push_back({"AB", false});
+	state.help_screen.shown = true;
+	state.help_screen.title = "Help - Movement";
+	state.help_screen.keys.assign(1, "W");
+	state.help_screen.texts.assign(1, "Forward");
+	const auto order = [](const HudDrawList &list, HudElement element) {
+		for (size_t i = 0; i < list.element_spans.size(); ++i)
+			if (list.element_spans[i].element == element) return static_cast<int>(i);
+		return -1;
+	};
+	const auto glyphs_of = [](const HudDrawList &list, HudElement element) {
+		for (const HudElementSpan &span : list.element_spans)
+			if (span.element == element) return span.end.glyphs - span.begin.glyphs;
+		return size_t{0};
+	};
+	// Jointops.exe out of a session: the I window's briefing panel, the win conditions, the help.
+	state.briefing.shown = true;
+	state.briefing.text = "brief";
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		const int window = order(list, HudElement::Briefing);
+		const int objectives = order(list, HudElement::Objectives);
+		CHECK(window >= 0 && window < objectives &&
+				objectives < order(list, HudElement::HelpScreen));
+		CHECK(order(list, HudElement::BriefingPanel) < 0);
+		CHECK(glyphs_of(list, HudElement::Briefing) == 5);
+	}
+	// dfx2.exe out of a session with I and O open: the how-to, the win conditions, then the
+	// briefing panel over them, then the help.
+	state.briefing.how_to = true;
+	state.briefing.text = "how";
+	state.briefing_panel.shown = true;
+	state.briefing_panel.text = "brief";
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		const int window = order(list, HudElement::Briefing);
+		const int objectives = order(list, HudElement::Objectives);
+		const int panel = order(list, HudElement::BriefingPanel);
+		CHECK(window >= 0 && window < objectives && objectives < panel &&
+				panel < order(list, HudElement::HelpScreen));
+		CHECK(glyphs_of(list, HudElement::Briefing) == 3);
+		CHECK(glyphs_of(list, HudElement::BriefingPanel) == 5);
+	}
+	// In a session the I window draws the end-game screen and the panel still draws, at its slot.
+	state.briefing = HudBriefingState();
+	state.end_game.shown = true;
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		const int window = order(list, HudElement::Briefing);
+		const int objectives = order(list, HudElement::Objectives);
+		const int panel = order(list, HudElement::BriefingPanel);
+		CHECK(window >= 0 && window < objectives && objectives < panel &&
+				panel < order(list, HudElement::HelpScreen));
+		CHECK(glyphs_of(list, HudElement::Briefing) == 0); // the box alone (no valid status)
+		CHECK(glyphs_of(list, HudElement::BriefingPanel) == 5);
+	}
+	// The panel's word alone: nothing at the I window's slot.
+	state.end_game.shown = false;
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(order(list, HudElement::Briefing) < 0);
+		CHECK(order(list, HudElement::Objectives) < order(list, HudElement::BriefingPanel));
 	}
 }
 
@@ -459,6 +535,7 @@ int main() {
 	test_windows_ride_the_top_layer(&font);
 	test_briefing_markup_draws_plain(&font);
 	test_end_game_screen(&font);
+	test_briefing_windows_order(&font);
 	test_view_veil_layer(&font);
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

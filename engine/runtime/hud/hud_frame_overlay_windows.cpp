@@ -290,18 +290,18 @@ void HudFrameCompiler::element_objectives(const HudFrameState &state, float w, f
 	++draw_list_.elements_drawn;
 }
 
-void HudFrameCompiler::element_briefing(const HudFrameState &state, float w, float h) {
+void HudFrameCompiler::element_briefing(const HudBriefingState &briefing, float w, float h) {
 	// [orig: HUD_DrawBriefingPanel @0x5bad00 — HUD_DrawLabelBox(ctx, 200, 40, 824, 728, null, -1)
 	//  @0x5bad4a; the text rect (235, 75)..(789, 693) through
 	//  Viewport_ScaleToVirtualCoords @0x5bad73/@0x5bad87; HUD_DrawWrappedText
 	//  in the bold slot, alignment 0, colour -1, skipping the page's start
 	//  lines @0x5bade7; an overflow writes the next page's start @0x5badfa]
-	if (!state.briefing.shown) return;
+	if (!briefing.shown) return;
 	emit_label_box(200.0f, 40.0f, 824.0f, 728.0f, std::string(), 0xFFFFFFFFu, w, h);
 	const bool have_bold = label_font_bold_.font() != nullptr;
 	const GameFont &bf = have_bold ? label_font_bold_ : font_;
 	const float bscale = have_bold ? label_scale_ : 1.0f;
-	if (bf.font() == nullptr || state.briefing.text.empty()) return;
+	if (bf.font() == nullptr || briefing.text.empty()) return;
 	const int x0 = ftol(sx(235.0f, w));
 	const int y0 = ftol(sy(75.0f, h));
 	const int x1 = ftol(sx(789.0f, w));
@@ -310,8 +310,8 @@ void HudFrameCompiler::element_briefing(const HudFrameState &state, float w, flo
 	if (pages.page < 0 || pages.page >= HudBriefingPages::kPages) pages.page = 0;
 	std::vector<HudWrappedLine> lines;
 	// The how-to draws from its first line and keeps no page (DFX2-96).
-	const bool how_to = state.briefing.how_to;
-	const int next = wrapped_text_layout(bf, bscale, bscale, state.briefing.text, x0, y0, x1,
+	const bool how_to = briefing.how_to;
+	const int next = wrapped_text_layout(bf, bscale, bscale, briefing.text, x0, y0, x1,
 			y1, how_to ? 0 : pages.starts[pages.page], lines);
 	// The wrapper halves the colour keeping its alpha [orig: @0x580c99..0x580ca8].
 	const uint32_t color = half_bright_keep_alpha(0xFFFFFFFFu);
@@ -328,7 +328,7 @@ void HudFrameCompiler::element_briefing(const HudFrameState &state, float w, flo
 	GameFontState block;
 	block.tags_inert = true;
 	for (const HudWrappedLine &line : lines) {
-		const std::string run = state.briefing.text.substr(line.begin, line.end - line.begin);
+		const std::string run = briefing.text.substr(line.begin, line.end - line.begin);
 		const GameFontRun laid = bf.layout(run.c_str(), static_cast<float>(x0),
 				static_cast<float>(line.y), bscale, bscale, 0u, color, &block);
 		draw_list_.glyphs.insert(draw_list_.glyphs.end(), laid.quads.begin(), laid.quads.end());

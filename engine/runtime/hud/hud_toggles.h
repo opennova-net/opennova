@@ -359,20 +359,23 @@ uint32_t hud_toggles_dispatch(HudToggleState &state, const HudKeyPoll &fired);
 // its once-counters clear as the next start from the menu clears them.
 void hud_toggles_reset_mission(HudToggleState &state);
 
-// DFX2-96: the panel the gameplay overlays draw from the briefing words. Out of a session the
-// I window (briefing_mode) draws Jointops.exe's briefing panel, dfx2.exe's single-player how-to
-// (`sp_how_to`, Title::hud_sp_how_to: Overlays STROVER_SPMISSIONHOWTO in the panel's box, from
-// its first line, no page kept), whose briefing panel is the Objectives window's
-// (briefing_panel_open); Jointops.exe draws that word too, never set. The panel draws after the
-// I window, so it wins. In a session the I window draws the end-game screen (elsewhere).
-// [orig: HUD_DrawGameplayOverlays @0x5BDE60 - dword_24C18C8 @0x5BE133, out of a session
-//  HUD_DrawBriefingPanel @0x5BE145; dword_24C18D0 @0x5BE16B -> HUD_DrawBriefingPanel
+// DFX2-96: what the I window (briefing_mode) draws: in a session the end-game screen, out of
+// one Jointops.exe's briefing panel, dfx2.exe's single-player how-to (`sp_how_to`,
+// Title::hud_sp_how_to: Overlays STROVER_SPMISSIONHOWTO in the panel's box, from its first line,
+// no page kept). The briefing panel's own word (briefing_panel_open, dfx2.exe's Objectives
+// window; Jointops.exe draws it too, never set) is not the I window's: it draws the briefing
+// panel in a session or out of one, after the win conditions, at its own slot of the gameplay
+// overlays (HudFrameCompiler::compile_gameplay_overlay_windows).
+// [orig: HUD_DrawGameplayOverlays @0x5BDE60 - dword_24C18C8 @0x5BE12C, in a session
+//  HUD_DrawEndGameScreen @0x5BE13E, out of one HUD_DrawBriefingPanel @0x5BE145;
+//  HUD_DrawWinConditions @0x5BE163; dword_24C18D0 @0x5BE16B -> HUD_DrawBriefingPanel
 //  @0x5BE174; HUD_DrawSinglePlayerHowTo @0x5B9210 has no caller]
-// [orig: sub_5BCD20 @0x5BCD20 - dword_24BAE78 @0x5BCF74, out of a session sub_5B8160 (the
-//  HUD_DrawSinglePlayerHowTo twin: HUD_DrawLabelBox(200, 40, 824, 728), the rect (235, 75)..
-//  (789, 693), GameText_GetString("Overlays", "STROVER_SPMISSIONHOWTO"), HUD_DrawWrappedText
-//  from line 0) @0x5BCF86; dword_24BAE80 @0x5BCFAC -> sub_5B9BB0 @0x5BCFB5 (dfx2.exe)]
-enum class HudBriefingWindow : uint8_t { None, Briefing, HowTo };
+// [orig: sub_5BCD20 @0x5BCD20 - dword_24BAE78 @0x5BCF6D, in a session sub_5BBF20 @0x5BCF7F,
+//  out of one sub_5B8160 (the HUD_DrawSinglePlayerHowTo twin: HUD_DrawLabelBox(200, 40, 824,
+//  728), the rect (235, 75)..(789, 693), GameText_GetString("Overlays",
+//  "STROVER_SPMISSIONHOWTO"), HUD_DrawWrappedText from line 0) @0x5BCF86; sub_5B9890
+//  @0x5BCFA4; dword_24BAE80 @0x5BCFAC -> sub_5B9BB0 @0x5BCFB5 (dfx2.exe)]
+enum class HudBriefingWindow : uint8_t { None, Briefing, HowTo, EndGame };
 HudBriefingWindow hud_briefing_window(const HudToggleState &state, bool in_session,
 		bool sp_how_to);
 

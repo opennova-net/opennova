@@ -59,6 +59,8 @@ struct HudVoiceMacroMenuState {
 inline constexpr int kHudEmotesMenuContextRow = 8; // [orig: `cmp esi, 8` @0x5c0002]
 inline constexpr int kHudRadioMenuContextRow = 9;  // [orig: `cmp esi, 9` @0x5bfc8f]
 
+// One briefing box (HudFrameCompiler::element_briefing): the I window's out of a session, or the
+// briefing panel's own window (HudFrameState::briefing_panel, DFX2-96), each at its own slot.
 struct HudBriefingState {
 	bool shown = false;
 	std::string text;

@@ -96,6 +96,7 @@ constexpr HudElementWords kWords[] = {
 	{ HudElement::StartTimer, "Start timer", { "STARTTIMER" } },
 	{ HudElement::ExpPoints, "Experience points", { "EXPPOINTS" } },
 	{ HudElement::LoneGunnerPanel, "Lone gunner panel", {} },
+	{ HudElement::BriefingPanel, "Briefing panel", {} },
 };
 static_assert(std::size(kWords) == opennova::hud::kHudElementCount, "every HudElement has its words");
 
@@ -125,6 +126,7 @@ std::vector<std::string> fixed_textures(HudElement element) {
 	case HudElement::EndRoundStatistics:
 	case HudElement::Briefing:
 	case HudElement::Objectives:
+	case HudElement::BriefingPanel:
 	case HudElement::HelpScreen: return named({ kHudTexBoxBorder, kHudTexBoxTile });
 	case HudElement::NetQuality: return named({ kHudTexNetIcon, kHudTexNetLinkIcon, kHudTexNetNovaWorldIcon });
 	case HudElement::LfpPanel:

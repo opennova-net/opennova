@@ -1168,9 +1168,10 @@ func cycle_friendly_tags() -> void:
 
 
 # The key-toggled windows: the F1 help page's text from the live help pages,
-# the F12 legend's gametext Hud labels (resolved once per mission), and the I
-# window: the briefing panel out of a session, the end-game screen in one
-# (engine HudFrameCompiler::compile_gameplay_overlay_windows carries the gate).
+# the F12 legend's gametext Hud labels (resolved once per mission), the I
+# window (the end-game screen in a session, out of one the briefing panel or
+# the how-to) and the briefing panel's own window (engine hud_briefing_window
+# and HudFrameCompiler::compile_gameplay_overlay_windows carry the gates).
 func _update_overlay_windows(sim: Simulation) -> void:
 	var legend_open := _toggles.is_map_legend_open()
 	if _toggles.is_help_open() and not legend_open:
@@ -1182,10 +1183,7 @@ func _update_overlay_windows(sim: Simulation) -> void:
 	if legend_open and _map_legend_labels.is_empty():
 		_map_legend_labels = _resolve_map_legend_labels()
 	_game_hud.set_map_legend(legend_open, _map_legend_title, _map_legend_labels)
-	var in_session := sim.is_mp_session()
 	_game_hud.set_briefing(_toggles.get_briefing_mode(), _toggles.is_briefing_panel_open(), sim,
-			Strings.get_table(Strings.TABLE_GAMETEXT))
-	_game_hud.set_end_game_screen(_toggles.get_briefing_mode() != 0 and in_session, sim,
 			Strings.get_table(Strings.TABLE_GAMETEXT))
 
 

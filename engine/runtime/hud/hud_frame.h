@@ -1208,12 +1208,14 @@ struct HudFrameState {
 	HudScoreboardState scoreboard;
 	// The open chat capture's input line.
 	HudChatInputState chat_input;
-	// The key-toggled windows HUD_DrawGameplayOverlays draws after the
-	// objectives (hud/hud_overlay_windows.h): the F1 key-binding help, the
-	// F12 map legend (it wins over the help list), the I briefing panel.
+	// The key-toggled windows HUD_DrawGameplayOverlays draws (hud/hud_overlay_windows.h): the
+	// F1 key-binding help, the F12 map legend (it wins over the help list), the I window out of
+	// a session (the briefing panel, dfx2.exe's how-to) and the briefing panel's own window,
+	// after the objectives (DFX2-96, hud_toggles.h hud_briefing_window).
 	HudHelpScreenState help_screen;
 	HudMapLegendState map_legend;
 	HudBriefingState briefing;
+	HudBriefingState briefing_panel;
 	// The I window in a session: the end-game screen (hud_overlay_windows.h).
 	HudEndGameScreenState end_game;
 	// The overlay-panel pass's voice-macro menus (hud_overlay_windows.h).
@@ -1799,7 +1801,8 @@ private:
 	void element_tip(const HudFrameState &state, bool alternate, float w, float h);
 	// HUD_DrawOverlayPanels' legs, over HUD_DrawGameplayOverlays' (hud_frame.cpp).
 	void compile_overlay_panels(const HudFrameState &state, float w, float h);
-	void element_briefing(const HudFrameState &state, float w, float h);
+	// One briefing box: the I window's out of a session, or the briefing panel's own window.
+	void element_briefing(const HudBriefingState &briefing, float w, float h);
 	void element_end_game_screen(const HudFrameState &state, float w, float h);
 	void element_help_screen(const HudFrameState &state, float w, float h);
 	void element_map_legend(const HudFrameState &state, float w, float h);

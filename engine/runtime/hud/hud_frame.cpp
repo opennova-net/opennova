@@ -787,13 +787,13 @@ void HudFrameCompiler::compile_overlay_panels(const HudFrameState &state, float 
 // and under the overlay panels (compile_overlay_panels, D-HUD-73):
 // the frame-rate overlay, the breath bar, the connection status, the start
 // timer and the service prompts, then past its level-3 skip, so they survive
-// the blank level, the Tab player list, the briefing, the objectives panel, then the help
-// screen / map legend [orig: HUD_DrawGameplayOverlays @0x5BDE60 — the level-3 jump to
-// LABEL_24 @0x5bdeaf skips only the framerate / breath / ping / timer / armory
-// legs; the briefing @0x5be133..0x5be145 (a session draws HUD_DrawEndGameScreen
-// instead), HUD_DrawWinConditions @0x5be163, HelpScreen_Draw @0x5be179; the
-// caller runs after the big map, Render_ProcessMainSceneFrame @0x5cad15 then
-// @0x5cae0b]. The whole function returns on a zero /NOHUD master word
+// the blank level, the Tab player list, the I window, the objectives panel, the briefing
+// panel's own window, then the help screen / map legend [orig: HUD_DrawGameplayOverlays
+// @0x5BDE60 — the level-3 jump to LABEL_24 @0x5bdeaf skips only the framerate / breath / ping /
+// timer / armory legs; the briefing @0x5be133..0x5be145 (a session draws HUD_DrawEndGameScreen
+// instead), HUD_DrawWinConditions @0x5be163, the panel word's HUD_DrawBriefingPanel @0x5be174,
+// HelpScreen_Draw @0x5be179; the caller runs after the big map, Render_ProcessMainSceneFrame
+// @0x5cad15 then @0x5cae0b]. The whole function returns on a zero /NOHUD master word
 // [orig: @0x5BDE9B].
 void HudFrameCompiler::compile_gameplay_overlay_windows(const HudFrameState &state, float w,
 		float h) {
@@ -827,16 +827,21 @@ void HudFrameCompiler::compile_gameplay_overlay_windows(const HudFrameState &sta
 	//  and g_ScoreboardPanelVisible tests @0x424310].
 	if (!state.local_dead && !state.round_over)
 		layered_(HudElement::Scoreboard, [&] { element_scoreboard(state, w, h); });
-	// The I window: in a session the end-game screen, out of one the briefing panel
-	// [orig: `cmp g_NapiNPCtx.is_in_session, 0` @0x5be135, HUD_DrawEndGameScreen @0x5be13e,
-	//  HUD_DrawBriefingPanel @0x5be145]; the embedder raises the one the session picks.
+	// The I window: in a session the end-game screen, out of one the briefing panel (dfx2.exe's
+	// the single-player how-to, DFX2-96) [orig: `cmp g_NapiNPCtx.is_in_session, 0` @0x5be135,
+	// HUD_DrawEndGameScreen @0x5be13e, HUD_DrawBriefingPanel @0x5be145] [orig: sub_5BCD20 -
+	// sub_5BBF20 @0x5BCF7F, sub_5B8160 @0x5BCF86 (dfx2.exe)]; the embedder raises the one the
+	// session picks (hud_toggles.h hud_briefing_window).
 	layered_(HudElement::Briefing, [&] {
-		if (state.end_game.shown)
-			element_end_game_screen(state, w, h);
-		else
-			element_briefing(state, w, h);
+		element_end_game_screen(state, w, h);
+		element_briefing(state.briefing, w, h);
 	});
 	layered_(HudElement::Objectives, [&] { element_objectives(state, w, h); });
+	// The briefing panel's own window, in a session or out of one, over the win conditions:
+	// dfx2.exe's Objectives window; Jointops.exe never sets the word (DFX2-96)
+	// [orig: `cmp dword_24C18D0, 0` @0x5be16b, HUD_DrawBriefingPanel @0x5be174]
+	// [orig: sub_5BCD20 - `cmp dword_24BAE80, 0` @0x5BCFAC, sub_5B9BB0 @0x5BCFB5 (dfx2.exe)].
+	layered_(HudElement::BriefingPanel, [&] { element_briefing(state.briefing_panel, w, h); });
 	layered_(HudElement::HelpScreen, [&] { element_help_screen(state, w, h); });
 	// The quit dialog below the blank level [orig: `cmp g_HUDDetailLevel, 3`
 	// @0x5be185; UI_DrawQuitConfirmDialog @0x5be1ce]. Out of a session

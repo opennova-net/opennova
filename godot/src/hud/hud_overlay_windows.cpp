@@ -1,8 +1,8 @@
 // The key-toggled overlay windows' setters (engine runtime/hud/
 // hud_overlay_windows.h): the F1 help page, the F12 map legend, the I
-// briefing panel, the I window's in-session end-game screen and the page
-// keys. The shell resolves the text tables; the compiler owns the layout and
-// the briefing's page state.
+// window (the briefing panel, the how-to, the in-session end-game screen),
+// the briefing panel's own window and the page keys. The shell resolves the
+// text tables; the compiler owns the layout and the briefing's page state.
 #include "hud/hud_overlay.h"
 #include "mnu/controls_model.h"
 #include "resource_index/resource_root.h"
@@ -64,21 +64,29 @@ void HudOverlay::set_briefing(int p_briefing_mode, bool p_briefing_panel_open,
 	using opennova::hud::HudBriefingWindow;
 	opennova::hud::HudToggleState words;
 	words.briefing_mode = p_briefing_mode;
-	words.briefing_panel_open = p_briefing_panel_open;
 	const HudBriefingWindow window = opennova::hud::hud_briefing_window(words,
 			p_sim.is_valid() && p_sim->is_mp_session(), ResourceRoot::session_title(root_).hud_sp_how_to);
-	state_.briefing.shown = window != HudBriefingWindow::None;
-	state_.briefing.how_to = window == HudBriefingWindow::HowTo;
+	// The I window: the end-game screen, or its box's briefing panel or how-to.
+	set_end_game_screen_(window == HudBriefingWindow::EndGame, p_sim, p_gametext);
+	opennova::hud::HudBriefingState &box = state_.briefing;
+	box.shown = window == HudBriefingWindow::Briefing || window == HudBriefingWindow::HowTo;
+	box.how_to = window == HudBriefingWindow::HowTo;
 	if (window == HudBriefingWindow::Briefing)
-		state_.briefing.text = p_sim.is_valid() ? p_sim->mission_briefing_text() : std::string();
+		box.text = p_sim.is_valid() ? p_sim->mission_briefing_text() : std::string();
 	else if (window == HudBriefingWindow::HowTo)
-		state_.briefing.text = opennova::hud::game_text(game_text_lookup(p_gametext), "Overlays",
+		box.text = opennova::hud::game_text(game_text_lookup(p_gametext), "Overlays",
 				"STROVER_SPMISSIONHOWTO", "");
 	else
-		state_.briefing.text.clear();
+		box.text.clear();
+	// The briefing panel's own window: the briefing panel in or out of a session.
+	opennova::hud::HudBriefingState &panel = state_.briefing_panel;
+	panel.shown = p_briefing_panel_open;
+	panel.how_to = false;
+	panel.text.clear();
+	if (p_briefing_panel_open && p_sim.is_valid()) panel.text = p_sim->mission_briefing_text();
 }
 
-void HudOverlay::set_end_game_screen(bool p_shown, const Ref<Simulation> &p_sim,
+void HudOverlay::set_end_game_screen_(bool p_shown, const Ref<Simulation> &p_sim,
 		const Ref<RtxtStringFile> &p_gametext) {
 	// The page the briefing pages stand on, built for this frame's draw, and keyhelp's footer
 	// over it (engine hud/session_rules_text.h carries the witnesses).
