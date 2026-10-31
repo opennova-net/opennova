@@ -751,12 +751,17 @@ bool PlayerInputRouter::poll_hud_toggles(const Ref<Simulation> &p_sim, int p_row
 	// The connection mode's two bits: an authority is any role but a joiner, a
 	// session peer any role but a dedicated host. The mousescale row steps by
 	// its fire's sign bit (Shift on a modifier-less key).
+	// The friendly-tags cycle reads the death-screen latch under the session title's rule
+	// (engine HudKeyPoll::death_screen).
 	const int role = p_sim->session_role();
+	const opennova::world::TitleRules *rules = p_sim->session_title_rules();
 	int64_t events = hud_toggles_->dispatch(p_rows_fired, frame_gameplay_input_active_,
 			p_sim->is_mp_session(),
 			opennova::game_type::is_objective(static_cast<uint32_t>(p_sim->get_session_game_type())),
 			!p_sim->local_player_dead(), role != Simulation::ROLE_JOINER,
-			role != Simulation::ROLE_DEDICATED_HOST, p_mouse_scale_negative, head_drops);
+			role != Simulation::ROLE_DEDICATED_HOST, p_mouse_scale_negative, head_drops,
+			p_sim->local_death_screen_active(),
+			rules != nullptr && rules->friendly_tags_skip_mode_1_on_death_screen);
 	// A typed mousescale's argument rides above the event bits (engine
 	// hud_toggle_event::kMouseScaleParamShift carries the witness).
 	if ((events & HudToggles::EVENT_MOUSE_SCALE_STEPPED) != 0)

@@ -209,6 +209,11 @@ world::TitleRules make() {
 	// [orig: Input_HandleActionBinding @0x49ad50 - case 361, `cmp eax, 80000h` @0x49bf27 /
 	// @0x49bf57 (dfx2.exe)].
 	r.map_zoom_max_q16 = 0x80000;
+	// Section 5.3: the friendly-tags toasts, modes 1 and 2 the literal lines, and the death screen's
+	// step past mode 1 [orig: Input_HandleActionBinding @0x49ad50 - case 30, @0x49b5ee / @0x49b60c,
+	// the step @0x49b59c..0x49b5b6 (dfx2.exe)].
+	r.friendly_tag_toast_literals = {nullptr, "Friendly Tags: On", "Friendly Tags: Smart", nullptr};
+	r.friendly_tags_skip_mode_1_on_death_screen = true;
 	return r;
 }
 

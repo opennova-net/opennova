@@ -314,6 +314,23 @@ struct TitleRules {
 	//  radar's) / @0x49beea (the big map's)] [orig: Input_HandleActionBinding @0x49ad50 - case
 	//  361, `cmp eax, 80000h` @0x49bf27 / @0x49bf57, the stores @0x49bf37 / @0x49bf67 (dfx2.exe)]
 	int32_t map_zoom_max_q16 = 0x100000;
+
+	// --- Section 5.3: the friendly-tags cycle's toasts (the local player's own feed). ------------
+	// The ShowFriendly action steps the mode 0 -> 1 -> 2 -> 3 -> 0 in both (hud/hud_toggles.h).
+	// Jointops.exe posts each mode's gametext Misc toast (hud::friendly_tag_toast_key:
+	// STRMISC_FRIENDLYTAGS_OFF / _FARBRIEF / _FULL / _BRIEF); dfx2.exe posts its own literal line
+	// for modes 1 and 2 (the entry here, null the key's), and while the death screen is up steps
+	// on past mode 1 to mode 2. Read on the local player's input alone: no joiner-side knob.
+	// [orig: Input_HandleActionBinding @0x49ad40 - case 30 @0x49b573..0x49b5df, every mode's key
+	//  through GameText_GetString("Misc") @0x49bc52] [orig: Input_HandleActionBinding @0x49ad50 -
+	//  case 30 @0x49b583: the wrap @0x49b58b..0x49b597, the death-screen step `cmp
+	//  g_DeathScreenActive, 0` @0x49b59c / `cmp eax, 1` @0x49b5a5 -> mode 2 and "Friendly Tags:
+	//  Smart" @0x49b5b1..0x49b5c0; mode 0's STRMISC_FRIENDLYTAGS_OFF @0x49b5d8, mode 1's "Friendly
+	//  Tags: On" @0x49b5ee, mode 2's "Friendly Tags: Smart" @0x49b60c, each straight to
+	//  Chat_AddMessageChannel2; mode 3's STRMISC_FRIENDLYTAGS_BRIEF @0x49b625; the keys' lookup
+	//  @0x49bcbf (dfx2.exe)]
+	std::array<const char *, 4> friendly_tag_toast_literals{};
+	bool friendly_tags_skip_mode_1_on_death_screen = false;
 };
 
 // One registry row: a title's code and the rules it runs.

@@ -3,6 +3,7 @@
 // row carried the same edge machine.
 #include <runtime/hud/hud_toggles.h>
 #include <runtime/controls/controls.h>
+#include <runtime/world/title_rules.h> // friendly_tag_toast (the title's literal lines)
 
 namespace opennova::hud {
 
@@ -291,10 +292,15 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 		events |= kShowScoreToggled | respawn_init_keeping(s, &s.end_round_stats_open, false);
 	}
 	// The friendly-tags cycle [orig: case 30 @0x49b573; catalog row 100
-	// ShowFriendly, default K]; the embedder posts the toast.
+	// ShowFriendly, default K]; the embedder posts the toast. A title whose
+	// cycle steps past mode 1 under the death screen does so here
+	// (world::TitleRules::friendly_tags_skip_mode_1_on_death_screen carries the witness).
 	if (s.friendly_tags.step(k.friendly_tags, bit0_active && bit0_operand_clear) &&
 			admitted(kRowFriendlyTags)) {
 		s.friendly_tag_mode = next_friendly_tag_mode(s.friendly_tag_mode);
+		if (k.death_screen && k.friendly_tags_skip_mode_1_on_death_screen &&
+				s.friendly_tag_mode == FriendlyTagMode::kFarBrief)
+			s.friendly_tag_mode = FriendlyTagMode::kFull;
 		events |= kFriendlyTagsCycled;
 	}
 	// The F1 key-binding help, then the keeping init [orig: case 8
@@ -614,6 +620,15 @@ const char *friendly_tag_toast_key(FriendlyTagMode mode) {
 		case FriendlyTagMode::kBrief: return "STRMISC_FRIENDLYTAGS_BRIEF";
 	}
 	return "";
+}
+
+std::string friendly_tag_toast(const GameTextLookup &gametext, FriendlyTagMode mode,
+		const world::TitleRules &rules) {
+	const int index = static_cast<int>(mode);
+	if (index >= 0 && index < static_cast<int>(rules.friendly_tag_toast_literals.size()) &&
+			rules.friendly_tag_toast_literals[static_cast<size_t>(index)] != nullptr)
+		return rules.friendly_tag_toast_literals[static_cast<size_t>(index)];
+	return game_text(gametext, kGameTextMisc, friendly_tag_toast_key(mode), "");
 }
 
 const char *hud_toggles_cycle_friendly_tags(HudToggleState &s) {

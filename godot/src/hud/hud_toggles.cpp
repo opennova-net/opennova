@@ -1,12 +1,15 @@
 #include "hud/hud_toggles.h"
 
+#include "simulation/simulation.h"
+
 using namespace godot;
 
 namespace {
 
 opennova::hud::HudKeyPoll key_poll(int p_rows, bool p_active, bool p_in_session,
 		bool p_objective_game, bool p_local_alive, bool p_authority, bool p_mp_session_peer,
-		bool p_mouse_scale_negative, int p_head_drops) {
+		bool p_mouse_scale_negative, int p_head_drops, bool p_death_screen,
+		bool p_friendly_tags_skip_mode_1) {
 	opennova::hud::HudKeyPoll keys;
 	opennova::hud::hud_key_poll_set_rows(keys, static_cast<uint32_t>(p_rows));
 	keys.active = p_active;
@@ -17,6 +20,8 @@ opennova::hud::HudKeyPoll key_poll(int p_rows, bool p_active, bool p_in_session,
 	keys.mp_session_peer = p_mp_session_peer;
 	keys.mouse_scale_negative = p_mouse_scale_negative;
 	keys.head_drops = static_cast<uint32_t>(p_head_drops);
+	keys.death_screen = p_death_screen;
+	keys.friendly_tags_skip_mode_1_on_death_screen = p_friendly_tags_skip_mode_1;
 	return keys;
 }
 
@@ -24,18 +29,22 @@ opennova::hud::HudKeyPoll key_poll(int p_rows, bool p_active, bool p_in_session,
 
 int64_t HudToggles::poll(int p_rows_down, bool p_active,
 		bool p_in_session, bool p_objective_game, bool p_local_alive, bool p_authority,
-		bool p_mp_session_peer, bool p_mouse_scale_negative, int p_head_drops) {
+		bool p_mp_session_peer, bool p_mouse_scale_negative, int p_head_drops,
+		bool p_death_screen, bool p_friendly_tags_skip_mode_1) {
 	return static_cast<int64_t>(opennova::hud::hud_toggles_poll(state_,
 			key_poll(p_rows_down, p_active, p_in_session, p_objective_game, p_local_alive,
-					p_authority, p_mp_session_peer, p_mouse_scale_negative, p_head_drops)));
+					p_authority, p_mp_session_peer, p_mouse_scale_negative, p_head_drops,
+					p_death_screen, p_friendly_tags_skip_mode_1)));
 }
 
 int64_t HudToggles::dispatch(int p_rows_fired, bool p_active,
 		bool p_in_session, bool p_objective_game, bool p_local_alive, bool p_authority,
-		bool p_mp_session_peer, bool p_mouse_scale_negative, int p_head_drops) {
+		bool p_mp_session_peer, bool p_mouse_scale_negative, int p_head_drops,
+		bool p_death_screen, bool p_friendly_tags_skip_mode_1) {
 	return static_cast<int64_t>(opennova::hud::hud_toggles_dispatch(state_,
 			key_poll(p_rows_fired, p_active, p_in_session, p_objective_game, p_local_alive,
-					p_authority, p_mp_session_peer, p_mouse_scale_negative, p_head_drops)));
+					p_authority, p_mp_session_peer, p_mouse_scale_negative, p_head_drops,
+					p_death_screen, p_friendly_tags_skip_mode_1)));
 }
 
 int HudToggles::escape(bool p_in_session, bool p_round_over, bool p_authority) {
@@ -77,8 +86,12 @@ void HudToggles::force_death_screen_hud_detail() { opennova::hud::hud_toggles_de
 String HudToggles::cycle_friendly_tags() {
 	return String(opennova::hud::hud_toggles_cycle_friendly_tags(state_));
 }
-String HudToggles::friendly_tag_toast_key() const {
-	return String(opennova::hud::friendly_tag_toast_key(state_.friendly_tag_mode));
+String HudToggles::friendly_tag_toast(const Ref<RtxtStringFile> &p_gametext,
+		const Ref<Simulation> &p_sim) const {
+	const opennova::world::TitleRules *rules = p_sim.is_valid() ? p_sim->session_title_rules() : nullptr;
+	if (rules == nullptr) return String();
+	return opennova::cp1252_to_gd(opennova::hud::friendly_tag_toast(
+			game_text_lookup(p_gametext), state_.friendly_tag_mode, *rules));
 }
 String HudToggles::verbose_toast_key() const {
 	return String(opennova::hud::verbose_toast_key(state_.mp_verbose));
@@ -146,14 +159,16 @@ bool HudToggles::is_tip_showing() const { return opennova::hud::tip_is_showing(s
 void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("poll", "rows_down", "active",
 								 "in_session", "objective_game", "local_alive", "authority",
-								 "mp_session_peer", "mouse_scale_negative", "head_drops"),
+								 "mp_session_peer", "mouse_scale_negative", "head_drops",
+								 "death_screen", "friendly_tags_skip_mode_1"),
 			&HudToggles::poll, DEFVAL(true), DEFVAL(false), DEFVAL(false), DEFVAL(false),
-			DEFVAL(0));
+			DEFVAL(0), DEFVAL(false), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("dispatch", "rows_fired", "active",
 								 "in_session", "objective_game", "local_alive", "authority",
-								 "mp_session_peer", "mouse_scale_negative", "head_drops"),
+								 "mp_session_peer", "mouse_scale_negative", "head_drops",
+								 "death_screen", "friendly_tags_skip_mode_1"),
 			&HudToggles::dispatch, DEFVAL(true), DEFVAL(false), DEFVAL(false), DEFVAL(false),
-			DEFVAL(0));
+			DEFVAL(0), DEFVAL(false), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("escape", "in_session", "round_over", "authority"),
 			&HudToggles::escape, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("session_init", "in_session", "mp_session_peer"),
@@ -174,7 +189,8 @@ void HudToggles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("force_death_screen_hud_detail"),
 			&HudToggles::force_death_screen_hud_detail);
 	ClassDB::bind_method(D_METHOD("cycle_friendly_tags"), &HudToggles::cycle_friendly_tags);
-	ClassDB::bind_method(D_METHOD("friendly_tag_toast_key"), &HudToggles::friendly_tag_toast_key);
+	ClassDB::bind_method(D_METHOD("friendly_tag_toast", "gametext", "sim"),
+			&HudToggles::friendly_tag_toast);
 	ClassDB::bind_method(D_METHOD("verbose_toast_key"), &HudToggles::verbose_toast_key);
 	ClassDB::bind_static_method("HudToggles", D_METHOD("mouse_scale_toast", "gametext", "scale"),
 			&HudToggles::mouse_scale_toast);

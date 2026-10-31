@@ -154,6 +154,9 @@ void retail_rules_values() {
 	CHECK(jo.part_spin.full == 186413 && jo.part_spin.mid == 163110 && jo.part_spin.low == 139809 &&
 			jo.part_spin.ground_decay == 186413 && jo.part_spin.helo_decay == 46603);
 	CHECK(jo.map_zoom_max_q16 == 0x100000); // section 7.12
+	// Section 5.3: every mode's toast the gametext key's, no death-screen step.
+	for (const char *literal : jo.friendly_tag_toast_literals) CHECK(literal == nullptr);
+	CHECK(!jo.friendly_tags_skip_mode_1_on_death_screen);
 
 	const world::TitleRules &dfx2 = world::title_rules("dfx2");
 	CHECK(dfx2.waypoint_completion == world::WaypointCompletion::CoopCheckpoint); // DFX2-9
@@ -181,6 +184,12 @@ void retail_rules_values() {
 	while (dfx2.spawn_kit != nullptr && dfx2.spawn_kit[kit] != nullptr) ++kit; // DFX2-33
 	CHECK(kit == 8 && std::string(dfx2.spawn_kit[2]) == "WPN_MK23");
 	CHECK(dfx2.map_zoom_max_q16 == 0x80000); // section 7.12
+	// Section 5.3: modes 1 and 2 the literal lines, the death screen's step past mode 1.
+	CHECK(dfx2.friendly_tag_toast_literals[0] == nullptr &&
+			dfx2.friendly_tag_toast_literals[3] == nullptr);
+	CHECK(std::string(dfx2.friendly_tag_toast_literals[1]) == "Friendly Tags: On" &&
+			std::string(dfx2.friendly_tag_toast_literals[2]) == "Friendly Tags: Smart");
+	CHECK(dfx2.friendly_tags_skip_mode_1_on_death_screen);
 }
 
 // A protocol's in-match sheet: every knob of its ProtocolInMatch, and its CD key (Protocol::cd_key,

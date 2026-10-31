@@ -8,6 +8,7 @@
 // windows and the escape close chain.
 #include <runtime/controls/controls.h>
 #include <runtime/hud/hud_toggles.h>
+#include <runtime/world/title_rules.h>
 
 #include <cstdio>
 #include <cstring>
@@ -232,6 +233,54 @@ void test_death_screen_and_friendly_tags() {
 	CHECK(std::strcmp(hud_toggles_cycle_friendly_tags(s), "STRMISC_FRIENDLYTAGS_FARBRIEF") == 0);
 	CHECK(std::strcmp(hud_toggles_cycle_friendly_tags(s), "STRMISC_FRIENDLYTAGS_FULL") == 0);
 	CHECK(s.friendly_tag_mode == FriendlyTagMode::kFull);
+}
+
+// The friendly-tags cycle under the title's rules (world::TitleRules section 5.3 carries the
+// witness): dfx2.exe's steps past mode 1 to mode 2 while the death screen is up and posts its own
+// lines for modes 1 and 2; Jointops.exe's steps 0 -> 1 and posts every mode's Misc key.
+void test_friendly_tags_title_rules() {
+	const opennova::world::TitleRules &jo = opennova::world::title_rules("jo");
+	const opennova::world::TitleRules &dfx2 = opennova::world::title_rules("dfx2");
+	HudToggleState s;
+	s.friendly_tag_mode = FriendlyTagMode::kOff;
+	HudKeyPoll k = keys();
+	k.friendly_tags = true;
+	k.death_screen = true;
+	k.friendly_tags_skip_mode_1_on_death_screen = jo.friendly_tags_skip_mode_1_on_death_screen;
+	CHECK(hud_toggles_dispatch(s, k) == kFriendlyTagsCycled);
+	CHECK(s.friendly_tag_mode == FriendlyTagMode::kFarBrief);
+	s.friendly_tag_mode = FriendlyTagMode::kOff;
+	k.friendly_tags_skip_mode_1_on_death_screen = dfx2.friendly_tags_skip_mode_1_on_death_screen;
+	CHECK(hud_toggles_dispatch(s, k) == kFriendlyTagsCycled);
+	CHECK(s.friendly_tag_mode == FriendlyTagMode::kFull);
+	// Out of the death screen dfx2.exe's cycle reaches mode 1 too.
+	s.friendly_tag_mode = FriendlyTagMode::kOff;
+	k.death_screen = false;
+	CHECK(hud_toggles_dispatch(s, k) == kFriendlyTagsCycled);
+	CHECK(s.friendly_tag_mode == FriendlyTagMode::kFarBrief);
+
+	const GameTextLookup gametext = [](const char *section, const char *key,
+			const char *fallback) -> std::string {
+		if (std::strcmp(section, "Misc") != 0) return fallback;
+		return std::string("<") + key + ">";
+	};
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kOff, jo) == "<STRMISC_FRIENDLYTAGS_OFF>");
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kFarBrief, jo) ==
+			"<STRMISC_FRIENDLYTAGS_FARBRIEF>");
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kFull, jo) == "<STRMISC_FRIENDLYTAGS_FULL>");
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kBrief, jo) ==
+			"<STRMISC_FRIENDLYTAGS_BRIEF>");
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kOff, dfx2) == "<STRMISC_FRIENDLYTAGS_OFF>");
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kFarBrief, dfx2) == "Friendly Tags: On");
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kFull, dfx2) == "Friendly Tags: Smart");
+	CHECK(friendly_tag_toast(gametext, FriendlyTagMode::kBrief, dfx2) ==
+			"<STRMISC_FRIENDLYTAGS_BRIEF>");
+	// A missing key posts nothing; a literal needs no table.
+	const GameTextLookup none = [](const char *, const char *, const char *fallback) {
+		return std::string(fallback);
+	};
+	CHECK(friendly_tag_toast(none, FriendlyTagMode::kOff, dfx2).empty());
+	CHECK(friendly_tag_toast(none, FriendlyTagMode::kFull, dfx2) == "Friendly Tags: Smart");
 }
 
 // The row mask the embedder samples maps onto the poll's key bits, and each
@@ -957,6 +1006,7 @@ int main() {
 	test_showhud_goals_dotsize_and_view_actions();
 	test_overlay_windows();
 	test_death_screen_and_friendly_tags();
+	test_friendly_tags_title_rules();
 	test_row_mask_and_tokens();
 	test_friendly_tags_and_verbose_rows();
 	test_help_and_map_legend_windows();
