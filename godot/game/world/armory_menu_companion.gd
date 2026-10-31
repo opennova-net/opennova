@@ -124,6 +124,12 @@ func on_menu_released() -> void:
 	_clear_icon_mounts()
 
 
+## The DEATH screen's icon mounts freed and forgotten: they ride that screen's frame, which its
+## presenter frees at each mission's teardown, while this companion lives on with its presenter.
+func release_screen_icon_mounts() -> void:
+	_free_icon_mounts(_screen_icon_mounts)
+
+
 func on_menu_built(driver: MenuDriver, file: String, screen: String, root: ResourceRoot) -> void:
 	# The base wires _driver/_root, the by-name handler table (dispatched
 	# with the stale-document guard) and the widget_activated relay.

@@ -369,6 +369,36 @@ func test_mission_start_stages_the_class_pages() -> void:
 	assert_eq(driver.selected_row(ammo), 1, "the mission start staged the profile's page again")
 
 
+# The DEATH screen's icon mounts ride that screen's frame, which DeployScreenPresenter frees at
+# each mission's teardown beside this presenter's: this teardown frees and forgets them too, so
+# the next mission's DEATH open mounts fresh ones over its new frame.
+func test_teardown_releases_the_death_screen_icon_mounts() -> void:
+	var weapons := _make_weapons()
+	var sim := _real_sim(2)
+	var overlay := Control.new()
+	add_child_autofree(overlay)
+	overlay.size = Vector2(800, 600)
+	var presenter := ArmoryPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(_make_world(sim, weapons), null, overlay)
+	var doc := MnuDocument.new()
+	assert_eq(doc.load_from_path(
+			ProjectSettings.globalize_path(TMP_DIR).path_join("weapon.mnu")), OK)
+	var frame := MenuFrame.new()
+	frame.size = Vector2(800, 600)
+	add_child_autofree(frame)
+	var driver := MenuDriver.new()
+	driver.attach(frame, null)
+	assert_true(driver.open_document(doc, null, null, null, "weapon.mnu", "WEAPON"),
+			"the framed screen opens on its own driver")
+	presenter.populate_death_screen(driver)
+	var icon := frame.find_child("PRIMARYDeathIcon", true, false)
+	assert_not_null(icon, "the screen's fill mounts an icon over PRIMARY_ICON")
+	presenter.teardown()
+	if icon != null:
+		assert_true(icon.is_queued_for_deletion(), "the teardown frees the screen's mounts")
+
+
 func test_open_preselects_the_authoritative_satchel_loadout() -> void:
 	var simulation := _real_sim(2)
 	var weapons := _make_weapons()

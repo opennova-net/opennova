@@ -138,8 +138,13 @@ func _mount_weapon_icons(driver: MenuDriver, root: ResourceRoot, mounts: Diction
 		var holder := driver.widget_id(control + "_ICON")
 		if holder < 0:
 			continue
-		var icon_rect: TextureRect = mounts.get(control)
-		if icon_rect == null or not is_instance_valid(icon_rect):
+		# Read untyped: a mount its frame freed first (the DEATH frame's teardown) is a freed
+		# instance, which a typed read refuses; typed only once it is live.
+		var held: Variant = mounts.get(control)
+		var icon_rect: TextureRect = null
+		if is_instance_valid(held):
+			icon_rect = held
+		if icon_rect == null:
 			icon_rect = TextureRect.new()
 			icon_rect.name = control + name_suffix
 			icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -161,20 +166,26 @@ func _mount_weapon_icons(driver: MenuDriver, root: ResourceRoot, mounts: Diction
 
 
 func _clear_icon_mounts() -> void:
-	for control in _icon_mounts:
-		var mount: TextureRect = _icon_mounts[control]
-		if mount != null and is_instance_valid(mount):
+	_free_icon_mounts(_icon_mounts)
+
+
+# Free every mount in `mounts` and forget them, each read untyped (a freed one is skipped).
+static func _free_icon_mounts(mounts: Dictionary) -> void:
+	for control in mounts:
+		var mount: Variant = mounts[control]
+		if is_instance_valid(mount):
 			mount.queue_free()
-	_icon_mounts.clear()
+	mounts.clear()
 
 
 func _reposition_icon_mounts() -> void:
 	if _driver == null:
 		return
 	for control in _icon_mounts:
-		var mount: TextureRect = _icon_mounts[control]
-		if mount == null or not is_instance_valid(mount):
+		var held: Variant = _icon_mounts[control]
+		if not is_instance_valid(held):
 			continue
+		var mount: TextureRect = held
 		var holder := _id(String(control) + "_ICON")
 		if holder >= 0:
 			_place_mount(mount, holder)

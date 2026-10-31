@@ -326,6 +326,9 @@ func _reset_all_input_state() -> void:
 
 func teardown() -> void:
 	set_process(false)
+	# The DEATH screen's icon mounts go with that screen's frame (DeployScreenPresenter's
+	# teardown beside this one), so the next mission's open mounts fresh ones.
+	_armory.release_screen_icon_mounts()
 	if _frame != null and is_instance_valid(_frame):
 		_frame.queue_free()
 	if _audio != null and is_instance_valid(_audio):
