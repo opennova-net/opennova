@@ -1094,6 +1094,17 @@ void fill_view_context(World *world, LocalPlayerWeapon &w, const PlayerViewState
     out.frame_fx.monitor_view = optical_view && monitor_def;
     out.frame_fx.nvg_active = v.nvg_active;
     out.frame_fx.death_screen_active = v.death_screen_active;
+    // The low-health ring's health pair (DFX2-48): the local player's health word and its
+    // ceiling, 1 without a definition or at 0.
+    // [orig: the twin of Render_ProcessMainSceneFrame @0x5c9000 - @0x5c98e2..0x5c98f9, the
+    //  word +0x11E @0x5c9909 (dfx2.exe)]
+    if (const Entity *local = world != nullptr ? world->registry.get(world->cached.local_player)
+                                               : nullptr) {
+        out.frame_fx.local_present = true;
+        out.frame_fx.local_health = local->health;
+        const int32_t ceiling = max_health_with_difficulty(*world, *local);
+        out.frame_fx.local_max_health = ceiling != 0 ? ceiling : 1;
+    }
     const bool sighted = out.scope_card_active &&
                          (w.def.flags & DEF_WEAPON_FLAG_SIGHTED) != 0 &&
                          active_slot->current != weapon_action::kSwitchFrom;

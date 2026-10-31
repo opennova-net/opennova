@@ -412,6 +412,9 @@ void FrameFx::advance_screen_effects() {
 	// GetTickCount's millisecond clock, the main loop's (engine world/tick_count_clock.h); only its
 	// low bits reach the angle.
 	inputs.clock_ms = opennova::world::frame_tick_count_ms();
+	// The session's title's scene frame dispatches the low-health ring (DFX2-48).
+	inputs.low_health_ring =
+			ResourceRoot::session_title(Ref<ResourceRoot>()).low_health_screen_effect;
 	auto frame = std::make_shared<FrameFxScreenFrame>();
 	frame->frame_id = ++screen_frame_id_;
 	frame->plan = opennova::renderer::plan_frame_fx(inputs, planner_state_,

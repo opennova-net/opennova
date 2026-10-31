@@ -2381,6 +2381,17 @@ void test_frame_carries_the_framefx_dispatch_facts() {
     CHECK(f.frame_fx.death_elapsed_ticks == 250);
     CHECK(f.frame_fx.camera_mode == 0);
     CHECK(!f.frame_fx.thermal_view && !f.frame_fx.monitor_view); // no optical view yet
+    // DFX2-48's health pair: the local player's word and its ceiling, 1 without a
+    // definition, the def hp with one [orig: the twin of Render_ProcessMainSceneFrame
+    // @0x5c98e2..0x5c9909 (dfx2.exe)].
+    CHECK(f.frame_fx.local_present && f.frame_fx.local_health == 100);
+    CHECK(f.frame_fx.local_max_health == 1);
+    lw.entity().has_item_def = true;
+    lw.entity().health_max = 400;
+    lw.w.rules.mp_session = true;
+    local_player_view_frame(&lw.w, w, v, t, f);
+    CHECK(f.frame_fx.local_max_health == 400);
+    lw.w.rules.mp_session = false;
     // A raised, settled sight is the CanFire verdict: both latches follow it.
     v.local_dead = false;
     CHECK(player_view_set_engaged(v, true, false));

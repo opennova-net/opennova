@@ -245,6 +245,10 @@ Title make() {
 	//  @0x5820C0 - `mov eax, 200h` @0x582177; FrameFX_DrawPass @0x580F30 reads the same two words
 	//  (dfx2.exe)].
 	t.frame_fx_work_side = 512;
+	// DFX2-48: the low-health ring [orig: the twin of Render_ProcessMainSceneFrame @0x5C9000 -
+	//  the fraction @0x5C991D, FrameFX_ApplyScreenEffect(5, (0x10000 - fraction) / 32768)
+	//  @0x5C995D (dfx2.exe)].
+	t.low_health_screen_effect = true;
 	return t;
 }
 

@@ -321,6 +321,13 @@ struct Title {
 	// that draws into the work rect (runtime/renderer/frame_fx_effects.h frame_fx_work_side):
 	// Jointops.exe's 256, dfx2.exe's 512. 0 unwitnessed.
 	int32_t frame_fx_work_side = 0;
+	// DFX2-48: the scene frame dispatches FrameFX's low-health ring (type 5) below the local
+	// player's health ceiling (runtime/renderer/frame_fx_effects.h FrameFxFrameInputs::
+	// low_health_ring). Jointops.exe's dispatcher carries the type with no caller.
+	// [orig: FrameFX_ApplyScreenEffect @0x584440 (callers @0x5CA92E, @0x5CAA3F, @0x5CAA71,
+	//  @0x5CAA97: types 0, 4, 1, 2)] [orig: the twin of Render_ProcessMainSceneFrame @0x5C9000 -
+	//  @0x5C98DE..0x5C995D (dfx2.exe)]
+	bool low_health_screen_effect = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

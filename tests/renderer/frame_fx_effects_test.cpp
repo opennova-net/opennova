@@ -153,6 +153,65 @@ void damage_blur_replaces_then_cross_fades() {
 	CHECK(rand.next == 0);
 }
 
+// DFX2-48, type 5: under a title whose scene frame dispatches it, the local player below its
+// health ceiling takes the capture, its downsample and the Ring pass at alpha
+// min(sqrt((0x10000 - fraction) / 32768), 1), radius (2.5 f + 0.5) / 512, base 1/1024; it runs
+// ahead of the death blur. Jointops.exe's scene frame never calls it.
+// [orig: sub_583B60 @0x583B60; FrameFX_DrawPass @0x582bb0 (the 10 vertices)] [orig: the twin of
+//  Render_ProcessMainSceneFrame @0x5c9000 - @0x5c98e2..0x5c995d (dfx2.exe)]
+void low_health_ring_runs_below_the_ceiling_under_its_title() {
+	FrameFxPlannerState state;
+	ScriptedRand rand;
+	FrameFxFrameInputs in;
+	in.view.local_present = true;
+	in.view.local_health = 50;
+	in.view.local_max_health = 100;
+	CHECK(plan_frame_fx(in, state, rand.fn()).before_bloom.empty()); // Jointops.exe's
+	in.low_health_ring = true;
+	FrameFxFramePlan plan = plan_frame_fx(in, state, rand.fn());
+	CHECK(count_kind(plan.before_bloom, FrameFxStepKind::CaptureFrame) == 1);
+	const FrameFxPass *ring = nth_pass(plan.before_bloom, 1);
+	CHECK(ring != nullptr);
+	if (ring != nullptr) {
+		CHECK(ring->source == FrameFxBuffer::WorkA && ring->target == FrameFxBuffer::Frame);
+		CHECK(ring->stage == FrameFxStage::AverageBlend && ring->taps == FrameFxTaps::Ring);
+		CHECK(ring->viewport_rect && ring->reduced_u && ring->count == 1);
+		CHECK(ring->angle_degrees == 0 && ring->angle_step_degrees == 0);
+		CHECK(near(ring->base, 1.0f / 1024.0f));
+		// Half health: the strength 1, so f = 1 and the radius 3 / 512.
+		CHECK(near(ring->constant_alpha, 1.0f) && near(ring->radius, 3.0f / 512.0f));
+	}
+	// 87 of 100: the fraction 57016, the strength 8520 / 32768.
+	in.view.local_health = 87;
+	CHECK(near(frame_fx_low_health_strength(in.view), 8520.0f / 32768.0f));
+	ring = nth_pass(plan_frame_fx(in, state, rand.fn()).before_bloom, 1);
+	const float f = std::sqrt(8520.0f / 32768.0f);
+	CHECK(ring != nullptr && near(ring->constant_alpha, f) &&
+			near(ring->radius, (2.5f * f + 0.5f) / 512.0f));
+	// At the ceiling or past it nothing; a 0 ceiling counts as 1; no local player nothing.
+	in.view.local_health = 100;
+	CHECK(plan_frame_fx(in, state, rand.fn()).before_bloom.empty());
+	in.view.local_health = 150;
+	CHECK(frame_fx_low_health_strength(in.view) < 0.0f);
+	in.view.local_health = 0;
+	in.view.local_max_health = 0;
+	CHECK(near(frame_fx_low_health_strength(in.view), 2.0f));
+	in.view.local_present = false;
+	CHECK(frame_fx_low_health_strength(in.view) < 0.0f);
+	// Dead at 0: the ring at f = 1 first, then the death blur's capture.
+	in.view.local_present = true;
+	in.view.local_max_health = 100;
+	in.view.local_dead = true;
+	in.view.death_elapsed_ticks = 30;
+	plan = plan_frame_fx(in, state, rand.fn());
+	CHECK(count_kind(plan.before_bloom, FrameFxStepKind::CaptureFrame) == 2);
+	ring = nth_pass(plan.before_bloom, 1);
+	CHECK(ring != nullptr && ring->taps == FrameFxTaps::Ring && near(ring->constant_alpha, 1.0f));
+	const FrameFxPass *death = nth_pass(plan.before_bloom, 3);
+	CHECK(death != nullptr && death->taps == FrameFxTaps::RadialFan);
+	CHECK(rand.next == 0);
+}
+
 // Type 4 [orig: FrameFX_DeathBlur @0x5833a0; d @0x5ca9fb..0x5caa34]
 void death_blur_grows_through_one_two_and_three_fan_passes() {
 	FrameFxPlannerState state;
@@ -465,6 +524,7 @@ void nvg_tint_and_glow_follow_their_pixel_shaders() {
 
 int main() {
 	work_side_is_the_titles();
+	low_health_ring_runs_below_the_ceiling_under_its_title();
 	capture_side_is_the_power_of_two_floor_of_one_less();
 	quiet_frame_plans_only_the_bloom();
 	bloom_kernel_reduces_u_on_the_first_weighted_pair();
