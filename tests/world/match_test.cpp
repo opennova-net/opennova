@@ -1589,6 +1589,102 @@ void test_own_flag_touch_syncs_its_definition_pose() {
     CHECK(world->match.player(blue)->stats[MatchStats::kFlagSaves] == 1);
 }
 
+// A 2 x 2 u face quad, normal +z, one unit above its entity's origin, the
+// entity raycast's target (Physics_RaycastEntityPool walks CFAC faces).
+CollisionModel deck_model() {
+    CollisionModel m;
+    constexpr int32_t kOne = 65536;
+    m.face_vertices = {{-256, -256, 256}, {256, -256, 256}, {256, 256, 256}, {-256, 256, 256}};
+    const auto face = [&](int a, int b, int c) {
+        CollisionFace f;
+        f.v[0] = static_cast<int16_t>(a);
+        f.v[1] = static_cast<int16_t>(b);
+        f.v[2] = static_cast<int16_t>(c);
+        f.normal[2] = 16384;
+        f.axis = 1;
+        f.plane_dist = -kOne;
+        f.min[0] = f.min[1] = -kOne;
+        f.max[0] = f.max[1] = kOne;
+        f.min[2] = f.max[2] = kOne;
+        f.material = 5;
+        m.faces.push_back(f);
+    };
+    face(0, 1, 2);
+    face(0, 2, 3);
+    m.sections.assign(1, {});
+    m.sections[0].face_count = 2;
+    m.sections[0].face_vertex_count = 4;
+    return m;
+}
+
+// The definition-pose sync's snap takes as its ground the entity a ray from
+// half a unit above the pose to ten units below it meets (the flag itself
+// excluded), and both of its legs rebuild the flag's proximity list where it
+// then stands, so a drop's indoors bit does not outlive the sync; the 0x2F
+// record carries that ground.
+// [orig: Entity_SyncPositionFromDefinition @0x43A9B0 - Entity_BuildProximityList
+//  @0x43AA50 (near) / @0x43AB25 (snap), the ray @0x43AAE4..0x43AB18,
+//  Physics_RaycastNearestEntity @0x43AB1C, the +0x28 store @0x43AB22]
+void test_definition_pose_sync_rays_its_ground() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 4);
+    world->registry.configure_pool(2, 4);
+    CollisionWorld collision;
+    world->collision = &collision;
+    MatchRules flag_ball;
+    flag_ball.game_type = gt::kFlagBall;
+    world->match.configure(flag_ball);
+    Entity deck;
+    deck.kind = EntityKind::Item;
+    deck.item_id = 4302;
+    deck.item_type_index = 3;
+    deck.has_item_def = true;
+    deck.alive = true;
+    deck.bound_radius = 3.0f;
+    deck.position = {10.0f, 20.0f, 0.0f};
+    const EntityHandle deck_handle = world->registry.spawn(2, deck);
+    collision.assign_entity(deck_handle, collision.add_model(deck_model()));
+    // The flag's definition pose two units over the deck's face, off its diagonal.
+    const EntityHandle flag = objective(*world, 4095, 0, {10.25f, 20.5f, 3.0f});
+    CHECK(!world->match.sync_flag_to_authored_pose(*world, flag)); // at the pose
+    CHECK(world->match.drain_gameplay_events().empty());
+
+    // Near the pose (one unit off): the flag stays, its proximity list rebuilt.
+    Entity *row = world->registry.get(flag);
+    row->position = {11.25f, 20.5f, 3.0f};
+    row->flags |= kEntityFlagIndoors;
+    CHECK(!world->match.sync_flag_to_authored_pose(*world, flag));
+    CHECK(row->position.x == 11.25f);
+    CHECK((row->flags & kEntityFlagIndoors) == 0);
+    CHECK(world->match.drain_gameplay_events().size() == 1);
+
+    // Off the pose: the snap, the deck as its ground, the indoors bit re-derived.
+    row->position = {40.0f, 0.0f, 3.0f};
+    row->flags |= kEntityFlagIndoors;
+    row->ground_target = EntityHandle{};
+    CHECK(world->match.sync_flag_to_authored_pose(*world, flag));
+    CHECK(row->position.x == 10.25f && row->position.y == 20.5f && row->position.z == 3.0f);
+    CHECK(row->ground_target == deck_handle);
+    CHECK((row->flags & kEntityFlagIndoors) == 0);
+    const std::vector<MatchGameplayEvent> snap = world->match.drain_gameplay_events();
+    CHECK(snap.size() == 1);
+    if (snap.size() == 1) {
+        CHECK(snap[0].kind == MatchGameplayEventKind::FlagDrop);
+        CHECK(snap[0].ground == deck_handle);
+    }
+
+    // Twelve units over the deck the ray (ten units down) meets nothing.
+    world->registry.despawn(flag);
+    const EntityHandle high = objective(*world, 4095, 0, {10.25f, 20.5f, 13.0f});
+    world->match.sync_flag_to_authored_pose(*world, high);
+    Entity *high_row = world->registry.get(high);
+    high_row->position = {40.0f, 0.0f, 13.0f};
+    high_row->ground_target = deck_handle;
+    CHECK(world->match.sync_flag_to_authored_pose(*world, high));
+    CHECK(!high_row->ground_target.valid());
+}
+
 // The pickup leg scores and clears the toucher's damage-disabled word (+0x124)
 // whether or not the attach takes the flag: an occupied flag stays where it is.
 // [orig: Entity_ProcessWaypointInteraction @0x4AD936..0x4AD955;
@@ -2281,6 +2377,7 @@ int main() {
     test_a_solid_neighbour_does_not_shadow_a_takeable_touch();
     test_a_carrier_still_saves_its_own_flag();
     test_own_flag_touch_syncs_its_definition_pose();
+    test_definition_pose_sync_rays_its_ground();
     test_pickup_leg_scores_even_when_the_attach_refuses();
     test_bay_arm_alone_clears_a_defless_carried_link();
     test_flag_attach_in_session_sends_a_second_state();

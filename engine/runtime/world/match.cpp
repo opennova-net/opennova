@@ -978,18 +978,32 @@ bool Match::sync_flag_to_authored_pose(World &world, EntityHandle flag_handle) {
         static_cast<int64_t>(std::sqrt(static_cast<long double>(dx * dx + dy * dy))) < 0x20000 &&
         (dz < 0 ? -dz : dz) < 0x20000; // [orig: @0x43aa3b / @0x43aa4d]
     if (!near_home) {
-        // The snap: position and heading back to the definition pose; the
-        // ground link is re-resolved by a downward raycast in retail
-        // (@0x43ab22) — this port clears it like the timeout return does, no
-        // raycast seam here.
-        flag->position = state->home;                 // [orig: @0x43aa7d..0x43aa96]
+        // The snap: position and heading back to the definition pose, then the
+        // ground link the nearest pool-2, then pool-1 entity a ray from half a
+        // unit above the pose to ten units below it meets, the flag itself
+        // excluded (a world with no collision world has none to meet).
+        // [orig: @0x43aa7d..0x43aa96 (the snap); the ray (x, y, z + 0x8000) ->
+        //  (x, y, z - 0xA0000) @0x43aae4..0x43ab18, Physics_RaycastNearestEntity
+        //  @0x5394B0 (the call @0x43ab1c), the +0x28 store @0x43ab22]
+        // [orig: the twin's ray @0x43a8e4..0x43a922 (dfx2.exe)]
+        flag->position = state->home;
         restore_authored_heading(*flag, state->home_heading);
-        flag->ground_target = EntityHandle{};
+        flag->ground_target = world.collision != nullptr
+            ? world.collision->raycast_nearest_entity(
+                  world, flag_handle, FixedVec3{home_x, home_y, io::bam_add(home_z, 0x8000)},
+                  FixedVec3{home_x, home_y, io::bam_sub(home_z, 0xA0000)})
+            : EntityHandle{};
     }
-    // Both paths publish the 19-B 0x2F state and nothing else (no 0x1E, no
-    // scoring): the FlagDrop-shaped record is the feed-less lane.
-    // [orig: Entity_SyncPositionFromDefinition @0x43A9B0 (the
-    // Server_SendDestructibleDeathPacket calls @0x43AA6B / @0x43AB40)]
+    // Both legs re-run the flag's proximity list where it now stands (the
+    // indoors bit and the blink quad), then publish the 19-B 0x2F state and
+    // nothing else (no 0x1E, no scoring): the FlagDrop-shaped record is the
+    // feed-less lane.
+    // [orig: Entity_SyncPositionFromDefinition @0x43A9B0 - Entity_BuildProximityList
+    //  @0x43AA50 / @0x43AB25, the Server_SendDestructibleDeathPacket calls
+    //  @0x43AA6B / @0x43AB40]
+    // [orig: the twin's @0x43A850 / @0x43A925, @0x43A86B / @0x43A940 (dfx2.exe)]
+    if (world.collision != nullptr)
+        world.collision->refresh_blink(world, *flag);
     gameplay_events_.push_back({MatchGameplayEventKind::FlagDrop,
                                 EntityHandle{},
                                 flag_handle,

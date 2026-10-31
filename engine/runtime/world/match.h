@@ -394,9 +394,11 @@ class Match {
     void drop_carried_object(World &world, EntityHandle player);
     // Re-sync a flag to its authored pose without a feed event or scoring: a
     // flag already AT that pose is left alone (no send); one displaced under
-    // 2 u keeps its position but re-publishes its 0x2F state; one displaced
-    // further snaps home, drops its ground link, and publishes. Returns true
-    // only for the snap. The 1 Hz carry-limit break is its caller here.
+    // 2 u keeps its position but rebuilds its proximity list and re-publishes
+    // its 0x2F state; one displaced further snaps home, takes the entity a
+    // downward ray meets as its ground, rebuilds its proximity list and
+    // publishes. Returns true only for the snap. Its callers: the 1 Hz
+    // carry-limit break and the own-flag arms.
     // [orig: Entity_SyncPositionFromDefinition @0x43A9B0 — equality return
     //  @0x43a9f8, near path @0x43aa3b..0x43aa7c, snap + ground raycast +
     //  send @0x43aa7d..0x43ab40]
