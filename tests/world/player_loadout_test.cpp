@@ -298,8 +298,8 @@ void test_a_windup_survives_the_applies_and_the_spawn_walk_clears_it() {
 // The apply's select (LoadoutApplySelect): the held weapon's combo, or under a protocol whose
 // S2C 0x5A apply takes the kit's last primary row (DFX2-35) that row's, whatever the body holds,
 // and AdmDef 0's (the "null" def, combo 0) when the kit lists no primary.
-// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x4296BC..0x4296D4;
-//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 (dfx2.exe) - @0x42B0AB..0x42B0BD,
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x4296BC..0x4296D4]
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 (dfx2.exe) - @0x42B0AB..0x42B0BD,
 //  @0x42B4F3..0x42B50B]
 void test_the_apply_selects_the_held_weapon_or_the_last_primary_row() {
     Rig r;

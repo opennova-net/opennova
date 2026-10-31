@@ -215,8 +215,9 @@ void world_state_folds_the_done_records() {
 
 // A DFX2 joiner's 0x0F raises the deploy screen whatever the flags byte and the death screen; a
 // JO joiner's clears it and raises it only for bit 0 with no death screen up (DFX2-34,
-// ProtocolInMatch::s2c_0f). [orig: NapiNPClientMsg_0x00F @0x42e2d8, @0x42e2ed..0x42e2f8;
-//  `mov g_DeployScreenActive, al` (1) @0x42fdc8 in NapiNPClientMsg_0x00F @0x42fcf0 (dfx2.exe)]
+// ProtocolInMatch::s2c_0f). [orig: NapiNPClientMsg_0x00F @0x42e2d8, @0x42e2ed..0x42e2f8]
+// [orig: `mov g_DeployScreenActive, al` (1) @0x42fdc8 in NapiNPClientMsg_0x00F @0x42fcf0
+//  (dfx2.exe)]
 void world_state_raises_the_deploy_screen() {
 	std::vector<uint8_t> body = coop_world_state_load(); // its flags byte 0
 	const auto folded = [&](const Protocol *protocol, const char *code, bool death_screen) {

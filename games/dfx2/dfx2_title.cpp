@@ -20,7 +20,7 @@ constexpr const char *kAbsentResourceRoles[] = { "cmap_menu", "vehicle_menu", "n
 
 // dfx2.exe's HUD label fonts: Joint Operations' three tiers, then Arial20b / 20n to 1280 pixels,
 // Arial28b / 28n to 1600 and Arial32b / 32n above, over 1280 / 1600 / 1920; Impac44b and Impac76b
-// over 1600 (DFX2-39).
+// over 1600 (DFX2-80).
 // [orig: HUD_InitAllFonts @0x51BD70 (dfx2.exe) - the widths @0x51BDCE / @0x51BDFE / @0x51BE2E /
 //  @0x51BE5B / @0x51BE88, the names @0x51BDDA..0x51BECD, the scale @0x51BEE1, Impac44b @0x51BF0D
 //  and Impac76b @0x51BF40 over 1600 @0x51BF2E / @0x51BF53]

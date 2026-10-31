@@ -238,7 +238,7 @@ int main() {
 			"the percent to alpha factor, 2.55");
 
 	// The label fonts by width, each title's table (Title::hud_fonts): Jointops.exe's three tiers
-	// and its Impact pair over 800; dfx2.exe's six (DFX2-39) and its Impact pair over 1600; a title
+	// and its Impact pair over 800; dfx2.exe's six (DFX2-80) and its Impact pair over 1600; a title
 	// with no table chooses no file
 	// [orig: HUD_InitAllFonts @0x51EE20] [orig: @0x51BD70 (dfx2.exe)].
 	{

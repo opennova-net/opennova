@@ -364,8 +364,8 @@ void test_a_fixed_class_protocol_writes_its_class_before_the_page() {
 
 // A client's S2C 0x5A apply selects as its protocol has it (DFX2-35, ProtocolInMatch::s2c_5a):
 // JO's the weapon the body holds, DFX2's the grant's last primary row.
-// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x4296BC..0x4296D4;
-//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 (dfx2.exe) - @0x42B0AB..0x42B0BD]
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x4296BC..0x4296D4]
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 (dfx2.exe) - @0x42B0AB..0x42B0BD]
 void test_the_grant_apply_select_is_the_protocols() {
 	CHECK(inmatch::grant_apply_select(opennova::title_protocol("jo")) ==
 			w::LoadoutApplySelect::HeldWeapon);

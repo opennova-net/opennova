@@ -153,8 +153,8 @@ void kit_from_authoritative_grant(const world::WeaponTable &weapons,
 // The weapon a client's S2C 0x5A apply selects (world::local_loadout_apply_accept's
 // `select`), as the session's protocol has it (ProtocolInMatch::s2c_5a): JO's the weapon the
 // body holds, DFX2's the grant's last primary row.
-// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x4296BC..0x4296D4;
-//  NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 (dfx2.exe) - @0x42B0AB..0x42B0BD,
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - @0x4296BC..0x4296D4]
+// [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 (dfx2.exe) - @0x42B0AB..0x42B0BD,
 //  @0x42B4F3..0x42B50B]
 world::LoadoutApplySelect grant_apply_select(const Protocol *protocol);
 

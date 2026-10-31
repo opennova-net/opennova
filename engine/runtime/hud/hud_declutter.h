@@ -28,7 +28,7 @@ namespace opennova::hud {
 // gate on them, but slot 9, which dfx2.exe's EXPPOINTS element reads (DFX2-36,
 // HudFrameCompiler::element_exp_points). [orig: the HUD_ParseHudposToken arm
 // table @ 0x59F370; the read sites are the per-slot g_HUDDeclutterVisible cmps
-// cited at each element; sub_5A6D20 @0x5A6EDE (dfx2.exe)]
+// cited at each element] [orig: sub_5A6D20 @0x5A6EDE (dfx2.exe)]
 enum HudDeclutterSlot : int {
 	kDeclutterMsnTitle = 0,
 	kDeclutterFarpInfo = 1,

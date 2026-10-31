@@ -150,7 +150,7 @@ void test_a_driver_seat_refuses_after_the_latch() {
 // a sourceless press (the press leg's mirror); a second occupant on the carrier fires, and so
 // does JO's title with the lone gunner.
 // [orig: the twin of Input_HandleActionBinding_0 @0x4DD4C0 (dfx2.exe) - @0x4DD8FE..0x4DD92C,
-//  @0x4DDABB..0x4DDADB; Input_HandleActionBinding_0 @0x4E0420 - @0x4E085C..0x4E086F,
+//  @0x4DDABB..0x4DDADB] [orig: Input_HandleActionBinding_0 @0x4E0420 - @0x4E085C..0x4E086F,
 //  @0x4E09CB..0x4E0A06]
 void test_a_lone_gunner_holds_fire_under_dfx2s_title() {
 	Fixture f;
