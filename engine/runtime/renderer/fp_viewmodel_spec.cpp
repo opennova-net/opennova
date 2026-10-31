@@ -1,5 +1,7 @@
 #include <runtime/renderer/fp_viewmodel_spec.h>
 
+#include <base/io/fixed.h>
+#include <formats/def/def.h>
 #include <formats/threedi/threedi_3di3.h>
 
 #include <algorithm>
@@ -23,6 +25,8 @@ FpViewmodelSpec fp_viewmodel_spec(bool has_def, const std::string &gfx1,
 	// Player_RenderFirstPersonViewModel no-channel branch @0x4def88..0x4defcf].
 	spec.gun = gfx1;
 	spec.adm = animadm;
+	// Both submits pose by the gun's part table (@0x4df088).
+	spec.rig = gfx1;
 	// [orig: @ 0x4df057/@ 0x4defe3 — emplaced mounts omit the carried
 	// character arms]
 	spec.show_arms = (flags & kWeaponFlagEmplaced) == 0u && !character_arms.empty();
@@ -73,6 +77,36 @@ FpViewmodelPose fp_viewmodel_pose(const float view_units[3], const float rot_bia
 		pose.origin[i] = bias.m[i][0] * offset[0] + bias.m[i][1] * offset[1] + bias.m[i][2] * offset[2];
 	}
 	return pose;
+}
+
+FpViewmodelPose fp_viewmodel_root(const float pos_units[3], const float def_rot_bias_deg[3],
+		const float rig_rot_deg[3], const float *sim_view_units, const float *sim_rot_bias_deg) {
+	float rotation[3] = {def_rot_bias_deg[0], def_rot_bias_deg[1], def_rot_bias_deg[2]};
+	float view_units[3];
+	for (int i = 0; i < 3; ++i) {
+		if (sim_rot_bias_deg != nullptr) rotation[i] += sim_rot_bias_deg[i];
+		view_units[i] = sim_view_units != nullptr ? sim_view_units[i] : pos_units[i] / kWeaponDefPosScale;
+	}
+	return fp_viewmodel_pose(view_units, rotation, rig_rot_deg);
+}
+
+FpViewmodelDef fp_viewmodel_def(const def::DefWeaponDef &def) {
+	FpViewmodelDef out;
+	out.weapon_name = def.weapon_name;
+	out.gfx1 = def.gfx1;
+	out.gfx3 = def.gfx3;
+	out.animadm = def.animadm;
+	for (int i = 0; i < 3; ++i) {
+		out.pos_units[i] = def.pos[i];
+		// The parser keeps the rotation columns as Q16 degrees.
+		out.rot_bias_deg[i] = static_cast<float>(def.pos_rotation_deg_q16[i] / io::kFp16OneD);
+		out.tpos_units[i] = def.tpos[i];
+	}
+	out.renderfov_h_deg = def.renderfov;
+	out.flags = def.flags;
+	out.scope_max_mag = def.scope_max_mag;
+	out.clipsize = def.clipsize;
+	return out;
 }
 
 int fp_arms_part_reach(const threedi::Threedi3di3 &arms) {

@@ -262,6 +262,36 @@ void test_preview_motion_steps_per_update() {
 	CHECK(yaw > -0x58000000 - 64 && yaw < -0x58000000 + 64);
 }
 
+// The portrait's model: framed from the clock word, stepped once a drained menu
+// update, hovered only while the window is claimed under a title that hovers;
+// the body and the head compose, never the arms [orig: CWnd_IsMouseOver @0x6467d0;
+// PlayerInfo_RenderPlayerPreview3D @0x5609c0].
+void test_preview_model() {
+	CHECK(kPlayerInfoPreviewParts[0] == avatars::AVATAR_PART_BODY);
+	CHECK(kPlayerInfoPreviewParts[1] == avatars::AVATAR_PART_HEAD);
+	PlayerInfoPreview preview;
+	// Nothing moves before the frame.
+	CHECK(preview.advance(1.0, 0) == 0 && preview.yaw_bam == 0);
+	preview.frame(1);
+	CHECK(preview.framed && preview.yaw_bam == 41 * 0xB60B60);
+	// A frame under the 4 ms drain floor runs no update.
+	CHECK(preview.advance(0.002, 0) == 0 && preview.yaw_bam == 41 * 0xB60B60);
+	preview.frame(1);
+	int updates = 0;
+	for (int i = 0; i < 5; ++i) updates += preview.advance(0.016, 0);
+	CHECK(preview.yaw_bam == static_cast<int32_t>(41u * 0xB60B60u + static_cast<uint32_t>(updates) * 0x800000u));
+	CHECK(updates > 0 && preview.zoom_blend == 0.0f);
+	CHECK(preview.camera_distance_scale(2.7f) == 2.7f);
+	// A title that never hovers keeps the rest motion under the pointer.
+	preview.set_hovered(true, false);
+	CHECK(!preview.hovered);
+	preview.set_hovered(true, true);
+	CHECK(preview.hovered);
+	for (int i = 0; i < 30; ++i) preview.advance(0.1, 0);
+	CHECK(preview.zoom_blend > 0.5f);
+	CHECK(preview.camera_distance_scale(2.7f) < 2.7f);
+}
+
 int main() {
 	test_cascade_and_voice();
 	test_missing_stages_and_invalid_selections();
@@ -269,6 +299,7 @@ int main() {
 	test_combo_list_event();
 	test_preview_initial_yaw();
 	test_preview_motion_steps_per_update();
+	test_preview_model();
 	std::cout << "player_info_avatars: " << failures << " failures\n";
 	return failures != 0;
 }

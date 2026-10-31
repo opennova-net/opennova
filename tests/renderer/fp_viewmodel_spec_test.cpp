@@ -4,6 +4,7 @@
 
 #include <runtime/renderer/fp_viewmodel_spec.h>
 
+#include <formats/def/def.h>
 #include <formats/threedi/threedi_3di3.h>
 
 #include <cmath>
@@ -159,6 +160,74 @@ int main() {
 		bool same_origin = true;
 		for (int i = 0; i < 3; ++i) same_origin = same_origin && close(turned.origin[i], pose.origin[i]);
 		check(same_origin, "the rig's axis map leaves the offset as the cant turns it");
+	}
+
+	// Both submits pose by the gun's part table, whatever the clip set is
+	// named (M21B_1st over M21_1st's clips) [orig: @0x4df088].
+	{
+		const FpViewmodelSpec s = fp_viewmodel_spec(true, "M21B_1st", "ArmsG", "M21_1st", 0);
+		check(s.rig == "M21B_1st" && s.adm == "M21_1st", "the rig is the gun's, the clips the def's");
+		check(fp_viewmodel_spec(false, "M21B_1st", "ArmsG", "M21_1st", 0).rig.empty(),
+				"nothing submitted, no rig");
+	}
+
+	// The FP pass's depth band: the nearest tenth [orig: @0x58a7b0].
+	check(opennova::renderer::kViewmodelPassDepthMax == 0.1f, "the FP depth band ends at 0.1");
+
+	// The frame's root: with a sim, its blended units and its ADS rotation on
+	// top of the def's cant; without one, the raw def pos over 256 and the
+	// def's cant alone [orig: @0x4dd380; flt_7D1D70 @0x544770].
+	{
+		const auto close = [](float a, float b) { return std::fabs(a - b) < 1e-5f; };
+		const float pos[3] = {-19.46f, 21.19f, -161.31f};
+		const float cant[3] = {5.0f, 3.75f, 353.0f};
+		const float rig[3] = {0.0f, opennova::renderer::kViewmodelRigYawDeg, 0.0f};
+		const float scaled[3] = {pos[0] / 256.0f, pos[1] / 256.0f, pos[2] / 256.0f};
+		const opennova::renderer::FpViewmodelPose bare =
+				opennova::renderer::fp_viewmodel_root(pos, cant, rig, nullptr, nullptr);
+		const opennova::renderer::FpViewmodelPose want_bare =
+				opennova::renderer::fp_viewmodel_pose(scaled, cant, rig);
+		bool same = true;
+		for (int i = 0; i < 9; ++i) same = same && close(bare.basis[i], want_bare.basis[i]);
+		for (int i = 0; i < 3; ++i) same = same && close(bare.origin[i], want_bare.origin[i]);
+		check(same, "no sim: the def pos over 256 under the def's cant");
+		const float units[3] = {-0.2f, 0.1f, -0.6f};
+		const float ads[3] = {1.0f, -2.0f, 0.5f};
+		const float summed[3] = {cant[0] + ads[0], cant[1] + ads[1], cant[2] + ads[2]};
+		const opennova::renderer::FpViewmodelPose live =
+				opennova::renderer::fp_viewmodel_root(pos, cant, rig, units, ads);
+		const opennova::renderer::FpViewmodelPose want_live =
+				opennova::renderer::fp_viewmodel_pose(units, summed, rig);
+		same = true;
+		for (int i = 0; i < 9; ++i) same = same && close(live.basis[i], want_live.basis[i]);
+		for (int i = 0; i < 3; ++i) same = same && close(live.origin[i], want_live.origin[i]);
+		check(same, "a sim: its units under the def's cant plus its ADS rotation");
+	}
+
+	// The def slice: the names, the raw pos/tpos units, the Q16 rotation
+	// columns as degrees, the renderfov, the flags, the zoom, the clip.
+	{
+		opennova::def::DefWeaponDef def = {};
+		std::snprintf(def.weapon_name, sizeof(def.weapon_name), "WPN_AK47AUTO");
+		std::snprintf(def.gfx1, sizeof(def.gfx1), "AKM_1st");
+		std::snprintf(def.gfx3, sizeof(def.gfx3), "AKM_3rd");
+		std::snprintf(def.animadm, sizeof(def.animadm), "AKM_1st");
+		def.pos[0] = -19.46f;
+		def.tpos[2] = -152.56f;
+		def.pos_rotation_deg_q16[0] = 5 * 65536;
+		def.pos_rotation_deg_q16[1] = 245760; // 3.75
+		def.renderfov = 80.0f;
+		def.flags = 0x102;
+		def.scope_max_mag = 2.0f;
+		def.clipsize = 30;
+		const opennova::renderer::FpViewmodelDef d = opennova::renderer::fp_viewmodel_def(def);
+		check(d.weapon_name == "WPN_AK47AUTO" && d.gfx1 == "AKM_1st" && d.gfx3 == "AKM_3rd" &&
+						d.animadm == "AKM_1st",
+				"the def slice carries the names");
+		check(d.pos_units[0] == -19.46f && d.tpos_units[2] == -152.56f, "the raw view-bias units");
+		check(d.rot_bias_deg[0] == 5.0f && d.rot_bias_deg[1] == 3.75f, "the rotation columns in degrees");
+		check(d.renderfov_h_deg == 80.0f && d.flags == 0x102 && d.scope_max_mag == 2.0f && d.clipsize == 30,
+				"the renderfov, flags, zoom and clip");
 	}
 
 	if (failures) {

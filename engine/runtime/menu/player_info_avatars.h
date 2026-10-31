@@ -2,6 +2,7 @@
 
 #include <formats/avatars/avatars.h>
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/world/tick_accumulator.h>
 
 #include <cstdint>
 #include <string>
@@ -104,4 +105,47 @@ int32_t player_info_preview_initial_yaw_bam(uint32_t seed);
 //  reads both @0x560a67 / @0x560c3b] (D-PLAYERINFO-37).
 float player_info_preview_blend_step(float blend, bool hovered);
 int32_t player_info_preview_yaw_step(int32_t yaw, bool hovered, uint32_t tick_ms);
+
+// The combo parts the portrait submits, in its order: the body, then the head,
+// each after its own camo store, both with the preview channel's bone matrices;
+// the combo's arms graphic is never submitted [orig:
+// PlayerInfo_RenderPlayerPreview3D @0x5609c0 - Avatar_SetBodyCamoCtrl @0x57a390
+// and the body submit (blip+0) @0x56110b, Avatar_SetHeadCamoCtrl @0x57a370 and
+// the head submit (blip+4) @0x56113c]. The skinned parts play the preview idle
+// (PI_Idle.BAD) on the rest skeleton Dt1rst.bad, the raw .bad pair the preview
+// init loads (formats/avatars/preview_animation.h) [orig:
+// PlayerInfo_InitPreviewModel @0x5600d0 - BoneFile_Load + AnimChannel_InitFromData].
+inline constexpr avatars::AvatarPartKind kPlayerInfoPreviewParts[2] = {
+	avatars::AVATAR_PART_BODY, avatars::AVATAR_PART_HEAD};
+
+// The PLAYER_INFO portrait's model state, which the embedder's preview device
+// draws: its facing (g_PlayerPreviewYaw, a BAM word), its hover zoom blend
+// (g_PlayerPreviewZoomBlend), the hover the update reads and the menu mode's
+// frame-time bank its updates drain from (world::TickAccumulator: the menu
+// update runs on the game loop's drained ticks). The hover is the PLAYER_PREVIEW
+// window's mouse-over state -- the menu pump's claim on the window, which
+// CWnd_IsMouseOver reads as its state 2 or 3 -- under a title that hovers it at
+// all (Title::player_info_preview_hover) [orig: CWnd_IsMouseOver @0x6467d0 -
+// the state word +0xE8 == 2 || == 3, the walk in
+// PlayerInfo_UpdatePlayerPreviewAnimation @0x55dba0].
+struct PlayerInfoPreview {
+	bool framed = false;
+	bool hovered = false;
+	float zoom_blend = 0.0f;
+	int32_t yaw_bam = 0;
+	world::TickAccumulator bank;
+
+	// A fresh preview model: the initial facing drawn from the clock word
+	// `seed` (player_info_preview_initial_yaw_bam) and the bank afresh.
+	void frame(uint32_t seed);
+	void set_hovered(bool widget_hovered, bool title_hovers);
+	// `delta` seconds of wall clock: every update the bank drains takes one
+	// blend step and one yaw step at the millisecond clock word `tick_ms`;
+	// nothing moves before frame(). Returns the updates run.
+	int advance(double delta, uint32_t tick_ms);
+	// The portrait camera's distance scale at the blend: `rest_scale` at rest,
+	// eased toward rest_scale * kPreviewZoomInScale hovered (the shell's
+	// framing of the blend, formats/avatars/preview_animation.h).
+	float camera_distance_scale(float rest_scale) const;
+};
 } // namespace opennova::menu

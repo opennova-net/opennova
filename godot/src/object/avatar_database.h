@@ -9,7 +9,6 @@
 #include <godot_cpp/variant/vector3i.hpp>
 
 #include <formats/avatars/avatars.h>
-#include <formats/avatars/preview_animation.h>
 #include <runtime/inmatch/character_registry.h>
 
 #include <cstdint>
@@ -62,21 +61,6 @@ private:
 	const opennova::avatars::AvatarDivision *division_at(int nat_index, int div_index) const;
 	const opennova::avatars::AvatarCombo *combo_at(int nat_index, int div_index, int combo_index) const;
 	Ref<AvatarComboRow> combo_row(int nat_index, int div_index, int combo_index) const;
-
-	// The witnessed menu preview constants, re-exported from engine
-	// avatars/preview_animation.h (float/String values cannot be class
-	// constants).
-	static float preview_zoom_in_scale();
-	static String preview_skeleton_bad();
-	static String preview_idle_bad();
-	// A fresh preview model's initial facing, its BAM word: the engine's draw
-	// (menu::player_info_preview_initial_yaw_bam, runtime/menu/player_info_avatars.h
-	// carries the witness) reseeded from the wall clock.
-	static int64_t preview_initial_yaw_bam();
-	// One menu update of the portrait's motion (menu::player_info_preview_blend_step /
-	// player_info_preview_yaw_step carry the witness).
-	static float preview_blend_step(float p_blend, bool p_hovered);
-	static int64_t preview_yaw_step(int64_t p_yaw, bool p_hovered, int64_t p_tick_ms);
 
 protected:
 	static void _bind_methods();

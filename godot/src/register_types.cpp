@@ -64,7 +64,6 @@
 #include "world/runtime_perf_counters.h"
 #include "world/world_view.h"
 #include "world/scar_draw_list.h"
-#include "world/tick_accumulator.h"
 #include "world/scar_presenter.h"
 #include "object/entity_index.h"
 #include "object/entity_ref.h"
@@ -209,6 +208,7 @@
 #include "player/player_move_intent.h"
 #include "player/player_info_kit_restore.h"
 #include "player/player_info_character_state.h"
+#include "player/player_info_preview.h"
 #include "player/player_profiles.h"
 #include "player/player_spawn_loadout.h"
 #include "player/player_viewmodel_def.h"
@@ -334,6 +334,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerInfoKitRestore);
 	GDREGISTER_CLASS(PlayerInfoSideSelection);
 	GDREGISTER_CLASS(PlayerInfoCharacterState);
+	GDREGISTER_CLASS(PlayerInfoPreview);
 	GDREGISTER_CLASS(PlayerProfiles);
 	GDREGISTER_CLASS(GameConfigBlock);
 	GDREGISTER_CLASS(ThrowableVisualRow);
@@ -441,8 +442,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(LoadingScreenInfo);
 	GDREGISTER_CLASS(PostMissionRoute);
 	GDREGISTER_CLASS(RuntimePerfCounters);
-	// The engine's frame-time bank for the menu mode's own updates.
-	GDREGISTER_CLASS(TickAccumulator);
 	GDREGISTER_CLASS(WorldView);
 	GDREGISTER_CLASS(ArmoryWorldView);
 	GDREGISTER_INTERNAL_CLASS(LiveWorldView);

@@ -1001,6 +1001,26 @@ ViewProjection nvg_view_projection(const ViewProjection &frame,
 //  the world pass Render_SetViewProjectionWithDefaults @0x58f6b0].
 float viewmodel_focal_ratio(float world_fov_h_deg, float renderfov_h_deg);
 
+// The first-person pass's projection, the three numbers a presenter that draws
+// the viewmodel inside the world's frame applies to it: the renderfov focal
+// ratio against the world pass's horizontal fov (viewmodel_focal_ratio), the
+// pass's swapped near plane and the world's far plane. Retail draws the gun
+// through its own projection into its own depth band ahead of the world
+// (renderer::kViewmodelPassDepthMax), then flushes it [orig:
+// Player_RenderFirstPersonViewModel @0x4ded60: Render_SwapProjectionNearZ(0.05)
+// @0x4dee29 / restore 0.2 @0x4df0aa, fov = WeaponDef+0x148 @0x4dee71 -> the
+// h->v conversion in Render_SetViewAndProjectionMatrices @0x58d900, the depth
+// band Render_SetViewportDepth01 @0x58a7b0; the default 80.0 = flt_7D1898
+// stored by AdmDef_InitEntryDefaults @0x53ff31, parser key 'renderfov'
+// @0x54482a].
+struct ViewmodelProjectionFeed {
+    float focal_ratio = 1.0f;
+    float near_z = 0.0f;
+    float far_z = 0.0f;
+};
+ViewmodelProjectionFeed viewmodel_projection_feed(float world_fov_h_deg, float renderfov_h_deg,
+                                                  float far_z);
+
 // The first-person view position in RAW weapon.def units: the def `pos`
 // (+0xF4) plus the PUBLISHED position bias (view_bias, g_ViewPosBiasX/Y/Z:
 // the last step's truncating ftol of its interp's current - the hip copy at
@@ -1130,6 +1150,14 @@ void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain
 // Mode 4 [orig: the lerp @0x4389eb..0x438b49]: the death camera's FROM/TO
 // poses lerped against `v.view_tick` (world/death_camera.h); roll rides the
 // same lerp.
+// The presenter only converts and stamps the pose this composes, the on-foot
+// person leg and the TP leg included [orig: Camera_ComputeThirdPersonView
+// @0x437d10 - the person leg @0x437f9c..0x438031, the TP leg
+// @0x438100..0x4383e2]. Tracked deferrals of the chase (net-re section 5.39):
+// the orbit keys (view bits 0x10/0x40 -> orbit_yaw +-0x1000000 a tick
+// @0x437c1b), the zoom keys (view actions 409/410 @0x49c1c5..0x49c23f), the
+// march's bone-collision FORCES (@0x4382d9) and the dead-target 10.0 -> 3.0
+// distance ease @0x437cc0 are unported.
 struct PlayerCameraPose {
     // The view words the call leaves for every reader until the next call
     // [orig: g_ViewPosX..Z @0xA890D4..0xA890DC; g_ViewRotYaw / Pitch / Roll

@@ -221,19 +221,16 @@ void LocalPlayerPresenter::setup(Node *p_world, Camera3D *p_camera, GameplayCame
 	camera_saved_cull_mask_ = p_camera != nullptr ? static_cast<int64_t>(p_camera->get_cull_mask()) : -1;
 	// The player camera never draws the FP body layer: retail renders no local
 	// body in first person, in any pass, so the water mirrors never draw it
-	// either (above the water their reflected collect keeps only the
-	// Reflective-flagged vehicles [orig: Terrain_CollectVisibleEntitiesForReflection
-	// @ 0x5c90a0]) -- the body stays a silhouette source only. The viewmodel
-	// layer stays ADMITTED: the FP arms/weapon draw inside the beauty pass
-	// through their shader-side renderfov projection + depth band (retail's
-	// "viewmodel first" step; PlayerViewmodelRig feeds the projection). The
-	// camera excludes the caster marker layers: the entity-shadow shadow map
-	// is retired (the slot pipeline owns entity shadows through SlotShadow's
-	// RenderingDevice pass, which reserves no visual layer), so nothing needs
-	// the caster markers beauty-admitted any more -- and the FP body/held
-	// weapon are camera-renderable (cast ON, hidden by LAYER) so that pass
-	// walks their visible geometry; an admitted caster marker would leak them
-	// into the beauty pass.
+	// either (above the water their collect keeps the Reflective-flagged
+	// population alone; engine environment/water_mirror.h carries the witness)
+	// -- the body stays a silhouette source only. The viewmodel layer stays
+	// ADMITTED: the FP arms/weapon draw inside the beauty pass through their
+	// shader-side projection (PlayerViewmodelRig). The camera excludes the
+	// caster marker layers: entity shadows are the slot pipeline's
+	// (SlotShadow's RenderingDevice pass reserves no visual layer), and the FP
+	// body/held weapon are camera-renderable (cast ON, hidden by LAYER) so that
+	// pass walks their visible geometry; an admitted caster marker would leak
+	// them into the beauty pass.
 	if (p_camera != nullptr) {
 		p_camera->set_cull_mask((p_camera->get_cull_mask() | visual_layers::VIEWMODEL) &
 				~(visual_layers::FP_BODY_SHADOW_ONLY | visual_layers::SHADOW_CASTER_MASK));
@@ -650,17 +647,23 @@ void LocalPlayerPresenter::set_fly_camera_locked(bool p_locked) {
 }
 
 Vector2 LocalPlayerPresenter::aim_screen_point() const {
-	if (!third_person_) {
-		return kNoProjection; // 1P: the HUD pins the design center [orig: @0x5928a0]
-	}
 	Camera3D *cam = camera();
 	if (world() == nullptr || cam == nullptr || !has_player()) {
 		return kNoProjection;
 	}
-	const Vector2 angles = aim_angles_deg();
 	const Ref<Simulation> aim_sim = sim();
 	const Vector3 eye = eye_position(aim_sim.is_valid() ? aim_sim->get_local_player_position() : Vector3());
-	const Vector3 target = Simulation::aim_ray_endpoint(eye, angles.x, angles.y);
+	const float eye_point[3] = {eye.x, eye.y, eye.z};
+	const bool binoculars = view_.is_valid() && view_->get_binoculars_view_active();
+	const opennova::world::CrosshairAimTarget aim = opennova::world::crosshair_aim_target(third_person_,
+			eye_point, aim_sim.is_valid() ? aim_sim->get_local_player_yaw_deg() : 0.0f,
+			aim_sim.is_valid() ? aim_sim->get_local_player_pitch_deg() : 0.0f, binoculars,
+			binoculars ? view_->get_binocular_yaw_offset_deg() : 0.0f,
+			binoculars ? view_->get_binocular_pitch_offset_deg() : 0.0f);
+	if (!aim.project) {
+		return kNoProjection;
+	}
+	const Vector3 target(aim.point[0], aim.point[1], aim.point[2]);
 	// Through the frame's screen projection (screen_projection): the target's
 	// camera while it is live -- its pixels reach the surface through the
 	// blit's full-surface stretch, so its clip space maps straight onto the
@@ -688,25 +691,9 @@ Vector2 LocalPlayerPresenter::aim_screen_point() const {
 			(-clip.y / clip.w * 0.5f + 0.5f) * surface_size.y);
 }
 
-Vector2 LocalPlayerPresenter::aim_angles_deg() const {
-	const Ref<Simulation> angle_sim = sim();
-	float yaw = angle_sim.is_valid() ? angle_sim->get_local_player_yaw_deg() : 0.0f;
-	float pitch = angle_sim.is_valid() ? angle_sim->get_local_player_pitch_deg() : 0.0f;
-	if (view_.is_valid() && view_->get_binoculars_view_active()) {
-		yaw += view_->get_binocular_yaw_offset_deg();
-		pitch += view_->get_binocular_pitch_offset_deg();
-	}
-	return Vector2(yaw, pitch);
-}
-
-// The eye anchor: Position + CameraOffset, where the local player's
-// CameraOffset is the POSED HEAD BONE minus Position -- sampled from the
-// avatar's render skeleton, the same bone matrices the original builds
-// sim-side. Stance, lean, the walk/run bob, and the jump arc all move the eye
-// exactly as the animation moves the head.
-// [orig: the local bone path @0x4b6bb3 (Entity_BuildBoneTransformMatrices ->
-// head, CameraOffset = head - Position); consumed by the on-foot person leg
-// @0x437f9c. The motor resolves it from the current simulation skeleton.]
+// The eye anchor: Position + the sim's CameraOffset (the posed head bone
+// minus Position, engine world/infantry.cpp carries the witness), else the
+// non-person bump.
 Vector3 LocalPlayerPresenter::eye_position(const Vector3 &p_pos) const {
     const Ref<Simulation> eye_sim = sim();
     if (eye_sim.is_valid()) return p_pos + eye_sim->get_local_player_eye_offset();
@@ -735,26 +722,15 @@ Vector3 LocalPlayerPresenter::avatar_head_world() const {
 	return ObjectModel::from_pose_transform(head.joint_world).origin;
 }
 
-// The soldier's third-person gun: retail's draw 5. The model is the equipped
-// weapon's gfx3 and it is drawn RIGID -- one matrix into every bone slot --
-// so it carries no clip and no skeleton of its own; everything is the attach
-// transform built here.
-//
-// Position is bone 16's own pivot, nudged, carried through that bone's posed
-// matrix: the original's `M16 . (pivot16 + nudge)`, and since `M16 . pivot16`
-// IS the joint world position, that reduces to joint + M16_rotation . nudge,
-// which is what the pose gives us directly. Orientation is NOT bone 16's
-// rotation and NOT one of the aim-overlay classes -- it is the weapon's own
-// attach basis (see PlayerAimOverlay.weapon_attach_angles).
-// [orig: draw @0x4e3c87..0x4e3d99; matrix build @0x4b2180..0x4b22f8; gate
-//  Entity_CanFireWeapon @0x4dcb10]
+// The soldier's third-person gun (world::local_held_weapon_present carries the
+// witnesses): the equipped def's gfx3 at the attach transform -- bone 16's
+// pivot, nudged, through its posed matrix, in the weapon's own attach basis
+// (PlayerAimOverlay.weapon_attach_angles, EntityPresenter's attach leg).
 void LocalPlayerPresenter::update_held_weapon(const Ref<PlayerAimOverlay> &p_overlay) {
 	if (world() == nullptr || visuals_.is_null()) {
 		return;
 	}
 	const Ref<PlayerViewmodelDef> def = visuals_->local_player_viewmodel_def();
-	// 27 of the 94 shipped weapon rows author no gfx3 at all; drawing nothing
-	// is the correct, retail behaviour there, not a missing asset.
 	const String graphic = def.is_valid() ? def->get_gfx3() : String();
 	if (graphic != held_weapon_graphic_) {
 		if (ObjectModel *stale = held_weapon()) {
@@ -771,27 +747,22 @@ void LocalPlayerPresenter::update_held_weapon(const Ref<PlayerAimOverlay> &p_ove
 	if (weapon == nullptr) {
 		return;
 	}
-	if (p_overlay.is_null() || !p_overlay->get_weapon_visible()) {
-		weapon->set_visible(false);
-		return;
-	}
+	const bool weapon_visible = p_overlay.is_valid() && p_overlay->get_weapon_visible();
 	ObjectModel *body = avatar();
-	// Drawn inside the avatar's HEAD submit, at that part's RLOD level clamped
-	// to the weapon's own count (the body when not composed), never through a
-	// threshold walk of its own. [retail BoneCallback_org0_World
-	// @ 0x4e3ce1..0x4e3cf2; the head submit Terrain_RenderSectorEntitiesBySide
-	// @ 0x5c7ffc]
-	if (body != nullptr) {
-		ObjectModel *head = MissionObjectPlacer::avatar_head_part(body);
-		ObjectModel *owner = head != nullptr ? head : body;
+	ObjectModel *head = body != nullptr ? MissionObjectPlacer::avatar_head_part(body) : nullptr;
+	const Variant attach = weapon_visible && body != nullptr
+			? EntityPresenter::held_weapon_attach_transform(body, avatar_world_,
+					  p_overlay->get_weapon_attach_angles(), p_overlay->get_weapon_hand_frame())
+			: Variant();
+	const opennova::world::LocalHeldWeaponPresent present = opennova::world::local_held_weapon_present(
+			weapon_visible, attach.get_type() != Variant::NIL, avatar_drawn(body),
+			third_person_ || debug_body_in_first_person_, head != nullptr);
+	if (weapon_visible && body != nullptr) {
+		ObjectModel *owner = present.lod_owner_head ? head : body;
 		if (weapon->get_authored_lod_owner() != owner) {
 			weapon->set_authored_lod_owner(owner);
 		}
 	}
-	const Variant attach = body != nullptr
-			? EntityPresenter::held_weapon_attach_transform(body, avatar_world_,
-					  p_overlay->get_weapon_attach_angles(), p_overlay->get_weapon_hand_frame())
-			: Variant();
 	if (attach.get_type() == Variant::NIL) {
 		weapon->set_visible(false);
 		return;
@@ -801,27 +772,17 @@ void LocalPlayerPresenter::update_held_weapon(const Ref<PlayerAimOverlay> &p_ove
 	if (weapon->get_global_transform() != attach_transform) {
 		weapon->set_global_transform(attach_transform);
 	}
-	// Drawn inside the body's submit: shown while a view collected the body or a
-	// render slot captured it, as a wire body's gun.
-	weapon->set_visible(avatar_drawn(body));
-	// Same layer rule as the body: first person hides it from every camera by
-	// LAYER while keeping it a shadow source; drawn, it takes the person's
-	// mirror rule, so above the water neither mirror draws it (the reflected
-	// collect keeps the Reflective-flagged vehicles alone
-	// [orig: Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0]). The
-	// model stores the decision and rewrites its instances on the edge only.
-	const bool draw_held_weapon = third_person_ || debug_body_in_first_person_;
-	weapon->set_presentation_layer(draw_held_weapon ? ObjectModel::PRESENTATION_LAYER_LOCAL_BODY
-													: ObjectModel::PRESENTATION_LAYER_LOCAL_BODY_HIDDEN);
+	weapon->set_visible(present.shown);
+	// Hidden from the camera, it stays a shadow source; drawn, it takes the
+	// person's mirror rule (engine environment/water_mirror.h). The model stores
+	// the decision and rewrites its instances on the edge only.
+	weapon->set_presentation_layer(present.camera_visible ? ObjectModel::PRESENTATION_LAYER_LOCAL_BODY
+														  : ObjectModel::PRESENTATION_LAYER_LOCAL_BODY_HIDDEN);
 }
 
-// Place the camera from the SIM-COMPOSED pose (world/player_view.h, S8): the
-// witnessed composition -- the eye floor + 0.1875 pull-back, the
-// recoil-doubled FP pitch, the torso+lean/4 roll, the chased-anchor pivot
-// nudge and the march-landed third-person back-off -- runs in the engine per
-// drain [orig: Camera_ComputeThirdPersonView @0x437d10 -- the on-foot person
-// leg @0x437f9c..0x438031, the TP leg @0x438100..0x4383e2]; this presenter
-// only converts the pose to the Godot frame and stamps the node. The mission
+// Stamp the camera from the SIM-COMPOSED pose (world/player_view.h
+// player_view_compose_camera carries the witnesses); this presenter only
+// converts the pose to the Godot frame and stamps the node. The mission
 // yaw -> Godot forward mirrors the present remap (x,y,z)->(x,z,-y): a mission
 // facing yaw faces (sin yaw, cos yaw) -> Godot (sin yaw, 0, -cos yaw), tilted
 // by pitch.
@@ -1398,20 +1359,15 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	}
 	// The body renders only in third person; first person hides it from every
 	// camera by LAYER, not by visible = false, so it stays a live shadow
-	// source. The drawn body is a person like any other in the water mirrors:
-	// above the water the reflected collect keeps only the Reflective-flagged
-	// population (vehicles by item type), which no person carries, so the
-	// body is in neither mirror; below the water the collect runs unfiltered
-	// and the person waves draw it there (ObjectModel's LOCAL_BODY layer is
-	// the person's mirror-policy world layer) [orig:
-	// Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0 filterMask 0x400;
-	// Entity_InitFromModel @ 0x40e20a; the viewmodel pass stays
-	// Player_RenderFirstPersonViewModel @ 0x4ded60]. Retail's "not drawn" is a
-	// skipped submit, not a state write: the model stores the policy and
-	// rewrites its instances only when it changes (and inside its own
-	// rebuild), never per frame. The collect gates the body like any other
-	// person (engine inmatch/occlusion_collect.h, no local-player exception):
-	// each view's verdict is its occlusion claim (OcclusionFrame::
+	// source. The drawn body is a person like any other in the water mirrors
+	// (engine environment/water_mirror.h carries the collect's witness: above
+	// the water neither mirror draws it, below it the person waves do;
+	// ObjectModel's LOCAL_BODY layer is the person's mirror-policy world layer).
+	// Retail's "not drawn" is a skipped submit, not a state write: the model
+	// stores the policy and rewrites its instances only when it changes (and
+	// inside its own rebuild), never per frame. The collect gates the body like
+	// any other person (engine inmatch/occlusion_collect.h, no local-player
+	// exception): each view's verdict is its occlusion claim (OcclusionFrame::
 	// set_local_avatar) over this present intent, so a body no view collected
 	// is neither drawn nor posed by its runtime frame (a render slot that
 	// captures it still poses it), and first person still skips the draw by

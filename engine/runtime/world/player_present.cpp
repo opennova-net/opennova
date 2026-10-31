@@ -6,7 +6,11 @@
 #include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/local_player.h>
+#include <runtime/world/player_view.h>
+#include <runtime/world/presentation_frame.h>
 #include <runtime/world/world.h>
+
+#include <base/io/strutil.h>
 
 namespace opennova::world {
 
@@ -79,6 +83,62 @@ bool action_particle_uses_third_person_gun(bool third_person) {
 bool action_particle_uses_mounted_gun(bool borrowed_usegun_slot,
                                      bool third_person, bool first_person_action_model) {
     return borrowed_usegun_slot && (third_person || !first_person_action_model);
+}
+
+ActionAnchorPlan action_anchor_plan(bool has_userpoint, bool has_weapon_view,
+                                    bool borrowed_usegun_slot, bool third_person,
+                                    bool first_person_action_model) {
+    ActionAnchorPlan plan;
+    if (has_userpoint) {
+        if (has_weapon_view && action_particle_uses_mounted_gun(borrowed_usegun_slot, third_person,
+                                                                first_person_action_model))
+            plan.sources[plan.count++] = ActionAnchorSource::kMountedGun;
+        if (action_particle_uses_third_person_gun(third_person))
+            plan.sources[plan.count++] = ActionAnchorSource::kThirdPersonGun;
+        plan.sources[plan.count++] = ActionAnchorSource::kFirstPersonParts;
+    }
+    // [orig: Entity_ComputeActionTransform @0x401310 - the fallback site
+    //  @0x401867..0x401887 copies the entity origin]
+    plan.sources[plan.count++] = ActionAnchorSource::kEntityOrigin;
+    return plan;
+}
+
+WeaponSwitchPresent weapon_switch_present(const std::string &presented_weapon,
+                                          const std::string &target_weapon,
+                                          bool viewmodel_built, bool installed) {
+    // [orig: Player_CountWeaponEffectsAndUpdateViewModel @0x4dc9e0]
+    if (viewmodel_built && strutil::iequals(presented_weapon, target_weapon))
+        return WeaponSwitchPresent::kKeep;
+    return installed ? WeaponSwitchPresent::kPresentInstalled : WeaponSwitchPresent::kMount;
+}
+
+LocalHeldWeaponPresent local_held_weapon_present(bool overlay_weapon_visible, bool attach_valid,
+                                                 bool body_drawn, bool presents_body,
+                                                 bool head_part_composed) {
+    LocalHeldWeaponPresent out;
+    // [orig: BoneCallback_org0_World @0x4e3ce1..0x4e3cf2 - the head submit's
+    //  RLOD level, the body's when not composed]
+    out.lod_owner_head = head_part_composed;
+    out.shown = overlay_weapon_visible && attach_valid && body_drawn;
+    out.camera_visible = presents_body;
+    return out;
+}
+
+CrosshairAimTarget crosshair_aim_target(bool third_person, const float eye[3], float yaw_deg,
+                                        float pitch_deg, bool binoculars_view,
+                                        float binocular_yaw_offset_deg,
+                                        float binocular_pitch_offset_deg) {
+    CrosshairAimTarget out;
+    // [orig: HUD_DrawCrosshair - 1P pins the centre @0x5928a0/@0x5928ae]
+    if (!third_person) return out;
+    if (binoculars_view) {
+        yaw_deg += binocular_yaw_offset_deg;
+        pitch_deg += binocular_pitch_offset_deg;
+    }
+    // [orig: Entity_BuildCameraView(entity, 1, 1, 1000.0 q16) @0x592910]
+    aim_ray_endpoint(eye, yaw_deg, pitch_deg, kAimProjectRange, out.point);
+    out.project = true;
+    return out;
 }
 
 // [orig: ActionSlot_BeginActivePhase @0x53f830; the gate
