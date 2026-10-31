@@ -145,7 +145,7 @@ private:
 // for (a font, a terrain, a wave) lands on its page as every Go to does (`page`, ADR 0046 DI-17: one
 // OpenDocument, always), the record the finding names marked there by its path as the graph names it
 // and its field; a finding about the file itself rather than what it holds (its row's place: its
-// name, asset.name.* and build.name_unstorable; its place, build.archive_in_project) is shown in
+// name, asset.name.*, build.name_unstorable and build.update_name; its place, build.archive_in_project) is shown in
 // Files (`in_files`), whose Rename... sets it right. Empty when the finding names no file of the
 // project (a required file the project lacks): Problems then only selects its row.
 struct ProblemLocation {

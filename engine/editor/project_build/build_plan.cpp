@@ -18,6 +18,7 @@
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirement_words.h>
 #include <formats/rtxt/rtxt.h>
+#include <formats/update/command_file.h>
 
 
 namespace opennova::editor {
@@ -101,6 +102,27 @@ bool own_finding(const AssetEntry &asset, const BuildTarget &target, Diagnostic 
 	return false;
 }
 
+// A file the build ships (one own_finding has no word on) under a name a release's command file cannot carry
+// (build.update_name). A release ships each file as a row of its command file by its name: an archive's entry a
+// COPY row under its archive's TARGET, a loose file (beside the archives, or in an expansion's folder, its
+// product's root) an UPD row (opennova-update-tool's package_builder.cpp); the name keeps the rule the writer
+// refuses a row by (update::command_name_refusal). The game reads the file by any such name, so only a release's
+// build (BuildTarget::release) is refused, an error; every other build (Play, Build, Export) packs it, the
+// finding a note. The archives' own names, the TARGET rows, are the boot table's or the expansion's, which its
+// name's rule keeps to letters a row carries (expansion_name.h).
+bool update_name_finding(const AssetEntry &asset, const BuildTarget &target, Diagnostic &out) {
+	if (!asset_kind_packed(asset.kind) || project::is_service_managed_file(asset.logical_name)) return false;
+	if (place(asset, target).slot == ArchiveSlot::None) return false;
+	const update::CommandRefusal refusal = update::command_name_refusal(asset.logical_name);
+	if (refusal == update::CommandRefusal::None) return false;
+	out = make_finding(CoreFinding::BuildUpdateName, target.release ? DiagnosticSeverity::Error : DiagnosticSeverity::Info,
+	                   asset.logical_name + " " + update::command_refusal_words(refusal, asset.logical_name) +
+	                           ". The game reads it by this name, but a release names every file it ships in a row of "
+	                           "its command file, so no release can ship it: rename it before releasing.",
+	                   asset.relative_path);
+	return true;
+}
+
 // The expansion's table (<b>.bin, its row of project/expansion_files) read as the Mods list reads it:
 // a name of 64 bytes or more runs over the record's folder name, which choosing the expansion there
 // then loads (build.expansion.exp_name, gating); a description of 272 bytes or more spills into the
@@ -138,9 +160,24 @@ void check_expansion_table(const ProjectPaths &paths, const AssetScan &scan, con
 
 std::vector<Diagnostic> plan_scan_findings(const AssetScan &scan, const std::string &expansion) {
 	std::vector<Diagnostic> out;
+	BuildTarget target;
+	target.expansion = expansion;
 	for (const AssetEntry &asset : scan.entries) {
 		Diagnostic own;
-		if (plan_file_finding(asset, expansion, own)) out.push_back(std::move(own));
+		if (plan_file_finding(asset, expansion, own) || update_name_finding(asset, target, own))
+			out.push_back(std::move(own));
+	}
+	return out;
+}
+
+std::vector<Diagnostic> release_name_findings(const AssetScan &scan, const std::string &expansion) {
+	std::vector<Diagnostic> out;
+	BuildTarget target;
+	target.expansion = expansion;
+	target.release = true;
+	for (const AssetEntry &asset : scan.entries) {
+		Diagnostic own;
+		if (!own_finding(asset, target, own) && update_name_finding(asset, target, own)) out.push_back(std::move(own));
 	}
 	return out;
 }
@@ -245,14 +282,15 @@ std::vector<Diagnostic> plan_blockers(const ProjectPaths &paths, const AssetScan
 		if (d.severity == DiagnosticSeverity::Error) found.push_back(d);
 	// An expansion's name and description as the Mods list copies them (ADR 0046 S16).
 	if (target.is_expansion()) check_expansion_table(paths, scan, target.expansion, found);
-	// The plan's own word on each file (an archive, a player's file, a name no archive stores), once: the gate holds
+	// The plan's own word on each file (an archive, a player's file, a name no archive stores, a name a release
+	// cannot carry: an error for a release's build alone), once: the gate holds
 	// it already when the Problems rows were composed over this scan, which a set of the gate's findings answers
 	// (made at the first such word: most scans have none).
 	std::unordered_set<const Diagnostic *, DiagnosticHash, DiagnosticPointerEqual> gate;
 	bool gate_made = false;
 	for (const AssetEntry &asset : scan.entries) {
 		Diagnostic own;
-		if (!own_finding(asset, target, own)) continue;
+		if (!own_finding(asset, target, own) && !update_name_finding(asset, target, own)) continue;
 		if (!gate_made) {
 			gate.reserve(document_findings.size());
 			for (const Diagnostic &d : document_findings) gate.insert(&d);
@@ -427,6 +465,8 @@ std::string blocker_words(const Diagnostic &d) {
 	const std::string name = slash == std::string::npos ? d.asset : d.asset.substr(slash + 1);
 	if (d.row() == &finding_code(CoreFinding::BuildNameUnstorable))
 		return name + "'s name is too long for an archive";
+	if (d.row() == &finding_code(CoreFinding::BuildUpdateName))
+		return name + "'s name holds a space, a comma or a line break, which a release's command file cannot carry";
 	return clause(d.message);
 }
 

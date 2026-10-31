@@ -389,13 +389,15 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 		}
 	}
 	if (!carry_previous(spec, product, excludes, to_archives, cmd, report, error)) return false;
-	const std::string text = update::write_command_file(cmd);
-	if (text.empty()) {
+	// The value or the row UPDATE.EXE would not read back, named with what it would read: the
+	// editor's build gate refuses the same names by the same rule (build.update_name).
+	const update::CommandFileProblem problem = update::command_file_problem(cmd);
+	if (!problem.ok()) {
 		error = "the command file " + product.command_file +
-				" cannot be written (a name or value "
-				"the updater cannot read back)";
+				" cannot be written: " + update::command_file_problem_words(problem);
 		return false;
 	}
+	const std::string text = update::write_command_file(cmd);
 	if (!claim_name(names, product.command_file, error))
 		return false;
 	section.expansion = product.expansion;

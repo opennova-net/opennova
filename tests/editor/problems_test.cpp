@@ -668,7 +668,8 @@ static int test_location() {
 	TEST_EXPECT(about_files == std::vector<std::string>({"asset.name.duplicate", "asset.name.empty", "asset.name.too_long",
 	                                                     "build.archive_in_project", "build.expansion.mission_twice",
 	                                                     "build.expansion.mission_untitled", "build.expansion.root_only",
-	                                                     "build.name_unstorable", "build.unread", "expansion.file.unread"}));
+	                                                     "build.name_unstorable", "build.unread", "build.update_name",
+	                                                     "expansion.file.unread"}));
 	for (const FindingCodeRow *row : file_rows) {
 		Diagnostic named = make_finding(*row, catalog.severity, catalog.message, catalog.asset, catalog.field);
 		named.record = catalog.record;

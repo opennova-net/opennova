@@ -172,6 +172,7 @@ void BaseExportOperation::join(const EditorRequest &request) {
 	case EditorRequestKind::Export:
 		after_.exported = ExportIntent{true, request.export_dir};
 		after_.rehash = after_.rehash || request.rehash;
+		after_.release = after_.release || request.release;
 		break;
 	case EditorRequestKind::Play:
 		// Its mode resolved as it joined (join_operation), as BuildOperation takes it.

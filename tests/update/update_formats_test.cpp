@@ -178,6 +178,118 @@ int test_command_file() {
 	return 0;
 }
 
+// Each refusal the writer makes, named with what UPDATE.EXE would read, and none it would read back:
+// a row's line split at " ,\r\n" after its key's '=' and kept to 255 characters [orig:
+// CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE)], a header value ending at ';' on a line kept to
+// 127 [orig: IniFile_GetValue @ 0x403b90 (UPDATE.EXE)].
+int test_command_file_refusals() {
+	using R = CommandRefusal;
+	const auto row = [](const char *key, CommandType type, std::string name) {
+		return CommandRow{ key, type, std::move(name), 1700000000, 15132, -42 };
+	};
+	const auto refused_by = [](const CommandFile &file, R refusal) {
+		return command_file_problem(file).refusal == refusal && write_command_file(file).empty();
+	};
+	CommandFile file;
+	file.product = "Joint Operations: Tactical Assault Coalition";
+	file.version = "0.0.1";
+	file.rows.push_back({ "TARGET", CommandType::Target, "RevX02.pff", 0, 0, std::nullopt });
+	TEST_EXPECT(command_file_problem(file).ok() && !write_command_file(file).empty());
+
+	// A space or a comma: the name ends there, the rest read as its fields.
+	TEST_EXPECT(command_name_refusal("Audio Track.wav") == R::NameSeparator);
+	TEST_EXPECT(command_name_refusal("a,b.wav") == R::NameSeparator);
+	CommandFile spaced = file;
+	spaced.rows.push_back(row("COPY", CommandType::Copy, "Audio Track.wav"));
+	TEST_EXPECT(refused_by(spaced, R::NameSeparator));
+	const CommandFileProblem problem = command_file_problem(spaced);
+	TEST_EXPECT(!problem.header && problem.key == "COPY" && problem.text == "Audio Track.wav" &&
+			problem.target == "RevX02.pff");
+	const std::string words = command_file_problem_words(problem);
+	TEST_EXPECT(words.rfind("the COPY row \"Audio Track.wav\" (in RevX02.pff) has a space: ", 0) == 0 &&
+			words.find("reads the name as \"Audio\"") != std::string::npos &&
+			words.find("[orig: CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE)") != std::string::npos);
+	// As retail reads it: the name its first field, the rest its time and size.
+	const std::optional<CommandFile> misread = read_command_file(
+			"[HEADER]\r\n\r\n[COMMAND]\r\nCOPY=Audio Track.wav,1700000000,15132\r\n");
+	TEST_EXPECT(misread && misread->rows.size() == 1 && misread->rows[0].name == "Audio" &&
+			misread->rows[0].time == 0 && misread->rows[0].size == 1700000000);
+	TEST_EXPECT(command_refusal_words(R::NameSeparator, "a,b.wav").rfind("has a comma: ", 0) == 0);
+	CommandFile loose;
+	loose.rows.push_back(row("UPD", CommandType::Loose, "my,file.txt"));
+	TEST_EXPECT(refused_by(loose, R::NameSeparator) &&
+			command_file_problem_words(command_file_problem(loose))
+							.rfind("the UPD row \"my,file.txt\" has a comma: ", 0) == 0);
+
+	// None: the reader skips a row with no name.
+	TEST_EXPECT(command_name_refusal("") == R::NameEmpty);
+	CommandFile unnamed = file;
+	unnamed.rows.push_back(row("REMOVE", CommandType::Remove, ""));
+	TEST_EXPECT(refused_by(unnamed, R::NameEmpty));
+
+	// A CR or an LF ends the name.
+	TEST_EXPECT(command_name_refusal("a\rb") == R::NameLineBreak &&
+			command_name_refusal("a\nb") == R::NameLineBreak);
+	CommandFile broken = file;
+	broken.rows.push_back(row("COPY", CommandType::Copy, "a\nb"));
+	TEST_EXPECT(refused_by(broken, R::NameLineBreak));
+
+	// A line of 255 characters is read whole, one of 256 cut: "REMOVE=" and a name of 248, then 249.
+	CommandFile longest = file;
+	longest.rows.push_back(row("REMOVE", CommandType::Remove, std::string(248, 'n')));
+	TEST_EXPECT(command_file_problem(longest).ok());
+	const std::optional<CommandFile> kept = read_command_file(write_command_file(longest));
+	TEST_EXPECT(kept && kept->rows.size() == 2 && kept->rows[1].name == std::string(248, 'n'));
+	CommandFile too_long = file;
+	too_long.rows.push_back(row("REMOVE", CommandType::Remove, std::string(249, 'n')));
+	TEST_EXPECT(refused_by(too_long, R::RowTooLong));
+	CommandFile long_name = file; // past UpdateCommand::name[260] its line is past 255 first
+	long_name.rows.push_back(row("TARGET", CommandType::Target, std::string(kCommandNameBytes, 'n')));
+	TEST_EXPECT(refused_by(long_name, R::RowTooLong));
+
+	// A key the table lacks, or one of another kind than the row's.
+	CommandFile unknown = file;
+	unknown.rows.push_back(row("PATCH", CommandType::Copy, "a.def"));
+	TEST_EXPECT(refused_by(unknown, R::RowKey));
+	CommandFile mismatched = file;
+	mismatched.rows.push_back(row("COPY", CommandType::Loose, "a.def"));
+	TEST_EXPECT(refused_by(mismatched, R::RowKey));
+
+	// A '=' inside a name is kept: the fields' strtok does not split at it.
+	CommandFile equals = file;
+	equals.rows.push_back(row("COPY", CommandType::Copy, "a=b.def"));
+	equals.rows.push_back(row("COPY", CommandType::Copy, "=lead.def"));
+	TEST_EXPECT(command_file_problem(equals).ok());
+	const std::optional<CommandFile> equals_back = read_command_file(write_command_file(equals));
+	TEST_EXPECT(equals_back && equals_back->rows.size() == 3 && equals_back->rows[1].name == "a=b.def" &&
+			equals_back->rows[2].name == "=lead.def" && equals_back->rows[2].size == 15132);
+
+	// A header value: a CR or an LF, a ';' (the value ends there), a line past 127.
+	CommandFile header = file;
+	header.product = "A\r\nB";
+	TEST_EXPECT(refused_by(header, R::HeaderLineBreak));
+	header.product = "Joint Operations; TAC";
+	TEST_EXPECT(refused_by(header, R::HeaderSemicolon));
+	const CommandFileProblem semicolon = command_file_problem(header);
+	TEST_EXPECT(semicolon.header && semicolon.key == "PRODUCT" &&
+			command_file_problem_words(semicolon)
+							.rfind("the PRODUCT value \"Joint Operations; TAC\" has a ';', where "
+								   "UPDATE.EXE's header reader ends the value, so it reads "
+								   "\"Joint Operations\"",
+									0) == 0);
+	header.product = std::string(kIniKeyLineBytes - 1 - 8, 'P'); // PRODUCT= and 119: 127, read whole
+	TEST_EXPECT(command_file_problem(header).ok());
+	const std::optional<CommandFile> header_back = read_command_file(write_command_file(header));
+	TEST_EXPECT(header_back && header_back->product == header.product);
+	header.product += "P";
+	TEST_EXPECT(refused_by(header, R::HeaderTooLong));
+	TEST_EXPECT(command_header_refusal("EXE", "") == R::None);
+	CommandFile version = file;
+	version.version = "1;2";
+	TEST_EXPECT(refused_by(version, R::HeaderSemicolon) && command_file_problem(version).key == "VERSION");
+	return 0;
+}
+
 int test_server_list() {
 	const std::vector<std::string> hosts =
 			read_server_list("  ftp.novaworld.com  extra\r\n\r\n"
@@ -303,6 +415,8 @@ int main() {
 	if (int rc = test_wizard())
 		return rc;
 	if (int rc = test_command_file())
+		return rc;
+	if (int rc = test_command_file_refusals())
 		return rc;
 	if (int rc = test_server_list())
 		return rc;

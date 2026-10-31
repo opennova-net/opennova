@@ -256,7 +256,8 @@ static int test_columns() {
 	            Tokens({ "play.boot_missing", "play.file_missing", "requirement.missing", "requirement.optional_missing" }));
 	TEST_EXPECT(fixed_by(FindingFix::WrongKind) == Tokens({ "requirement.wrong_kind" }));
 	TEST_EXPECT(fixed_by(FindingFix::Rename) ==
-	            Tokens({ "asset.name.duplicate", "asset.name.too_long", "build.name_unstorable", "expansion.file.unread" }));
+	            Tokens({ "asset.name.duplicate", "asset.name.too_long", "build.name_unstorable", "build.update_name",
+	                     "expansion.file.unread" }));
 	TEST_EXPECT(fixed_by(FindingFix::ResetRow) == Tokens({ "animation_map.no_reset" }));
 	TEST_EXPECT(fixed_by(FindingFix::Reference) == Tokens({ "play.reference_missing", "reference.missing" }));
 	TEST_EXPECT(fixed_by(FindingFix::UnimportedTexture) == Tokens({ "import.texture_not_imported" }));
@@ -342,7 +343,7 @@ static int test_columns() {
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
 	                     "build.expansion.mission_twice", "build.expansion.mission_untitled", "build.expansion.root_only",
-	                     "build.name_unstorable", "build.unread", "expansion.file.unread" }));
+	                     "build.name_unstorable", "build.unread", "build.update_name", "expansion.file.unread" }));
 	// S14, the build follows retail; S26, a row gates only when it says why: the game's refusal, witnessed and cited
 	// (game_fails_code, game_stops_code), or the editor's integrity (a file it cannot read or write as it is, a name
 	// the archives cannot store). Every other code is listed (shown, fixable, never blocking), the default: the
@@ -352,7 +353,7 @@ static int test_columns() {
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.gates_build; }) ==
 	            Tokens({ "animation_map.clip_name_long", "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "avatars.reader_stops",
 	                     "build.archive", "build.expansion.base_missing", "build.expansion.exp_name",
-	                     "build.name_unstorable", "document.config_overrun", "document.decode", "document.kind",
+	                     "build.name_unstorable", "build.update_name", "document.config_overrun", "document.decode", "document.kind",
 	                     "document.no_records", "document.parse", "document.read", "document.stale",
 	                     "hudfx.power_slots_empty", "import.decode",
 	                     "import.encode", "import.font", "import.input", "import.migrate", "import.option", "import.read",
@@ -375,7 +376,8 @@ static int test_columns() {
 	// does hudfx.def's HUD model as its one line read, the power slots' draw then reading a slot of no model, and an
 	// Avatars.def past its reader's tables, where the game fails (S23 B).
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.game_refusal != nullptr; }) ==
-	            Tokens({ "animation_map.clip_name_long", "avatars.reader_stops", "build.expansion.exp_name", "document.config_overrun",
+	            Tokens({ "animation_map.clip_name_long", "avatars.reader_stops", "build.expansion.exp_name", "build.update_name",
+	                     "document.config_overrun",
 	                     "hudfx.power_slots_empty",
 	                     "menu.invalid_input", "mission.route_past_pool", "mission.runs_past_table",
 	                     "model.light_no_registers", "particle.unfilled_token_slot", "style.hangs",

@@ -882,6 +882,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::BaseKey: out.base_key = "JO"; break;
 		case F::GateTagFile: out.gate_tag_file = "C:/service/gt.ssc"; break;
 		case F::VersionFile: out.version_file = "C:/service/version.txt"; break;
+		case F::Release: out.release = true; break;
 		case F::Lobby: out.lobby = "acidgambit_0_consumer"; break;
 		case F::NewLobbyName: out.new_lobby_name = "My lobby"; break;
 		case F::kCount: break;

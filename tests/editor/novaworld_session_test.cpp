@@ -489,6 +489,17 @@ static int test_player_projects() {
 	// Its owner releases it, published on its own page under Projects; each refusal of the service's
 	// said plainly; the release players get, once published, in the view.
 	TEST_EXPECT(s.novaworld().remote.can_release && s.novaworld().remote.release_id == 0);
+	// A file the release would ship under a name its command file cannot carry (JO:TAC's sounds/Audio
+	// Track.wav, build.update_name): refused here, named, the service asked nothing; gone, the release goes.
+	TEST_EXPECT(put(dir.file("Game") + "/sounds/Audio Track.wav", "RIFF"));
+	s.send(request::rescan());
+	s.send(request::novaworld_release("0.1.0"));
+	TEST_EXPECT(s.refused("novaworld.refused") && service.release_version.empty() &&
+			s.session.view().activity.status.find("A release cannot ship sounds/Audio Track.wav: Audio "
+												  "Track.wav has a space") != std::string::npos);
+	std::error_code removed;
+	std::filesystem::remove(opennova::io::os_path(dir.file("Game") + "/sounds/Audio Track.wav"), removed);
+	s.send(request::rescan());
 	s.send(request::novaworld_release("0.1.0"));
 	TEST_EXPECT(service.release_key == "MYGAME" && service.release_version == "0.1.0" &&
 			service.release_revision == 1 &&

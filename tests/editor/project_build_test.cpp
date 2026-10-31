@@ -440,6 +440,93 @@ static int test_long_names_bind_packed_files_only() {
 	return 0;
 }
 
+static bool archive_has(const std::string &archive_path, const char *name);
+
+// A file the build ships under a name a release's command file cannot carry (build.update_name), by the rule
+// opennova-update-tool's writer refuses the row by (update::command_name_refusal): the stock updater reads a row's
+// fields with strtok over " ,\r\n" [orig: CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE)]. The game reads the file
+// by any name, so only a release's build (BuildTarget::release, the service's opennova-project export --release)
+// is refused; Play, Build and Export pack it, the finding a note. The realistic case is JO:TAC's: its RevX02.pff
+// ships "Audio Track.wav", which a project of it holds as sounds/Audio Track.wav, an archive entry whose COPY row
+// would carry the space (the one name of REVX02 r2's 13,658 that the staging release refused). A release refuses
+// that wave and a loose video, named and saying what UPDATE.EXE would read; a note no build ships is not named;
+// Play's plan packs both, built; an expansion's Problems rows note the wave and Build > Release...'s check
+// (release_name_findings) refuses it; renamed, a release's plan goes ahead, the wave an entry of localres.pff.
+static int test_update_names_bind_release_builds() {
+	Project p("opennova_editor_build_update_names_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	const std::string wave = "sounds/Audio Track.wav", video = "video/my,intro.bik", note = "notes/My File.txt";
+	TEST_EXPECT(test_io::write_text(p.root + "/" + wave, "RIFF"));
+	TEST_EXPECT(test_io::write_text(p.root + "/" + video, "BIKi"));
+	TEST_EXPECT(test_io::write_text(p.root + "/" + note, "a note for the authors"));
+	const auto in = [](const std::vector<BuildEntry> &entries, const std::string &name) {
+		for (const BuildEntry &entry : entries)
+			if (entry.relative_path == name) return true;
+		return false;
+	};
+	const auto named = [](const std::vector<Diagnostic> &findings, DiagnosticSeverity severity) {
+		std::vector<std::string> out;
+		for (const Diagnostic &d : findings)
+			if (d.code() == "build.update_name" && d.severity == severity) out.push_back(d.asset);
+		std::sort(out.begin(), out.end());
+		out.erase(std::unique(out.begin(), out.end()), out.end());
+		return out;
+	};
+
+	// A release's build: refused, each file named.
+	BuildTarget release;
+	release.release = true;
+	const BuildPlan refused = p.plan(release);
+	TEST_EXPECT(!refused.ok);
+	TEST_EXPECT((named(refused.blockers, DiagnosticSeverity::Error) == std::vector<std::string>{ wave, video }));
+	for (const Diagnostic &d : refused.blockers) {
+		if (d.code() != "build.update_name") continue;
+		TEST_EXPECT(blocks_build(d) && blocker_is_the_games(d) && d.asset != note);
+		if (d.asset == wave)
+			TEST_EXPECT(d.message.rfind("Audio Track.wav has a space: UPDATE.EXE splits", 0) == 0 &&
+			            d.message.find("reads the name as \"Audio\"") != std::string::npos &&
+			            d.message.find("[orig: CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE)") != std::string::npos);
+		if (d.asset == video) TEST_EXPECT(d.message.rfind("my,intro.bik has a comma: ", 0) == 0);
+		TEST_EXPECT(blocker_reason(d).find("[orig: CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE)") != std::string::npos);
+	}
+	TEST_EXPECT(refusal_words(refused.blockers).find("which a release's command file cannot carry") != std::string::npos);
+
+	// Play's (and Build's, Export's): the same files packed, the finding a note that blocks nothing, and built.
+	const BuildPlan play = p.plan();
+	for (const Diagnostic &d : play.blockers) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(play.ok && play.blockers.empty());
+	TEST_EXPECT((named(play.diagnostics, DiagnosticSeverity::Info) == std::vector<std::string>{ wave, video }));
+	TEST_EXPECT(named(play.diagnostics, DiagnosticSeverity::Error).empty());
+	TEST_EXPECT(play.archives.size() == 3 && play.archives[1].slot == ArchiveSlot::Localres &&
+	            in(play.archives[1].entries, wave) && in(play.loose, video) && !in(play.loose, note));
+	const BuildReport built = run_build(play, p.output_root());
+	if (!built.ok)
+		for (const Diagnostic &d : built.diagnostics) std::fprintf(stderr, "  build: %s %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(built.ok && archive_has(built.build_dir + "/localres.pff", "Audio Track.wav") &&
+	            fs::is_regular_file(system_path(built.build_dir + "/my,intro.bik")));
+
+	// An expansion (the project as REVX02 builds it): its Problems rows note the wave in <b>.pff, and the check
+	// Build > Release... makes refuses it.
+	const AssetScan scan = scan_project_assets(p.paths, p.doc);
+	TEST_EXPECT((named(plan_scan_findings(scan, "revx02"), DiagnosticSeverity::Info) == std::vector<std::string>{ wave, video }));
+	const std::vector<Diagnostic> unshippable = release_name_findings(scan, "revx02");
+	TEST_EXPECT((named(unshippable, DiagnosticSeverity::Error) == std::vector<std::string>{ wave, video }) &&
+	            unshippable.size() == 2);
+
+	// Renamed, a release's build goes ahead, the wave an entry of localres.pff: the name the gate refused was an
+	// archive entry's, a COPY row's.
+	std::error_code ec;
+	for (const std::string &path : { wave, video }) fs::remove(system_path(p.root + "/" + path), ec);
+	const std::string renamed_wave = "sounds/AudioTrack.wav";
+	TEST_EXPECT(test_io::write_text(p.root + "/" + renamed_wave, "RIFF"));
+	const BuildPlan renamed = p.plan(release);
+	for (const Diagnostic &d : renamed.blockers) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(renamed.ok && renamed.archives.size() == 3 && renamed.archives[1].slot == ArchiveSlot::Localres &&
+	            in(renamed.archives[1].entries, renamed_wave));
+	return 0;
+}
+
 // The kinds S13 D5 added, planned where their rows say: a wave and a map project in localres.pff,
 // a face in resource.pff, the score table copied loose (as a Config it was before).
 static int test_new_kinds_land_where_their_rows_say() {
@@ -2193,6 +2280,7 @@ int main() {
 	failures += test_mission_project_builds_clean();
 	failures += test_protected_build_survives_and_archives_are_refused();
 	failures += test_long_names_bind_packed_files_only();
+	failures += test_update_names_bind_release_builds();
 	failures += test_unknown_kinds_are_left_out();
 	failures += test_project_notes_are_left_out_silently();
 	failures += test_hash_cache();

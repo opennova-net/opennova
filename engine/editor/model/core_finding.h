@@ -53,6 +53,7 @@ enum class CoreFinding {
 	BuildPlayerFile,
 	BuildRead,
 	BuildUnread,
+	BuildUpdateName,
 	BuildVerify,
 	BuildWrite,
 	CreateMissingExists,

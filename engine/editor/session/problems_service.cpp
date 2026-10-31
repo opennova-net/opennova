@@ -84,6 +84,7 @@ struct ProblemsService::BlockerMemo {
 		       target.expansion == target_now.expansion && target.install == target_now.install &&
 		       target.base_project == target_now.base_project &&
 		       target.gate_tag_file == target_now.gate_tag_file && target.version_file == target_now.version_file &&
+		       target.release == target_now.release &&
 		       base_files == base_now &&
 		       shipped.original == shipped_now.original && shipped.unsaved == shipped_now.unsaved;
 	}
