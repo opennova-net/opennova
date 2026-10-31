@@ -672,9 +672,11 @@ func snapshot() -> Dictionary:
 			profile[key + "_clips"] = selected_clips(control)
 			if control in TYPE_SLOTS:
 				profile[key + "_ammo_type"] = selected_ammo_type(control)
-		profile["kit"] = kit_entries()
-		# The page the populate restored, which a class pick has already left.
-		profile["kit_class"] = _loadout.page_class
+		profile.merge({
+			"kit": kit_entries(),
+			# The page the populate restored, which a class pick has already left.
+			"kit_class": _loadout.page_class,
+		})
 	return profile
 
 
