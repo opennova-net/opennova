@@ -349,6 +349,8 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 	} else {
 		e["novalogic"] = nullptr;
 	}
+	// Its starts so far, each its own log (an admin's Logs tab picks one on either page).
+	e["generation"] = s.generation;
 	if (!admin)
 		put_phase(e, db, s, wall_now_s() * 1000, false);
 	if (admin) {
@@ -370,7 +372,6 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 			e["game_port"] = s.game_port;
 		else
 			e["game_port"] = nullptr;
-		e["generation"] = s.generation;
 		text_or_null(e, "serve_image", s.serve_image);
 		put_id(e, "base_tree_id", s.base_tree_id);
 		put_id(e, "expansion_tree_id", s.expansion_tree_id);
@@ -523,7 +524,7 @@ void HostedRoutes::register_routes(WebApp &app) {
 // game_display_name, expansion_display_name, data ({base: {tree_id, version} or
 // null, expansion: likewise}: the trees it is pinned to), update_available
 // (newer data than its pins, or an older serve image than the release's, while
-// live), update_kinds, build, build_available (server_json), update_requested, restarts,
+// live), update_kinds, build, build_available (server_json), update_requested, restarts, generation,
 // failure_reason, created_at, updated_at, running_at, ended_at (UTC, null until
 // set), listing ({rid, server_name, mission_name, players, max_players,
 // host_ip, host_port} while listed, else null), phase ({name: queued,

@@ -7343,6 +7343,8 @@ int test_hosted_server_build_update(Harness &h) {
 		std::fprintf(stderr, "  update: %s\n", describe(reply).c_str());
 	TEST_EXPECT(reply.code == 202 && json && json["server"]["update_requested"].b() &&
 			kinds(json["server"]) == "server_build");
+	// Its starts so far, which the owner's page reads too (an admin's Logs tab there).
+	TEST_EXPECT(json && json["server"].has("generation") && json["server"]["generation"].t() == type::Number);
 	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), older)->update_requested);
 	reply = update(current);
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "up_to_date");

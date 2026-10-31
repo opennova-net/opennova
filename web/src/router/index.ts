@@ -96,6 +96,8 @@ const router = createRouter({
             { path: '', component: ServerOverviewTab },
             { path: 'stats', component: ServerStatsTab },
             { path: 'console', component: ServerConsoleTab },
+            // An admin's session alone shows its tab (ServerDetailLayout.vue).
+            { path: 'logs', component: ServerLogsTab },
             { path: 'settings', redirect: (to) => `/me/servers/${to.params.id}` },
           ],
         },

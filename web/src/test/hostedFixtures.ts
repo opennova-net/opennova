@@ -114,6 +114,7 @@ export function hostedServer(id: number, overrides: Partial<HostedServer> = {}):
     build: null,
     build_available: null,
     update_requested: false,
+    generation: 1,
     restarts: 0,
     failure_reason: null,
     created_at: '2026-10-14 12:00:00',

@@ -312,6 +312,9 @@ export interface HostedServer {
   // An update was asked for: the supervisor restarts it on the current data
   // shortly.
   update_requested: boolean;
+  // Its starts so far (each start a new generation with its own log; 0 before
+  // its first).
+  generation: number;
   // Crash restarts counted toward the limit (3 in the restart window).
   restarts: number;
   // Why it failed, in the service's words; null unless it did.
@@ -560,8 +563,6 @@ export interface FleetServer extends HostedServer {
   expansion_tree_id: number | null;
   // It runs on an older tree than its game's current one.
   outdated: boolean;
-  // Its starts so far (each start a new generation; 0 before its first).
-  generation: number;
   // Its tick health in its slot's latest report: its frames' 99th percentile
   // time and the late ticks of the last minute; null with no report or no
   // tick in it.
