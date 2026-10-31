@@ -482,7 +482,8 @@ void Mixer::render_buses(const Lanes &bus0, const Lanes &bus1, int16_t out[2]) {
 	stage(bus0, ring0_, sum0_, avg0, high0);
 	Lanes avg1;
 	stage(bus1, ring1_, sum1_, avg1, high1);
-	// The block stage every 0x400th frame [orig: @0x7BEF16..0x7BEF55].
+	// The block stage every 0x400th frame, the counter test [orig: @0x7BEF16..0x7BEF1C] and the stage
+	// [orig: @0x7BEF1E..0x7BEF55].
 	if ((frame_ & 0x3FFu) == 0) {
 		meter_.stage(follower_);
 		follower_ = 0;

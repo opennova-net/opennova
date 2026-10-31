@@ -18,9 +18,9 @@
 //   [orig: SoundEmitter_UpdateAndMixTop8 @ 0x5284a0, called from the Game Loop mode
 //   render callback GameLoop_RenderFrame @ 0x521341].
 //
-// The embedder keeps everything Godot: LWF data access, stream decode, the eight
-// persistent AudioStreamPlayer3D channels (D-SND-6), and bus/pan/doppler mapping
-// (D-SND-8). Positions are world-space floats (1 unit = 1 game unit); distances enter
+// The embedder keeps the LWF data access and the decode; the eight emitter channels, their
+// pans and their doppler are the engine mixer's (AmbientEmitters::play over runtime/audio/mixer
+// and sound_listener). Positions are world-space floats (1 unit = 1 game unit); distances enter
 // the witnessed curve as Q16.16, exactly like the GDScript form this replaces.
 #pragma once
 
@@ -125,8 +125,8 @@ struct AmbientCandidate {
 // AudioChannel_OpenSlotChecked call @ 0x528adb (its handle stored @ 0x528ae3)
 // and the AudioChannel_SetAndPlay call @ 0x528a5c; the layer member's authored
 // pitch is never a play factor (member 0 is read for its wave, volume and clamp
-// alone, @ 0x528649; D-SND-56). Read unsigned and exact; its doppler is
-// unported (Sound_ApplyDopplerShift, called @ 0x52896a; D-SND-8). A slot
+// alone, @ 0x528649; D-SND-56). Read unsigned and exact; the doppler then moves
+// it (Sound_ApplyDopplerShift, called @ 0x52896a; audio::doppler_play_word). A slot
 // whose word is 0 never reaches a channel: the mix skips it before candidacy
 // (@ 0x528582) and a lane registered with 0 is cleared
 // (AmbientMixer::register_emitter, SoundEmitter_RegisterSetLayers @ 0x528340),

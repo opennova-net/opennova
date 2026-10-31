@@ -4,8 +4,9 @@
 // sounds and selection flags that decide which member plays when the set is triggered. This is
 // the faithful port of the engine's per-layer member selection, pulled out of the Godot layer
 // (now godot/src/audio/sound_bank) so the engine core stays C++ and a headless server can
-// resolve the same member without Godot. The embedder keeps the lwf data access and the
-// AudioStreamPlayer spawning; this only decides WHICH member index plays.
+// resolve the same member without Godot. The embedder keeps the lwf data access, and the
+// channel the member opens is the mixer's (runtime/audio/mixer); this only decides WHICH member
+// index plays.
 //
 // Grilled vs Jointops.exe 2026-06-09 (see docs/audio/lwf-dbf-sound-re.md):
 // [orig: SoundBank_PlayTriggerEntries @ 0x75ccd0 / SoundBank_SelectTriggerEntryFromBank @ 0x75bf20]

@@ -8,8 +8,9 @@
 // AudioMixer_OutputStereo @0x7BD71A], the channel-zero meter [orig: @0x7BDE22..0x7BDE2C,
 // @0x7BEF16..0x7BEF55], the bearing pans [orig: Sound_Play3DPositional @0x527DA7..0x527DF8;
 // Audio_UpdateAmbientStream @0x4EDA90..0x4EDAD8] and the doppler [orig:
-// Sound_Calculate3DAttenuation @0x527F60]; and a mixed-buffer golden of the minted
+// Sound_ApplyDopplerShift @0x527F60]; and a mixed-buffer golden of the minted
 // fixtures/lwf/tone.wav (tests/fixtures/minimal_lwf_gen.cpp).
+#include <runtime/audio/dialog_queue.h>
 #include <runtime/audio/mixer.h>
 #include <runtime/audio/music_stream.h>
 #include <runtime/audio/script_voice_player.h>
@@ -487,6 +488,31 @@ uint64_t fnv1a(const std::vector<int16_t> &samples) {
 	return h;
 }
 
+// A mission's dialog and zone waves are IMA-ADPCM (WAVE format 0x11): the minted
+// fixtures/lwf/ima_adpcm.wav decodes as the game's loader does and its line plays on the dialog
+// channel at its record (a wave that failed to decode once left the line silent) [orig:
+// Dialog_LoadAudioClip @ 0x44de8b; Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x527560].
+void dialog_adpcm_line() {
+	const std::string root = test_paths_repo_root(__FILE__);
+	const std::vector<uint8_t> bytes = test_io::read_file(root + "/fixtures/lwf/ima_adpcm.wav");
+	lwf::WavPcm pcm;
+	std::string error;
+	if (!expect(!bytes.empty() && lwf::wav_decode_pcm16(bytes.data(), bytes.size(), pcm, error),
+				"ima_adpcm.wav decodes")) return;
+	const MixWaveRef wave = mix_wave_from_pcm(pcm);
+	if (!expect(wave && wave->count > 0 && wave->width == 2, "the ADPCM line as the loader leaves it")) return;
+	Mixer mixer;
+	const uint32_t handle = mixer.open(kDialogChannel, dialog_line_params(wave, 0, 255));
+	expect(handle != 0 && (handle & 0x3F) == uint32_t(kDialogChannel) && mixer.validate(handle) == handle,
+			"the line opens on the dialog channel");
+	expect(mixer.channel(kDialogChannel).wave == wave && mixer.channel(kDialogChannel).volume == 254 &&
+					mixer.channel(kDialogChannel).play_q16 == 0x10000u,
+			"at its record: a volume-0 line's 255 through the full option, 254, the unity play factor");
+	int16_t out[2];
+	mixer.render(out, 1);
+	expect(mixer.validate(handle) == handle, "the decoded line plays");
+}
+
 int golden() {
 	// The minted triangle wave (22050 Hz, 8320 16-bit samples), decoded as the game's loader does,
 	// on a hard-left one-shot at full volume and a half-volume one behind, 4096 frames of the mix.
@@ -527,6 +553,7 @@ int main() {
 	script_voice();
 	device_feed();
 	tail_against_retail();
+	dialog_adpcm_line();
 	golden();
 	if (test_expect::failures == 0) std::printf("audio_mixer: all passed\n");
 	return test_expect::failures == 0 ? 0 : 1;

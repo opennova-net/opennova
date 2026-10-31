@@ -51,7 +51,7 @@ uint8_t voice_pan(int32_t dx, int32_t dy, int32_t yaw) {
 uint32_t doppler_play_word(uint32_t play_q16, const int32_t listener[3],
 		const int32_t listener_velocity[3], const int32_t source[3], const int32_t source_velocity[3],
 		uint8_t divisor, int32_t sound_speed_q16) {
-	// [orig: Sound_Calculate3DAttenuation @0x527F61..0x527F8E: no velocity, no change]
+	// [orig: Sound_ApplyDopplerShift @0x527F61..0x527F8E: no velocity, no change]
 	if (listener_velocity[0] == 0 && listener_velocity[1] == 0 && listener_velocity[2] == 0 &&
 			source_velocity[0] == 0 && source_velocity[1] == 0 && source_velocity[2] == 0)
 		return play_q16;
