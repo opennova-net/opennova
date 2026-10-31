@@ -335,8 +335,8 @@ Title make() {
 	//  MaxPlayers stores its atol alone [orig: ServerConfig_ApplyHostSetting @0x4a6060 -
 	//  @0x4a6289..0x4a6296 (dfx2.exe)].
 	t.max_players_switch = false;
-	// DFX2-29: a fresh profile's kit pages (above); the single-player page is the rules' spawn kit
-	// too (DFX2-33, dfx2_rules.cpp).
+	// DFX2-29: a fresh profile's kit pages (above); the single-player page's table is the rules'
+	// spawn kit's too (DFX2-33, dfx2_single_player_kit).
 	t.profile_single_player_kit = kSinglePlayerKit;
 	t.profile_class_kits = kProfileClassKits;
 	// DFX2-58: the map views' ceiling 6.0 (flt_7CC0C8): the CMAP window's [orig:
@@ -519,6 +519,10 @@ Title make() {
 const Title &dfx2_title() {
 	static const Title title = make();
 	return title;
+}
+
+const char *const *dfx2_single_player_kit() {
+	return kSinglePlayerKit;
 }
 
 } // namespace opennova::games

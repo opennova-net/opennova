@@ -280,6 +280,10 @@ void retail_rules_values() {
 	size_t kit = 0;
 	while (dfx2.spawn_kit != nullptr && dfx2.spawn_kit[kit] != nullptr) ++kit; // DFX2-33
 	CHECK(kit == 8 && std::string(dfx2.spawn_kit[2]) == "WPN_MK23");
+	// The page is dfx2.exe's one table (0x832368), which the rules' spawn and the Title's fresh
+	// profile each point at, neither reading the other's row (DFX2-29, DFX2-33).
+	CHECK(dfx2.spawn_kit == games::dfx2_single_player_kit() &&
+			games::dfx2_title().profile_single_player_kit == games::dfx2_single_player_kit());
 }
 
 // The Title's knobs read on the local player's input alone (docs/titles/dfx2-vs-jo-re.md §8, the

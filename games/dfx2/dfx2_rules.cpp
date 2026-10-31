@@ -192,11 +192,11 @@ world::TitleRules make() {
 	// AI_CheckVehicleStuckState @0x4652a0 (dfx2.exe)].
 	r.ai_vehicle_near_reach = 0x40000;
 	r.ai_vehicle_write_off_count = 1860;
-	// DFX2-33: the profile-less spawn page dfx2.exe compiles in, the single-player page a fresh
-	// profile takes too (dfx2_title.cpp's kSinglePlayerKit holds the names)
+	// DFX2-33: the profile-less spawn page dfx2.exe compiles in, the table a fresh profile's
+	// single-player page copies too (dfx2_single_player_kit; the rules read no Title row)
 	// [orig: Buffer_CopyUntilDoubleNull(restrictionData, 0x832368, 2048) @0x52188f / @0x54ec2a
 	//  (dfx2.exe)].
-	r.spawn_kit = dfx2_title().profile_single_player_kit;
+	r.spawn_kit = dfx2_single_player_kit();
 	// DFX2-37: the lone gunner's fire [orig: the twin of Input_HandleActionBinding_0 @0x4DD4C0
 	// (dfx2.exe) - @0x4DD8FE..0x4DD92C, @0x4DDABB..0x4DDADB].
 	r.emplaced_solo_holds_fire = true;

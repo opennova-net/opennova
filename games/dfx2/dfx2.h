@@ -16,4 +16,10 @@ const Title &dfx2_title();
 const Protocol &dfx2_protocol();
 const world::TitleRules &dfx2_rules();
 
+// The single-player kit page dfx2.exe compiles in (0x832368), null-terminated: one table two sites
+// copy, a fresh profile's page (Title::profile_single_player_kit, DFX2-29) and the profile-less
+// spawn's (TitleRules::spawn_kit, DFX2-33). Each axis's row points at it, neither at the other's
+// row (dfx2_title.cpp holds it).
+const char *const *dfx2_single_player_kit();
+
 } // namespace opennova::games
