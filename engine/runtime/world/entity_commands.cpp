@@ -1261,9 +1261,11 @@ bool EntityCommands::ssn_holding_group(uint16_t ssn, int group) const {
 }
 
 bool EntityCommands::group_holding_group(int holder_group, int held_group) const {
-    // [orig: TriggerGroup_AnyMemberHoldingItemGroup @0x43c870 — walk pool 0,
-    // gate ItemTypeIndex(+0x1C) != 0, first member of holder_group whose
-    // mountedChild's commandGroup == held_group]
+    // [orig: TriggerGroup_AnyMemberHoldingItemGroup @0x43c870 — either group 0
+    // -> 0 @0x43c878 / @0x43c880, then walk pool 0, gate ItemTypeIndex(+0x1C)
+    // != 0, first member of holder_group whose mountedChild's commandGroup ==
+    // held_group; the same at @0x43c670 (dfx2.exe)]
+    if (holder_group == 0 || held_group == 0) return false;
     std::vector<EntityHandle> members;
     world_.registry.by_group(static_cast<uint8_t>(holder_group), members);
     for (EntityHandle h : members) {

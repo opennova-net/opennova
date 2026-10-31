@@ -2283,6 +2283,23 @@ static void test_holding_triggers() {
     w.registry.get(wrong_pool_h)->mounted_child = world::EntityHandle{};
     w.registry.get(ungated_h)->mounted_child = item_h;
     CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(G::GroupHoldingGroup, 2, 9)));
+    w.registry.get(ungated_h)->mounted_child = world::EntityHandle{};
+
+    // The group walk reads false for group 0 on either side before it walks; the
+    // single walk has no such gate. [orig: TriggerGroup_AnyMemberHoldingItemGroup
+    // @0x43c878 / @0x43c880; Entity_IsSsnHoldingItemGroup @0x43e2f0 (only SSN 0
+    // @0x43e2f7)]
+    holder.net_id = 53;
+    holder.group_id = 0;
+    holder.item_id = 1001; holder.item_type_index = 7;
+    world::EntityHandle zero_h = w.registry.spawn(0, holder);
+    w.registry.get(zero_h)->mounted_child = item_h;
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(G::GroupHoldingGroup, 0, 9)));
+    w.registry.get(zero_h)->mounted_child = world::EntityHandle{};
+    w.registry.get(item_h)->group_id = 0;
+    w.registry.get(holder_h)->mounted_child = item_h;
+    CHECK(!sys.evaluate_trigger_for_test(w, group_trigger(G::GroupHoldingGroup, 2, 0)));
+    CHECK(sys.evaluate_trigger_for_test(w, single_trigger(S::SingleHoldingGroup, 50, 0)));
 }
 
 // Subs 42-45: the chain/distance/LOS family — RAW-positive senses; the
