@@ -2388,14 +2388,15 @@ func test_joiner_deploy_release_keeps_the_last_granted_kit() -> void:
 	# The fixture's weapons share CLASS_556MM. The host's deploy rebuild sets that
 	# pool in entry order (the M4's two magazines, then the M9's default 210) and
 	# draws the M9's, the M4's and its semi mode's clips (135 left), so its 0x5A
-	# counts (135 + 30) / 30 = 5 M4 clips. The client's apply sets the pool from
-	# the rows and its last recalc returns the loaded clips before drawing them
-	# again, leaving 150: the host's grant, where a local reseed would leave 135.
+	# counts (135 + 30) / 30 = 5 M4 clips. The client's apply zeroes the clips its
+	# rebuild drew, sets the pool from the rows (the last, an M4 row's 5 clips: 150)
+	# and draws the three clips out of it again, leaving 75: the host's grant, where
+	# a local reseed would leave 135.
 	# [orig: PlayerSlot_InitWeaponsFromLoadout @0x5156C1..0x5156EA, the recalc
 	#  @0x51577C; Server_SendWeaponSlotListToPlayer @0x502794 (WeaponSlot_GetTotalClips);
-	#  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4295fc, @0x4296a9;
-	#  WeaponSlots_RecalculateAmmoFromCapacity @0x54233d..0x542374]
-	assert_eq(joiner.get_local_player_weapon_state().reserve, 150,
+	#  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - WeaponSlots_ClearLoadedRounds
+	#  @0x42955B, the counts @0x4295FC, the draw @0x4296A9]
+	assert_eq(joiner.get_local_player_weapon_state().reserve, 75,
 			"the reserve follows the host's granted rows, not a local reseed")
 
 

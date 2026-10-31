@@ -374,6 +374,21 @@ bool apply_kit(World &world, LocalPlayerLoadout &loadout, LocalPlayerWeapon &wea
     rebuild_from_kit(world, loadout, weapon, inventory, inventory_valid, applied,
             /*select_spawn_default=*/false);
     inventory.current_slot = current_slot;
+    // The rebuild's drawn clips are dropped, not returned: every loaded round of a def that
+    // draws pool units is zeroed ahead of the counts, so the last draw takes its clip out of
+    // the count's pool (a four-clip row leaves three in reserve and one loaded), as the S2C
+    // 0x5A apply and the offline ACCEPT both do.
+    // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the draw @0x429540,
+    //  WeaponSlots_ClearLoadedRounds @0x42955B, the counts @0x4295FC, the draw @0x4296A9;
+    //  WeaponLoadout_ApplyFromBuffer @0x565CD0 - WeaponSlots_ClearLoadedRounds @0x5660FD,
+    //  the draw @0x56624B]
+    // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 - WeaponOverlay_UpdateAllPerFrame @0x42B399;
+    //  WeaponLoadout_ApplyFromBuffer @0x564C30 - WeaponOverlay_UpdateAllPerFrame @0x56505D (dfx2.exe)]
+    {
+        const Entity *cleared = world.registry.get(world.cached.local_player);
+        weapon_inventory_clear_loaded_rounds(world.tables.weapons, inventory,
+                cleared != nullptr ? entity_ammo_seat(world, *cleared) : WeaponAmmoSeat{});
+    }
     // Out of a session the apply stores each entry's fourth value, raw, into the
     // local slot's damage-class bytes, clearing nothing; in a session it sends the
     // 0x2F instead and the accept stores (D-NET-691). [orig: WeaponLoadout_ApplyFromBuffer

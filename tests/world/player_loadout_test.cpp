@@ -99,9 +99,11 @@ void test_promotion_applies_availability_then_filters_kit() {
         CHECK(r.loadout.spawn_kit()[0].name == "WPN_KNIFE");
 }
 
-// The ACCEPT overlay: requested clips expand to min(req, maxclips) * clipsize;
-// the banned validation drops entries only when requested
-// [orig: @ 0x566166; the 0x2F gate @ 0x515a3f].
+// The ACCEPT overlay: requested clips expand to min(req, maxclips) * clipsize, out of
+// which the last draw takes the loaded clip, the rebuild's own clip zeroed ahead of the
+// counts (three M4 clips: 60 in reserve, 30 loaded); the banned validation drops entries
+// only when requested [orig: @ 0x566166; WeaponSlots_ClearLoadedRounds @0x5660FD, the draw
+// @0x56624B; the 0x2F gate @ 0x515a3f].
 void test_accept_requested_ammo_and_banned_validation() {
     Rig r;
     CHECK(local_loadout_apply_accept(r.world, r.loadout, r.weapon, r.inventory,
@@ -111,7 +113,8 @@ void test_accept_requested_ammo_and_banned_validation() {
     const WeaponTableEntry *def =
             r.world.tables.weapons.by_index(static_cast<uint8_t>(r.m4));
     CHECK(def != nullptr &&
-            r.inventory.pools[static_cast<size_t>(def->ammo_class_id)] == 90);
+            r.inventory.pools[static_cast<size_t>(def->ammo_class_id)] == 60);
+    CHECK(r.inventory.slot(3 * 65) != nullptr && r.inventory.slot(3 * 65)->clip == 30);
 
     // Ban the M4 and re-accept with validation: the entry drops.
     local_loadout_apply_availability_pairs(r.world, r.loadout,
@@ -390,7 +393,7 @@ static void test_slot_list_skips_an_unclosed_entry() {
 // A sub-variant index past 255 wraps to the table's start in the accept's ammo leg,
 // as the display list's does (D-NET-757), and the walk runs on past the "null" def
 // the wrap reaches to every sub-variant of another class: the grenade launcher takes
-// the requested 5 rounds. [orig: WeaponLoadout_ApplyFromBuffer @0x5661CA ->
+// the requested 5 rounds, one of which its slot's draw then loads. [orig: WeaponLoadout_ApplyFromBuffer @0x5661CA ->
 //  AdmDef_GetEntryByIndex @0x53FC80; the walk @0x56621D..0x566233]
 void test_accept_sub_variant_index_wraps() {
     Rig r;
@@ -413,7 +416,7 @@ void test_accept_sub_variant_index_wraps() {
             r.inventory_valid, kit_of("WPN_EDGE", 3, 5), 8, /*validate_banned=*/false,
             LoadoutApplySelect::HeldWeapon));
     const WeaponTableEntry &gl = t.entries[static_cast<size_t>(sub)];
-    CHECK(r.inventory.pools[static_cast<size_t>(gl.ammo_class_id)] == 5);
+    CHECK(r.inventory.pools[static_cast<size_t>(gl.ammo_class_id)] == 4);
 }
 
 int main() {
