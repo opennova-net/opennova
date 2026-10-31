@@ -152,4 +152,45 @@ bool lists_as_mission(const std::string &name);
 // [orig: SinglePlayer_PopulateMissionList @ 0x5618b9..0x561943].
 std::string display_text(const Row &row);
 
+// The catalog's high scores: each table entry's score word (+0x11E4), 0 as the scan builds the
+// table, read from hiscore.txt (in the game's folder) at boot and at each expansion reload past the
+// rescan, and written back at each of the menu's teardowns (a mission start and the exit, the
+// reload's too). Read and written alike by Jointops.exe and dfx2.exe; only dfx2.exe's win epilog
+// reads and raises a score (runtime/world/epilog_cine.h).
+// [orig: HUD_LoadHighScoreText @ 0x5630e0 (called @ 0x4a72b3 past the scan @ 0x4a72a6, and
+//  @ 0x5527d4 past the reload's @ 0x5527ca); HighScore_SaveToFile @ 0x563100 (called
+//  @ 0x54e4de / @ 0x54e51a by Menu_TeardownShellAndCloseBinkVideos @ 0x54e430, @ 0x552725 by
+//  Game_ReloadExpansionAndMods @ 0x552710)] [orig: HUD_LoadHighScoreText @0x562040,
+//  HighScore_SaveToFile @0x562060 (dfx2.exe)]
+inline constexpr const char *kHighScoreFile = "hiscore.txt";
+class HighScoreTable {
+public:
+	// The table's rows in catalog order, each score 0.
+	void reset(const std::vector<Row> &rows);
+	// hiscore.txt's text over the table: each line the walk hands its callback (a first token not
+	// starting '/') sets the score of every row whose file is its first token, without case, to its
+	// second token read as an unsigned decimal.
+	// [orig: HUD_LoadHighScoreText @ 0x5630e0 -> File_ParseASCIIFileWithCallback @ 0x53d980 with
+	//  sub_563070 @ 0x563070 (the stricmp on entry+0 @ 0x56309d, CRT_strtoul(token 2, 10) into
+	//  entry+0x11E4 @ 0x5630c2; every row, no break)]
+	void apply_text(const std::string &text);
+	// hiscore.txt as the save writes it: "%s\t%d\r\n" per row in catalog order through a
+	// text-mode "w" stream, which writes each '\n' as CR LF, so a line ends CR CR LF.
+	// [orig: HighScore_SaveToFile @ 0x563100 - fopen("hiscore.txt", "w") @ 0x563110, the fprintf
+	//  @ 0x563146 of entry+0 and entry+0x11E4]
+	std::string text() const;
+	bool empty() const { return rows_.empty(); }
+	// The score of the first row whose file is `file` (without case); 0 for none. set_score sets
+	// that row's.
+	int32_t score(const std::string &file) const;
+	void set_score(const std::string &file, int32_t score);
+
+private:
+	struct Entry {
+		std::string file;
+		int32_t score = 0;
+	};
+	std::vector<Entry> rows_;
+};
+
 } // namespace opennova::mission_catalog

@@ -8,6 +8,7 @@
 #include <unordered_set>
 
 #include <base/gameprofile/game_type.h>
+#include <base/io/ascii_config.h>
 #include <base/io/cp1252.h>
 #include <base/io/file_io.h>
 #include <base/io/log.h>
@@ -307,6 +308,69 @@ std::string display_text(const Row &row) {
 	std::string text = row.loose ? "*" : "";
 	text += row.title.empty() ? row.file : row.title;
 	return text;
+}
+
+namespace {
+
+// CRT_strtoul(s, &end, 10) at 32 bits: leading white space, an optional sign, the digits; past
+// ULONG_MAX the value clamps to it, and a '-' negates the result [orig: CRT_strtoul, called
+// @ 0x5630c2].
+uint32_t crt_strtoul10(const char *s) {
+	while (*s == ' ' || (*s >= '\t' && *s <= '\r')) ++s;
+	bool negative = false;
+	if (*s == '+' || *s == '-') negative = *s++ == '-';
+	uint64_t value = 0;
+	bool overflow = false;
+	for (; *s >= '0' && *s <= '9'; ++s) {
+		value = value * 10u + static_cast<uint64_t>(*s - '0');
+		if (value > 0xFFFFFFFFull) overflow = true;
+		if (overflow) value = 0xFFFFFFFFull;
+	}
+	if (overflow) return 0xFFFFFFFFu;
+	const uint32_t out = static_cast<uint32_t>(value);
+	return negative ? 0u - out : out;
+}
+
+} // namespace
+
+void HighScoreTable::reset(const std::vector<Row> &rows) {
+	rows_.clear();
+	rows_.reserve(rows.size());
+	for (const Row &row : rows) rows_.push_back(Entry{row.file, 0});
+}
+
+void HighScoreTable::apply_text(const std::string &text) {
+	io::for_each_config_file_line(text.data(), text.size(), [this](io::ConfigTokens &line) {
+		for (Entry &entry : rows_)
+			if (strutil::iequals(line.tokens[0], entry.file))
+				entry.score = static_cast<int32_t>(crt_strtoul10(line.tokens[1]));
+		return false;
+	});
+}
+
+std::string HighScoreTable::text() const {
+	std::string out;
+	for (const Entry &entry : rows_) {
+		out += entry.file;
+		out += '\t';
+		out += std::to_string(entry.score);
+		out += "\r\r\n";
+	}
+	return out;
+}
+
+int32_t HighScoreTable::score(const std::string &file) const {
+	for (const Entry &entry : rows_)
+		if (strutil::iequals(entry.file, file)) return entry.score;
+	return 0;
+}
+
+void HighScoreTable::set_score(const std::string &file, int32_t score) {
+	for (Entry &entry : rows_)
+		if (strutil::iequals(entry.file, file)) {
+			entry.score = score;
+			return;
+		}
 }
 
 } // namespace opennova::mission_catalog

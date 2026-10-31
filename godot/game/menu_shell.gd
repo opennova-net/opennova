@@ -332,6 +332,9 @@ func leave_menu_mode() -> void:
 		return
 	_menu_mode = false
 	_driver.leave_menu_mode()
+	# The menu's teardown at a mission start writes the high scores back
+	# (engine: runtime/mission/mission_catalog.h HighScoreTable).
+	MissionCatalog.save_high_scores(String(LaunchFlags.working_dir()))
 
 
 # --- Asset assembly -----------------------------------------------------------
@@ -415,6 +418,9 @@ func _load_root_assets() -> void:
 	Strings.register_table(Strings.TABLE_GAMETEXT, _load_text(game_text_file))
 	Strings.register_table(Strings.TABLE_GAMEERR, _load_text("gameerr.bin"))
 	Strings.register_table(Strings.TABLE_GAMEUI, _load_text(menu_ui_text_file))
+	# The catalog's high scores, read past its scan at boot and at each reload
+	# (engine: runtime/mission/mission_catalog.h HighScoreTable).
+	MissionCatalog.load_high_scores(_root, String(LaunchFlags.working_dir()))
 	# The shell's stylesheets by their fixed names, usually PFF-archived:
 	# menu_style.mns, then brand.mns onto it, as the game loads them (the port
 	# and its witnesses: engine/runtime/menu/menu_style.h); null when neither is
@@ -791,6 +797,9 @@ func _mount_expansion(name: String) -> void:
 	# Game_ReloadExpansionAndMods witness above), so both mounts name the game the
 	# root ran, never the default title's.
 	var game := _root.get_game_code()
+	# The reload writes the high scores back before it closes the archives
+	# (engine: runtime/mission/mission_catalog.h HighScoreTable).
+	MissionCatalog.save_high_scores(String(LaunchFlags.working_dir()))
 	_root.clear()
 	if _root.mount_runtime(dir, name, LaunchFlags.loose_override_enabled(), game) != OK:
 		push_warning("MenuShell: could not mount expansion '%s': %s" % [name, _root.get_last_error()])

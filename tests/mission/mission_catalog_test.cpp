@@ -152,6 +152,35 @@ int main() {
 	using opennova::bms::AttribFlags;
 	namespace catalog = opennova::mission_catalog;
 
+	{
+		// The high-score table (entry+0x11E4): every row 0, then hiscore.txt's lines set every row
+		// whose file is the first token, without case, to the second read as an unsigned decimal
+		// ("//" lines skipped, a negative wrapping, an overflow clamping to ULONG_MAX); the save
+		// writes "%s\t%d\r\n" per row through a text-mode stream, CR CR LF
+		// [orig: sub_563070 @ 0x563070; HighScore_SaveToFile @ 0x563100].
+		std::vector<catalog::Row> rows(4);
+		rows[0].file = "A.bms";
+		rows[1].file = "b.bms";
+		rows[2].file = "C.bms";
+		rows[3].file = "a.BMS";
+		catalog::HighScoreTable table;
+		table.reset(rows);
+		TEST_EXPECT(table.text() == "A.bms\t0\r\r\nb.bms\t0\r\r\nC.bms\t0\r\r\na.BMS\t0\r\r\n");
+		table.apply_text("a.bms\t120\r\r\n// b.bms 5\r\nB.BMS -3\r\nc.bms 99999999999\r\nnone.bms 7\r\n");
+		TEST_EXPECT(table.score("A.bms") == 120);
+		TEST_EXPECT(table.score("b.bms") == -3);
+		TEST_EXPECT(table.score("C.bms") == -1);
+		TEST_EXPECT(table.text() ==
+				"A.bms\t120\r\r\nb.bms\t-3\r\r\nC.bms\t-1\r\r\na.BMS\t120\r\r\n");
+		table.set_score("c.BMS", 4580);
+		TEST_EXPECT(table.score("C.bms") == 4580);
+		TEST_EXPECT(table.score("none.bms") == 0);
+		catalog::HighScoreTable reread;
+		reread.reset(rows);
+		reread.apply_text(table.text());
+		TEST_EXPECT(reread.text() == table.text());
+	}
+
 	const fs::path root = fs::temp_directory_path() / test_paths_unique("opennova_mission_catalog_test");
 	fs::remove_all(root);
 	fs::create_directories(root);

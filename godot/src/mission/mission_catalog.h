@@ -57,6 +57,14 @@ public:
 	static TypedArray<MissionCatalogRow> rows(const Ref<ResourceRoot> &p_root);
 	// The flat filename views the session/browser surfaces consume.
 	static PackedStringArray mission_names(const Ref<ResourceRoot> &p_root);
+	// The catalog's high scores, the process's one table (engine mission_catalog::HighScoreTable
+	// carries the witnesses): load_high_scores rebuilds it over the root's catalog, each score 0,
+	// then reads `p_dir`'s hiscore.txt over it (none: all 0); save_high_scores writes it there.
+	// high_score / set_high_score read and set a row's by its file.
+	static void load_high_scores(const Ref<ResourceRoot> &p_root, const String &p_dir);
+	static Error save_high_scores(const String &p_dir);
+	static int64_t high_score(const String &p_file);
+	static void set_high_score(const String &p_file, int64_t p_score);
 };
 
 } // namespace godot

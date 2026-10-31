@@ -1092,6 +1092,8 @@ func request_quit() -> void:
 	# its cookie jar to nw_cdata.coo (NovaWorldClient.save_cookie_jar).
 	GameCfgStore.save()
 	NovaWorldClient.save_cookie_jar()
+	# And the high scores (engine: runtime/mission/mission_catalog.h HighScoreTable).
+	MissionCatalog.save_high_scores(String(LaunchFlags.working_dir()))
 	var load_operation := begin_runtime_shutdown()
 	# The subsystems' shutdown, after the cursor's show: Scroll Lock off, Num Lock
 	# as the start found it, Caps Lock off (engine controls::kVkNumLock carries the

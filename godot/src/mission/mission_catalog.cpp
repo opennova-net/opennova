@@ -1,10 +1,13 @@
 #include "mission/mission_catalog.h"
 
+#include <base/io/file_io.h>
 #include <runtime/mission/mission_catalog.h>
 
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
 #include "util/string_convert.h"
+
+#include <godot_cpp/variant/utility_functions.hpp>
 
 namespace godot {
 
@@ -49,6 +52,14 @@ void MissionCatalog::_bind_methods() {
 			&MissionCatalog::rows);
 	ClassDB::bind_static_method("MissionCatalog",
 			D_METHOD("mission_names", "root"), &MissionCatalog::mission_names);
+	ClassDB::bind_static_method("MissionCatalog", D_METHOD("load_high_scores", "root", "dir"),
+			&MissionCatalog::load_high_scores);
+	ClassDB::bind_static_method("MissionCatalog", D_METHOD("save_high_scores", "dir"),
+			&MissionCatalog::save_high_scores);
+	ClassDB::bind_static_method("MissionCatalog", D_METHOD("high_score", "file"),
+			&MissionCatalog::high_score);
+	ClassDB::bind_static_method("MissionCatalog", D_METHOD("set_high_score", "file", "score"),
+			&MissionCatalog::set_high_score);
 }
 
 TypedArray<MissionCatalogRow> MissionCatalog::rows(const Ref<ResourceRoot> &p_root) {
@@ -71,6 +82,54 @@ TypedArray<MissionCatalogRow> MissionCatalog::rows(const Ref<ResourceRoot> &p_ro
 				row.loose));
 	}
 	return out;
+}
+
+namespace {
+
+opennova::mission_catalog::HighScoreTable &high_score_table() {
+	static opennova::mission_catalog::HighScoreTable table;
+	return table;
+}
+
+} // namespace
+
+void MissionCatalog::load_high_scores(const Ref<ResourceRoot> &p_root, const String &p_dir) {
+	opennova::mission_catalog::HighScoreTable &table = high_score_table();
+	std::vector<opennova::mission_catalog::Row> rows;
+	if (p_root.is_valid()) {
+		const std::shared_ptr<const opennova::rtxt::File> text_override =
+				RtxtStringFile::installed_text_override();
+		rows = opennova::mission_catalog::build(p_root->engine_index(), text_override.get(),
+				ResourceRoot::session_title(p_root).mission_list_order);
+	}
+	table.reset(rows);
+	if (p_dir.is_empty()) return;
+	std::string text;
+	std::string error;
+	// No file reads as no lines (File_ParseASCIIFileWithCallback's failed fopen).
+	if (opennova::io::read_file_text(
+				opennova::to_std(p_dir.path_join(opennova::mission_catalog::kHighScoreFile)), text, error))
+		table.apply_text(text);
+}
+
+Error MissionCatalog::save_high_scores(const String &p_dir) {
+	if (p_dir.is_empty()) return ERR_FILE_BAD_PATH;
+	const std::string text = high_score_table().text();
+	std::string error;
+	if (!opennova::io::write_file_atomic(
+				opennova::to_std(p_dir.path_join(opennova::mission_catalog::kHighScoreFile)), text, error)) {
+		UtilityFunctions::push_warning(String("MissionCatalog: ") + opennova::to_gd(error));
+		return ERR_FILE_CANT_WRITE;
+	}
+	return OK;
+}
+
+int64_t MissionCatalog::high_score(const String &p_file) {
+	return high_score_table().score(opennova::to_std(p_file));
+}
+
+void MissionCatalog::set_high_score(const String &p_file, int64_t p_score) {
+	high_score_table().set_score(opennova::to_std(p_file), static_cast<int32_t>(p_score));
 }
 
 PackedStringArray MissionCatalog::mission_names(const Ref<ResourceRoot> &p_root) {
