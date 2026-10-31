@@ -1205,6 +1205,8 @@ void MenuDriver::_bind_methods() {
 	BIND_ENUM_CONSTANT(AVATAR_COMBO);
 	BIND_ENUM_CONSTANT(AVATAR_VOICE);
 	ClassDB::bind_method(D_METHOD("update_player_info_avatars", "db", "change", "value", "team", "voice", "gameui", "menutxt"), &MenuDriver::update_player_info_avatars);
+	ClassDB::bind_method(D_METHOD("seed_player_info_avatars", "nationality", "division"),
+			&MenuDriver::seed_player_info_avatars);
 	ClassDB::bind_method(D_METHOD("player_info_nationality_rows"), &MenuDriver::player_info_nationality_rows);
 	ClassDB::bind_method(D_METHOD("player_info_avatar_nationality"), &MenuDriver::player_info_avatar_nationality);
 	ClassDB::bind_method(D_METHOD("player_info_avatar_division"), &MenuDriver::player_info_avatar_division);

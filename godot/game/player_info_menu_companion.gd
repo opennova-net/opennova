@@ -161,6 +161,9 @@ func _ensure_db() -> void:
 		_db = null
 
 
+# Each list the screen holds selected to the side's record; one it lacks keeps the
+# record's byte (seeded ahead of the fill, _populate_side) and the next is restored
+# from it (engine PlayerInfoAvatars::seed_record).
 func _restore_character_selection(side: int) -> void:
 	if _db == null or side < 0 or side > 1:
 		return
@@ -168,18 +171,20 @@ func _restore_character_selection(side: int) -> void:
 	if saved == null:
 		return
 	var nat_index := saved.nationality
-	var visible_nat_row := nationality_rows().find(nat_index)
 	var nat_combo := _id("NATIONALITY")
-	if visible_nat_row < 0 or nat_combo < 0:
-		return
-	_driver.select_row(nat_combo, visible_nat_row, false)
-	_update_avatars(MenuDriver.AVATAR_NATIONALITY, visible_nat_row)
+	if nat_combo >= 0:
+		var visible_nat_row := nationality_rows().find(nat_index)
+		if visible_nat_row < 0:
+			return
+		_driver.select_row(nat_combo, visible_nat_row, false)
+		_update_avatars(MenuDriver.AVATAR_NATIONALITY, visible_nat_row)
 	var div_index := saved.division
-	var div_combo := _id("DIVISION")
-	if div_index < 0 or div_index >= _db.get_division_count(nat_index) or div_combo < 0:
+	if div_index < 0 or div_index >= _db.get_division_count(nat_index):
 		return
-	_driver.select_row(div_combo, div_index, false)
-	_update_avatars(MenuDriver.AVATAR_DIVISION, div_index)
+	var div_combo := _id("DIVISION")
+	if div_combo >= 0:
+		_driver.select_row(div_combo, div_index, false)
+		_update_avatars(MenuDriver.AVATAR_DIVISION, div_index)
 	var combo_index := saved.combo
 	var combo := _id("COMBO_LIST")
 	if combo_index < 0 or combo_index >= _db.get_combo_count(nat_index, div_index) \
@@ -430,13 +435,18 @@ func _populate_nationalities() -> void:
 
 
 # The shown side's lists filled and its saved selection restored, as the
-# screen's build and a side switch do. The cascade runs through the first rows
+# screen's build and a side switch do. The side's record is seeded first, which a
+# list the screen lacks keeps. The cascade runs through the first rows
 # on its way to the restored ones; each of its legs reads the profile's byte as
 # it stands, and only the last leg's voice, the fill against the restored
 # selection, is written (engine profile::set_voice_override).
 func _populate_side() -> void:
 	_restoring_side = true
 	_restored_voice = selected_voice()
+	if _db != null:
+		var saved := _character_state.side_selection(_team)
+		if saved != null:
+			_driver.seed_player_info_avatars(saved.nationality, saved.division)
 	_populate_nationalities()  # cascades into divisions -> combos -> voice
 	_restore_character_selection(_team)
 	_restoring_side = false

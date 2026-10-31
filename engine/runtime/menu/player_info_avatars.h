@@ -11,8 +11,21 @@ namespace opennova::menu {
 class MenuRuntime;
 
 // The PLAYER_INFO nationality -> division -> combo -> voice controller.
-// Widgets may be absent: a missing stage stops its downstream cascade and
-// retains its previous state. The embedder owns profile persistence and preview nodes.
+// Widgets may be absent. The populate hands each stage the side's record: a
+// nationality or division list the screen lacks leaves the record's
+// nationality or division as it stands (seed_record), and the next stage
+// fills from it, as both executables' populate passes the record's bytes to
+// each fill and each fill returns at once without its control
+// [orig: PlayerInfo_PopulateAllControls @0x5606f0 - PlayerInfo_PopulateDivisionList
+//  (the nationality byte) @0x560802, PlayerInfo_PopulateAvatarComboList (the
+//  nationality and division bytes) @0x560865; PlayerInfo_PopulateNationalityList
+//  @0x55d8c0 (@0x55d8dd), PlayerInfo_PopulateDivisionList @0x55da50 (@0x55da6a)]
+// [orig: PlayerInfo_PopulateAllControls @0x55e9a0 (@0x55eab2, @0x55eb15) (dfx2.exe),
+//  whose player.mnu holds no NATIONALITY or DIVISION]. A missing combo list
+// still stops ours there, its voices unfilled, where retail's populate fills
+// them from the record's combo [orig: PlayerInfo_PopulatePlayerVoiceCombo
+// @0x55dce0 (g_CharSelCombo @0x55dd48), called @0x5608d8]; no shipped
+// player.mnu lacks one. The embedder owns profile persistence and preview nodes.
 struct PlayerInfoAvatars {
 	enum class Change { Team, Nationality, Division, Combo, Voice };
 	int nationality = -1;
@@ -21,6 +34,12 @@ struct PlayerInfoAvatars {
 	std::vector<int32_t> voices;
 	bool preview_changed = false;
 
+	// The shown side's record ahead of a Team populate: its nationality and
+	// division (Avatars.def tree indices), which a stage with no list keeps.
+	void seed_record(int record_nationality, int record_division) {
+		nationality = record_nationality;
+		division = record_division;
+	}
 	int update(MenuRuntime &menu, const avatars::AvatarsFile &file, Change change,
 			int value, int team, int saved_voice, const hud::GameTextLookup &gameui,
 			const hud::GameTextLookup &menutxt);

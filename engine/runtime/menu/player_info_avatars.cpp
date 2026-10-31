@@ -46,32 +46,39 @@ struct Fill {
 	}
 
 	// [orig: PlayerInfo_PopulateNationalityList @0x55d8c0; team filter D-PLAYERINFO-5]
+	// No list: the record's nationality stands and the divisions fill from it (the
+	// fill's return @0x55d8dd; PlayerInfo_PopulateAllControls @0x560802).
 	void nationalities() {
 		const int id = menu.widget_id("NATIONALITY");
-		if (id < 0) return;
 		state.nationalities.clear();
-		std::vector<std::string> rows;
-		for (size_t i = 0; i < file.nationalities_count; ++i) {
-			const auto &nat = file.nationalities[i];
-			if ((nat.alignment != 0) != (team != 0)) continue;
-			state.nationalities.push_back(static_cast<int32_t>(i));
-			rows.push_back(name(nat.name_key));
+		if (id >= 0) {
+			std::vector<std::string> rows;
+			for (size_t i = 0; i < file.nationalities_count; ++i) {
+				const auto &nat = file.nationalities[i];
+				if ((nat.alignment != 0) != (team != 0)) continue;
+				state.nationalities.push_back(static_cast<int32_t>(i));
+				rows.push_back(name(nat.name_key));
+			}
+			items(id, rows);
+			state.nationality = state.nationalities.empty() ? -1 : state.nationalities.front();
 		}
-		items(id, rows);
-		state.nationality = state.nationalities.empty() ? -1 : state.nationalities.front();
 		divisions();
 	}
 
 	// [orig: PlayerInfo_PopulateDivisionList @0x55da50]
+	// No list: the record's division stands and the combos fill from it (the
+	// fill's return @0x55da6a; PlayerInfo_PopulateAllControls @0x560865).
 	void divisions() {
 		const int id = menu.widget_id("DIVISION");
-		if (id < 0) return;
-		std::vector<std::string> rows;
-		if (const auto *nat = nationality_at(file, state.nationality)) {
-			for (size_t i = 0; i < nat->divisions_count; ++i) rows.push_back(name(nat->divisions[i].name_key));
+		if (id >= 0) {
+			std::vector<std::string> rows;
+			if (const auto *nat = nationality_at(file, state.nationality)) {
+				for (size_t i = 0; i < nat->divisions_count; ++i)
+					rows.push_back(name(nat->divisions[i].name_key));
+			}
+			items(id, rows);
+			state.division = rows.empty() ? -1 : 0;
 		}
-		items(id, rows);
-		state.division = rows.empty() ? -1 : 0;
 		combos();
 	}
 

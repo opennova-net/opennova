@@ -126,12 +126,25 @@ void test_missing_stages_and_invalid_selections() {
 	state.update(menu, data.file, Change::Team, 0, 0, 3, gameui, menutxt);
 	state.update(menu, data.file, Change::Division, 999, 0, 3, gameui, menutxt);
 	CHECK(state.division == 999 && state.selected_combo(menu, data.file) == nullptr);
+	// A list the screen lacks leaves the record's byte, and the next stage fills from it
+	// [orig: PlayerInfo_PopulateAllControls @0x560802 / @0x560865; @0x55eab2 / @0x55eb15 (dfx2.exe)]:
+	// no nationality list, the record's nationality's divisions (the list's first row picked).
 	menu.open_document(&no_nat, "partial.mnu", "PLAYER_INFO");
-	CHECK(state.update(menu, data.file, Change::Team, 0, 1, 7, gameui, menutxt) == 7);
-	CHECK(state.nationalities == (std::vector<int32_t>{1, 2}) && !state.preview_changed);
+	state.seed_record(1, 1);
+	CHECK(state.update(menu, data.file, Change::Team, 0, 1, 7, gameui, menutxt) == 0);
+	CHECK(state.nationalities.empty() && state.nationality == 1 && state.division == 0);
+	CHECK(menu.get_widget_items(menu.widget_id("DIVISION")) == (std::vector<std::string>{"D_ZERO", "D_ONE"}));
+	CHECK(menu.item_count(menu.widget_id("COMBO_LIST")) == 2 && state.preview_changed);
+	// No division list: the record's division's combos (a female head: her voices keep 7).
 	menu.open_document(&no_div, "partial.mnu", "PLAYER_INFO");
-	CHECK(state.update(menu, data.file, Change::Team, 0, 1, 7, gameui, menutxt) == 7);
-	CHECK(state.nationality == 0 && state.division == 999 && !state.preview_changed);
+	state.seed_record(-1, 1);
+	CHECK(state.update(menu, data.file, Change::Team, 0, 0, 7, gameui, menutxt) == 7);
+	CHECK(state.nationality == 1 && state.division == 1 && state.preview_changed);
+	CHECK(menu.get_widget_items(menu.widget_id("COMBO_LIST")) == (std::vector<std::string>{"HEAD_F - BODY_F"}));
+	state.seed_record(-1, 999);
+	CHECK(state.update(menu, data.file, Change::Team, 0, 1, 7, gameui, menutxt) == 0);
+	CHECK(state.nationality == 0 && state.division == 999 && state.preview_changed);
+	CHECK(menu.item_count(menu.widget_id("COMBO_LIST")) == 0);
 	menu.open_document(&no_combo, "partial.mnu", "PLAYER_INFO");
 	CHECK(state.update(menu, data.file, Change::Team, 0, 0, 7, gameui, menutxt) == 7);
 	CHECK(state.division == 0 && !state.preview_changed);
@@ -142,6 +155,32 @@ void test_missing_stages_and_invalid_selections() {
 	CHECK(state.update(menu, {}, Change::Team, 0, 0, 7, gameui, menutxt) == 0);
 	CHECK(state.nationality == -1 && state.division == -1 && state.preview_changed);
 	CHECK(menu.item_count(menu.widget_id("NATIONALITY")) == 0);
+}
+
+// dfx2.exe's PLAYER_INFO: a COMBO_LIST spin list and neither NATIONALITY nor DIVISION. The
+// combos are the record's nationality and division's [orig: PlayerInfo_PopulateAllControls
+// @0x55e9a0 - PlayerInfo_PopulateAvatarComboList @0x55eb15 (dfx2.exe)].
+void test_record_fills_a_lone_combo_spin_list() {
+	Avatars data;
+	mnu::Document doc = document({"COMBO_LIST"});
+	doc.screens[0].roots[0].children[0].type = mnu::WindowType::SpinList;
+	MenuRuntime menu; menu.open_document(&doc, "player.mnu", "PLAYER_INFO");
+	PlayerInfoAvatars state;
+	state.seed_record(1, 0);
+	state.update(menu, data.file, Change::Team, 0, 0, 0, gameui, menutxt);
+	const int combo = menu.widget_id("COMBO_LIST");
+	CHECK(state.nationalities.empty() && state.nationality == 1 && state.division == 0);
+	CHECK(menu.get_widget_items(combo) == (std::vector<std::string>{"Head - Body", "HEAD_F - BODY_F"}));
+	CHECK(menu.selected_row(combo) == 0 && state.preview_changed);
+	menu.select_row(combo, 1, false);
+	CHECK(state.selected_combo(menu, data.file) == data.combos + 1);
+	state.seed_record(1, 1);
+	state.update(menu, data.file, Change::Team, 0, 0, 0, gameui, menutxt);
+	CHECK(menu.get_widget_items(combo) == (std::vector<std::string>{"HEAD_F - BODY_F"}));
+	// No record seeded: nothing to list.
+	PlayerInfoAvatars fresh;
+	fresh.update(menu, data.file, Change::Team, 0, 0, 0, gameui, menutxt);
+	CHECK(menu.item_count(combo) == 0 && fresh.selected_combo(menu, data.file) == nullptr);
 }
 // The preview's initial facing: the reseed, then rand() % 180 whole degrees at
 // 0xB60B60 BAM a degree, the draw stepping the CRT stream once
@@ -188,6 +227,7 @@ void test_preview_motion_steps_per_update() {
 int main() {
 	test_cascade_and_voice();
 	test_missing_stages_and_invalid_selections();
+	test_record_fills_a_lone_combo_spin_list();
 	test_preview_initial_yaw();
 	test_preview_motion_steps_per_update();
 	std::cout << "player_info_avatars: " << failures << " failures\n";

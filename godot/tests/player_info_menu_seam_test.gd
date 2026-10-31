@@ -544,6 +544,49 @@ func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 	assert_eq(int((saved_sides[1] as Dictionary).get("avatar_packed", -1)), 0x8407)
 
 
+# dfx2.exe's player.mnu shape: a COMBO_LIST spin list, the name edit and ACCEPT, no
+# NATIONALITY or DIVISION. The combos are the record's nationality and division's, the
+# record's combo selected, and the save keeps the record's nationality and division
+# (engine PlayerInfoAvatars::seed_record).
+func _spin_screen_doc() -> MnuDocument:
+	return MenuDriverFixture.doc_from_xml(self, MenuDriverFixture.screen_xml("PLAYER_INFO",
+			MenuDriverFixture.wnd("spinlist", "COMBO_LIST", 10)
+			+ MenuDriverFixture.wnd("edit", "PLAYERNAME", 40)
+			+ MenuDriverFixture.wnd("button", "ACCEPT", 70)))
+
+
+func test_a_screen_without_nationality_lists_fills_the_records_combos() -> void:
+	var db := _load_db()
+	var blue := db.resolve_character_id(0x0400, 0)
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_persisted_profile({
+		"team": 0,
+		"side_profiles": [
+			{
+				"team": 0,
+				"nationality": blue.nationality_index,
+				"division": blue.division_index,
+				"combo": blue.combo_index,
+				"player_class": 8,
+				"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0400,
+			},
+			{},
+		],
+	})
+	companion.set_database(db)
+	var driver := MenuDriverFixture.driver_over(self, _spin_screen_doc(), "player.mnu")
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	var combos := driver.widget_id("COMBO_LIST")
+	assert_eq(driver.item_count(combos),
+			db.get_combo_count(blue.nationality_index, blue.division_index),
+			"the record's division's combos")
+	assert_eq(driver.selected_row(combos), blue.combo_index, "the record's combo")
+	var snap := companion.snapshot()
+	assert_eq(int(snap.get("nationality", -1)), blue.nationality_index, "the record's nationality kept")
+	assert_eq(int(snap.get("division", -1)), blue.division_index, "the record's division kept")
+	assert_eq(int(snap.get("combo", -1)), blue.combo_index)
+
+
 func test_accept_emits_avatar_chosen() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_database(_load_db())

@@ -253,6 +253,11 @@ public:
 	int update_player_info_avatars(const Ref<AvatarDatabase> &p_db, int p_change,
 			int p_value, int p_team, int p_voice, const Ref<RtxtStringFile> &p_gameui,
 			const Ref<RtxtStringFile> &p_menutxt);
+	// The shown side's record ahead of a team populate, which a stage the screen holds no list for
+	// keeps (engine PlayerInfoAvatars::seed_record).
+	void seed_player_info_avatars(int p_nationality, int p_division) {
+		avatars_.seed_record(p_nationality, p_division);
+	}
 	PackedInt32Array player_info_nationality_rows() const;
 	int player_info_avatar_nationality() const { return avatars_.nationality; }
 	int player_info_avatar_division() const { return avatars_.division; }
