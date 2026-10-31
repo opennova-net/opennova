@@ -1475,9 +1475,12 @@ bool decode_spawn_wave_status(const uint8_t *body, size_t len, SpawnWaveStatus &
 // S2C 0x81 — requester-local accumulated points `[i32 score]`. This is
 // CRenderState field 0x1C (the direct array word at index 29), not the
 // game-type-specific primary score shown in the first scoreboard column.
+// The reader refuses no body: it reads the first four bytes, a shorter body as
+// 0, so the decode always succeeds.
 // [orig: Server_UpdateCaptureZoneProximity @0x5086A0;
 //        CPlayerStats_GetFieldPlusOne @0x52D7D0;
-//        NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
+//        NapiNPClientMsg_ScoreDeltaSound @0x42A0B0 - the length test
+//        @0x42A0BA..0x42A0BF, the short body's 0 @0x42A0C1, the read @0x42A0CD]
 struct ScoreDeltaSound {
 	int32_t score = 0;
 };

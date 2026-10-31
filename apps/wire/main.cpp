@@ -1294,12 +1294,9 @@ void print_tag_6c(const std::vector<uint8_t> &body) {
 
 void print_tag_81(const std::vector<uint8_t> &body) {
 	ScoreDeltaSound score;
-	if (!decode_score_delta_sound(body.data(), body.size(), score)) {
-		std::printf("        [0x81] score-delta-sound decode failed (need 4 B got %zu)\n",
-		            body.size());
-		return;
-	}
-	std::printf("        [0x81] score-delta-sound score=%d\n", int(score.score));
+	(void)decode_score_delta_sound(body.data(), body.size(), score); // a short body reads 0
+	std::printf("        [0x81] score-delta-sound score=%d%s\n", int(score.score),
+	            body.size() < 4 ? " (short body, read as 0)" : "");
 }
 
 void print_tag_2b_c2s(const std::vector<uint8_t> &body) {

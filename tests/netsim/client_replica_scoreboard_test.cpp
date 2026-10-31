@@ -592,9 +592,14 @@ void test_score_delta_sound_fold() {
 	CHECK(view.state().score_feedback.updates == 2);
 	CHECK(view.state().revision == revision + 1);
 
+	// A short body reads 0, a long one its first four bytes
+	// [orig: NapiNPClientMsg_ScoreDeltaSound @0x42A0BA..0x42A0CD].
 	view.apply(s2c::SCORE_DELTA_SOUND, {0x01, 0x00, 0x00});
-	CHECK(view.state().score_feedback.score == -3);
-	CHECK(view.state().score_feedback.updates == 2);
+	CHECK(view.state().score_feedback.score == 0);
+	CHECK(view.state().score_feedback.delta == 3);
+	CHECK(view.state().score_feedback.updates == 3);
+	view.apply(s2c::SCORE_DELTA_SOUND, {0x05, 0x00, 0x00, 0x00, 0xFF});
+	CHECK(view.state().score_feedback.score == 5 && view.state().score_feedback.updates == 4);
 }
 
 // Each 0x81 whose delta sounds the EXP_FANFARE ladder is a fanfare arm, the last one's tone kept

@@ -171,11 +171,8 @@ void ClientReplicaPipeline::apply_spawn_wave_status(
 
 void ClientReplicaPipeline::apply_score_delta_sound(
 		const std::vector<uint8_t> &body) {
-	ScoreDeltaSound sample;
-	if (!decode_score_delta_sound(body.data(), body.size(), sample)) {
-		++malformed_bodies_;
-		return;
-	}
+	ScoreDeltaSound sample; // every body reads (the decode carries the witness)
+	(void)decode_score_delta_sound(body.data(), body.size(), sample);
 	ClientScoreFeedback &feedback = state_.score_feedback;
 	if (sample.score == feedback.score) return;
 	feedback.delta = static_cast<int32_t>(
