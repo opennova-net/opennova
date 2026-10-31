@@ -400,7 +400,8 @@ class Match {
     // its 0x2F state; one displaced further snaps home, takes the entity a
     // downward ray meets as its ground, rebuilds its proximity list and
     // publishes. Returns true only for the snap. Its callers: the 1 Hz
-    // carry-limit break, the own-flag arms and a non-CTF capture.
+    // carry-limit break, the own-flag arms, a non-CTF capture and the timeout
+    // return.
     // [orig: Entity_SyncPositionFromDefinition @0x43A9B0 — equality return
     //  @0x43a9f8, near path @0x43aa3b..0x43aa7c, snap + ground raycast +
     //  send @0x43aa7d..0x43ab40]
@@ -621,8 +622,9 @@ class Match {
     void record_flag_pickup(World &world, EntityHandle player, EntityHandle flag);
     void record_flag_save(World &world, EntityHandle player, EntityHandle flag,
                           const EntityPosition &touched_at);
-    void return_flag_home(World &world, EntityHandle flag, MatchGameplayEventKind kind,
-                          EntityHandle actor = EntityHandle{});
+    // [orig: Server_BroadcastOverlayDeathEvent @0x50F5A0]: the timeout
+    // return's 0x1E event and 0x2F, after its definition-pose sync.
+    void record_flag_return(World &world, EntityHandle flag);
     void update_objective_proximity(const World &world);
     // Per slot team: the non-spectator players whose dead bit is clear and
     // whose last proximity mask holds bit 0 (the 4095 objective, a team-0 hill

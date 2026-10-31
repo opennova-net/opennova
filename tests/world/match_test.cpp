@@ -1166,6 +1166,18 @@ void test_demolition_flag_and_flagball_gameplay() {
     world->logic_tick = 5 * 62;
     step_item_pool(*world, 1);
     CHECK(world->registry.get(timed_flag)->position.x == 10.0f);
+    // The expiry's definition-pose sync raises its 0x2F lane, then the return's
+    // event record. [orig: Entity_UpdateIdleCheck @0x40857D / @0x408583]
+    const std::vector<MatchGameplayEvent> returned = world->match.drain_gameplay_events();
+    CHECK(returned.size() >= 2);
+    if (returned.size() >= 2) {
+        const MatchGameplayEvent &synced = returned[returned.size() - 2];
+        CHECK(synced.kind == MatchGameplayEventKind::FlagDrop && synced.objective == timed_flag &&
+              synced.objective_position.x == 10.0f);
+        CHECK(returned.back().kind == MatchGameplayEventKind::FlagReturn &&
+              returned.back().objective_item_id == 4095 &&
+              returned.back().objective_position.x == 10.0f);
+    }
     world->registry.despawn(timed_flag);
 
     MatchRules flag_ball;

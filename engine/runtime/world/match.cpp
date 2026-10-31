@@ -671,35 +671,26 @@ void Match::attach_carried_object(World &world, Entity &carrier, Entity &carried
                                 static_cast<uint16_t>(carried.item_id)});
 }
 
-void Match::return_flag_home(World &world, EntityHandle flag_handle,
-                             MatchGameplayEventKind kind, EntityHandle actor) {
-    CarryObjectiveState *state = carry_state(world, flag_handle);
-    Entity *flag = world.registry.get(flag_handle);
-    if (state == nullptr || flag == nullptr)
+// The timeout return's broadcast, after its sync: the 0x1E return event by
+// the flag's id (35 / 36 / 37, no actor, zero words) and the flag's 0x2F as it
+// then stands, its parent the flag's +0x170 occupant as the serializer writes
+// it. Only the three flags send.
+// [orig: Server_BroadcastOverlayDeathEvent @0x50F5A0 - the def @0x50F5AE, the
+//  id switch @0x50F5B8, the 0x1E @0x50F613..0x50F618, the 0x2F @0x50F61E
+//  (Server_SendDestructibleDeathPacket @0x50D900); NetPacket_SerializeEntityWithParentAndTarget
+//  @0x505810 (entity[92] @0x5058AA)]
+// [orig: the twin's @0x50C670 (dfx2.exe)]
+void Match::record_flag_return(World &world, EntityHandle flag_handle) {
+    const Entity *flag = world.registry.get(flag_handle);
+    if (flag == nullptr || !flag->has_item_def || !is_flag(flag->item_id))
         return;
-    const EntityPosition event_position = flag->position;
-    if (Entity *carrier = world.registry.get(flag->primary_occupant);
-        carrier != nullptr && carrier->mounted_child == flag_handle)
-        carrier->mounted_child = EntityHandle{};
-    flag->primary_occupant = EntityHandle{};
-    flag->ground_target = EntityHandle{};
-    flag->flags &= ~kEntityFlagCarried;
-    flag->position = state->home;
-    // The retail returns are the definition-pose sync, whose snap writes the
-    // heading with the position. [orig: Entity_SyncPositionFromDefinition
-    // @0x43aa96, called from
-    //  Entity_UpdateIdleCheck @0x40857d, Entity_ProcessWaypointInteraction
-    //  @0x4ad8c3 / @0x4ad908, Server_ProcessScoringAndBroadcast @0x516a5b]
-    restore_authored_heading(*flag, state->home_heading);
-    flag->alive = true;
-    state->return_ticks = 0;
-    gameplay_events_.push_back({kind,
-                                actor,
+    gameplay_events_.push_back({MatchGameplayEventKind::FlagReturn,
+                                EntityHandle{},
                                 flag_handle,
-                                event_position,
+                                flag->position,
                                 flag->position,
                                 static_cast<uint8_t>(flag->flags),
-                                EntityHandle{},
+                                flag->primary_occupant,
                                 flag->ground_target,
                                 false,
                                 static_cast<uint16_t>(flag->item_id)});
@@ -1715,12 +1706,21 @@ void Match::tick_flag_event(World &world, Entity &flag) {
     } else {
         state->return_ticks = rules_.flag_return_ticks < 5 ? 210 : int32_t(rules_.flag_return_ticks);
     }
+    // The expiry: every pool-0 carrier drops the flag (each drop its 0x2F),
+    // the definition-pose sync snaps it home (its 0x2F, the heading and the
+    // ground ray with it), then the return's event and its 0x2F.
+    // [orig: Entity_UpdateIdleCheck - the pool-0 walk @0x40854E..0x40857A
+    //  (Entity_DropCarriedObject @0x408572), Entity_SyncPositionFromDefinition
+    //  @0x40857D, Server_BroadcastOverlayDeathEvent @0x408583]
+    // [orig: the twin's @0x408552 / @0x40855D / @0x408563 (dfx2.exe)]
     if (state->return_ticks <= 0) {
         const EntityHandle handle = flag.handle;
         world.registry.for_each_in_pool(0, [&](const Entity &body) {
             if (body.mounted_child == handle) drop_carried_object(world, body.handle);
         });
-        return_flag_home(world, handle, MatchGameplayEventKind::FlagReturn);
+        flag.alive = true; // the port's liveness latch, as the drop's
+        sync_flag_to_authored_pose(world, handle);
+        record_flag_return(world, handle);
         state = carry_state(world, handle);
     }
     state->previous_x_q16 = flag.position.x.q16;

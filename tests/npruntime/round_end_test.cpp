@@ -1408,11 +1408,17 @@ void test_flag_timeout_wire_transaction() {
 	inmatch::Server_TickUpdate(ctx);
 	inmatch::Server_TickUpdate(ctx); // the return's records lead this queue
 
+	// The expiry's definition-pose sync sends the home state ahead of the return
+	// event, and the return's own 0x2F follows the event.
+	// [orig: Entity_UpdateIdleCheck - Entity_SyncPositionFromDefinition @0x40857D
+	//  (its 0x2F @0x43AB40), Server_BroadcastOverlayDeathEvent @0x408583 (the 0x1E
+	//  @0x50F618, the 0x2F @0x50F61E)]
 	auto saw_exact_return = [&](ns::LoopbackChannel &channel) {
 		bool saw_event = false;
 		bool saw_state = false;
 		int event_order = -1;
 		int state_order = -1;
+		int first_state_order = -1;
 		int order = 0;
 		ns::Datagram datagram;
 		while (channel.client_recv(datagram)) {
@@ -1433,14 +1439,16 @@ void test_flag_timeout_wire_transaction() {
 						state.pos_x == 5 * 65536 && state.pos_y == 6 * 65536) {
 					saw_state = true;
 					state_order = order;
+					if (first_state_order < 0) first_state_order = order;
 				}
 			}
 			++order;
 		}
-		return saw_event && saw_state && event_order >= 0 && state_order > event_order;
+		return saw_event && saw_state && event_order >= 0 && first_state_order >= 0 &&
+				first_state_order < event_order && state_order > event_order;
 	};
 	expect(saw_exact_return(remote_wire),
-			"red-flag timeout fans event 36 before the exact home-state 0x2F");
+			"red-flag timeout fans the sync's home-state 0x2F, event 36, then its own 0x2F");
 	expect(saw_exact_return(host_wire),
 			"flag-timeout mask 0x80 includes the host with event-before-state ordering");
 }
