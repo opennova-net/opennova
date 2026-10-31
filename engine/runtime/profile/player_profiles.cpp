@@ -15,7 +15,6 @@
 namespace opennova::profile {
 namespace {
 
-constexpr uint32_t kMagic = 0x43425046u;    // "FPBC"
 constexpr uint32_t kVersion = 0x31313230u;  // "0211"
 constexpr uint32_t kDefaultTableFlag = 0x4000000u;
 
@@ -207,7 +206,7 @@ void set_voice_override(playersav::ProfileRecord &record, int side, int value) {
 	record.voice[static_cast<size_t>(side)] = static_cast<uint8_t>(value);
 }
 
-PlayerProfiles::PlayerProfiles() = default;
+PlayerProfiles::PlayerProfiles(const Title &title) : magic_(title.profile_magic) {}
 
 void PlayerProfiles::select_slot(int slot) {
 	slot_ = (slot < 0 || slot >= static_cast<int>(playersav::kProfileSlots)) ? 0 : slot;
@@ -229,7 +228,9 @@ void PlayerProfiles::load(const LoadInput &in, const ProfileDefaults &defaults) 
 	if (in.player_sav != nullptr) {  // [orig: File_CheckExists @0x54f586]
 		const Header h = read_header(*in.player_sav);
 		extra = h.extra;
-		if (h.magic == kMagic && h.version == kVersion) {  // [orig: @0x54f5c6]
+		// The title's magic [orig: @0x54f5b4..0x54f5c6] [orig: @0x54c800..0x54c812
+		//  (dfx2.exe)]
+		if (h.magic == magic_ && h.version == kVersion) {
 			if ((h.flags & playersav::kHeaderFlagLatched) != 0) header_latched_ = true;
 			for (size_t s = 0; s < playersav::kProfileSlots; ++s) {
 				// [orig: File_Read(record, 0x3C80) @0x54f5ec]
@@ -255,12 +256,13 @@ void PlayerProfiles::load(const LoadInput &in, const ProfileDefaults &defaults) 
 	// records read over the seeded ones.
 	if (in.weapon_sav != nullptr) {
 		const Header h = read_header(*in.weapon_sav);
-		if (h.magic == kMagic && h.version == kVersion) {
-			std::vector<uint8_t> image = playersav::write(weapons_);
+		// [orig: @0x54f6ef..0x54f6fd] [orig: @0x54c93f..0x54c94d (dfx2.exe)]
+		if (h.magic == magic_ && h.version == kVersion) {
+			std::vector<uint8_t> image = playersav::write(weapons_, magic_);
 			overlay(image, playersav::kHeaderBytes, *in.weapon_sav, playersav::kHeaderBytes,
 					playersav::kProfileSlots * playersav::kRecordBytes);
 			playersav::File file;
-			if (playersav::read(image.data(), image.size(), file)) {
+			if (playersav::read(image.data(), image.size(), magic_, file)) {
 				// The header words are the image's: the weapon.sav load keeps
 				// neither.
 				file.flags = weapons_.flags;
@@ -273,11 +275,12 @@ void PlayerProfiles::load(const LoadInput &in, const ProfileDefaults &defaults) 
 
 std::vector<uint8_t> PlayerProfiles::player_sav_bytes() const {
 	// [orig: PlayerProfile_SaveToFiles @0x54be00 — "FPBC0211" @0x54be2e, the
-	//  extra word's high byte @0x54be3d, the flags bit @0x54be43]
+	//  extra word's high byte @0x54be3d, the flags bit @0x54be43] [orig:
+	//  PlayerProfile_SaveToFiles @0x549080 - "2XFD0211" @0x5490ae..0x5490b5 (dfx2.exe)]
 	playersav::PlayerSav out = player_;
 	out.flags = header_latched_ ? playersav::kHeaderFlagLatched : 0u;
 	out.extra = static_cast<uint32_t>(header_byte_) << 24;
-	return playersav::write(out);
+	return playersav::write(out, magic_);
 }
 
 std::vector<uint8_t> PlayerProfiles::weapon_sav_bytes() const {
@@ -285,7 +288,7 @@ std::vector<uint8_t> PlayerProfiles::weapon_sav_bytes() const {
 	playersav::File out = weapons_;
 	out.flags = header_latched_ ? playersav::kHeaderFlagLatched : 0u;
 	out.extra = static_cast<uint32_t>(header_byte_) << 24;
-	return playersav::write(out);
+	return playersav::write(out, magic_);
 }
 
 bool PlayerProfiles::rename(const std::string &text) {

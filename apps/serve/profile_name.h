@@ -1,5 +1,6 @@
 #pragma once
 
+#include <base/title/title.h>
 #include <runtime/inmatch/character_registry.h>
 #include <runtime/inmatch/napi_np_connection.h> // CharacterJoinVars
 
@@ -37,13 +38,15 @@ struct ServeProfile {
 	std::string name;
 	std::optional<inmatch::CharacterJoinVars> character_vars;
 };
-ServeProfile load_serve_profile(int32_t player_index, const std::string &account_name,
-		const std::vector<uint8_t> *player_sav, const std::vector<uint8_t> *weapon_sav,
-		const inmatch::CharacterRegistry &characters);
+// `title` is the one the server runs as (its files' magic, profile::PlayerProfiles).
+ServeProfile load_serve_profile(const Title &title, int32_t player_index,
+		const std::string &account_name, const std::vector<uint8_t> *player_sav,
+		const std::vector<uint8_t> *weapon_sav, const inmatch::CharacterRegistry &characters);
 
 // load_serve_profile over the files the process's working directory holds: player.sav, and
 // weapon.sav at its path for the mounted expansion (playersav::weapon_sav_relpath).
-ServeProfile read_serve_profile(int32_t player_index, const std::string &account_name,
-		const std::string &expansion, const inmatch::CharacterRegistry &characters);
+ServeProfile read_serve_profile(const Title &title, int32_t player_index,
+		const std::string &account_name, const std::string &expansion,
+		const inmatch::CharacterRegistry &characters);
 
 } // namespace opennova::serve

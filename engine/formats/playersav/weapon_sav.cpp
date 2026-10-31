@@ -13,10 +13,10 @@
 namespace opennova::playersav {
 namespace {
 
-// The 16-byte header's first two dwords, tested for equality by the loader
-// [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0]. 1128419398 / 825307696 in
-// the original's decimal immediates; little-endian they read as ASCII.
-constexpr uint32_t kMagic = 0x43425046u;    // "FPBC"
+// The 16-byte header's version dword, the second the loader tests for equality
+// after the title's magic (the caller's) [orig: PlayerProfile_LoadAllFromDisk
+// @0x54f4d0]. 825307696 in the original's decimal immediate; little-endian it
+// reads as ASCII.
 constexpr uint32_t kVersion = 0x31313230u;  // "0211"
 
 // The witnessed regions of a side block leave a trailing span with no reader in
@@ -251,7 +251,7 @@ void encode_kit_page(const KitPage &page, uint8_t *out, size_t size)
     // out[pos] is already 0 from the memset: that byte is the blob terminator.
 }
 
-bool read(const uint8_t *data, size_t size, File &out)
+bool read(const uint8_t *data, size_t size, uint32_t want_magic, File &out)
 {
     out = File{};
     if (data == nullptr || size < kHeaderBytes)
@@ -260,7 +260,7 @@ bool read(const uint8_t *data, size_t size, File &out)
     io::ByteReader r(data, size);
     const uint32_t magic = r.read_u32();
     const uint32_t version = r.read_u32();
-    if (magic != kMagic || version != kVersion)
+    if (magic != want_magic || version != kVersion)
         return false;
     out.flags = r.read_u32();
     out.extra = r.read_u32();
@@ -283,10 +283,10 @@ bool read(const uint8_t *data, size_t size, File &out)
     return true;
 }
 
-std::vector<uint8_t> write(const File &in)
+std::vector<uint8_t> write(const File &in, uint32_t magic)
 {
     io::ByteWriter w;
-    w.write_u32(kMagic);
+    w.write_u32(magic);
     w.write_u32(kVersion);
     w.write_u32(in.flags);
     w.write_u32(in.extra);

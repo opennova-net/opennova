@@ -84,6 +84,10 @@ Title make() {
 	// The catalog sorted by file name [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 - the
 	//  qsort @ 0x5635f0 over Mission_CompareMapNames @ 0x5628e0].
 	t.mission_list_order = MissionListOrder::FileName;
+	// The profile files' magic, "FPBC" [orig: PlayerProfile_SaveToFiles @ 0x54be00 - the header
+	//  @ 0x54be2e; PlayerProfile_LoadAllFromDisk @ 0x54f4d0 - edi = 0x43425046 @ 0x54f590, the
+	//  player.sav gate @ 0x54f5b4, the weapon.sav gate @ 0x54f6ef].
+	t.profile_magic = 0x43425046u;
 	return t;
 }
 

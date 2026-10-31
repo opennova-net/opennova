@@ -33,6 +33,8 @@ Title make() {
 	t.hud_fonts = jo_title().hud_fonts;
 	// Its mission catalog's order is Joint Operations', as its code is.
 	t.mission_list_order = jo_title().mission_list_order;
+	// Its profile files are Joint Operations', as its code is.
+	t.profile_magic = jo_title().profile_magic;
 	return t;
 }
 

@@ -11,7 +11,6 @@
 namespace opennova::playersav {
 namespace {
 
-constexpr uint32_t kMagic = 0x43425046u;    // "FPBC"
 constexpr uint32_t kVersion = 0x31313230u;  // "0211"
 
 int32_t get_i32(const uint8_t *rec, size_t offset) {
@@ -183,10 +182,10 @@ void write_record(const ProfileRecord &record, uint8_t *out) {
 		write_binding(record.bindings[i], out + kBindingOffset + i * kBindingBytes);
 }
 
-bool read(const uint8_t *data, size_t size, PlayerSav &out) {
+bool read(const uint8_t *data, size_t size, uint32_t magic, PlayerSav &out) {
 	out = PlayerSav{};
 	if (data == nullptr || size < kHeaderBytes + kProfileSlots * kPlayerRecordBytes) return false;
-	if (io::read_u32_le(data) != kMagic || io::read_u32_le(data + 4) != kVersion) return false;
+	if (io::read_u32_le(data) != magic || io::read_u32_le(data + 4) != kVersion) return false;
 	out.flags = io::read_u32_le(data + 8);
 	out.extra = io::read_u32_le(data + 12);
 	for (size_t s = 0; s < kProfileSlots; ++s)
@@ -194,9 +193,9 @@ bool read(const uint8_t *data, size_t size, PlayerSav &out) {
 	return true;
 }
 
-std::vector<uint8_t> write(const PlayerSav &in) {
+std::vector<uint8_t> write(const PlayerSav &in, uint32_t magic) {
 	std::vector<uint8_t> out(kPlayerSavBytes, 0);
-	put_u32(out.data(), 0, kMagic);
+	put_u32(out.data(), 0, magic);
 	put_u32(out.data(), 4, kVersion);
 	put_u32(out.data(), 8, in.flags);
 	put_u32(out.data(), 12, in.extra);

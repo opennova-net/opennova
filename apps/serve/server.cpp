@@ -790,8 +790,8 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	//  @0x54F4D0 - GetUserNameA @0x54F535, File_CheckExists @0x54F586 / @0x54F6C7;
 	//  Game_ApplySessionSettingsToGlobals @0x551680..0x551695; Player_InitPlayer
 	//  @0x4E184F..0x4E186A; CNapiGameSession_CreateSession @0x4C97C0 - @0x4C9CCE].
-	const serve::ServeProfile row_profile = serve::read_serve_profile(config_.cfg().player_index,
-			serve::process_account_name(), config.expansion, characters_);
+	const serve::ServeProfile row_profile = serve::read_serve_profile(*title_by_code(game_code_),
+			config_.cfg().player_index, serve::process_account_name(), config.expansion, characters_);
 	config.player_name = row_profile.name;
 	// The session config the next map change stages from.
 	session_config_ = config;

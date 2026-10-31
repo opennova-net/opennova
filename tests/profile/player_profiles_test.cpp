@@ -25,12 +25,17 @@
 #include <runtime/controls/binding_set.h>
 #include <runtime/profile/player_profiles.h>
 #include <runtime/profile/profile_controls.h>
+#include <games/dfx2/dfx2.h>
+#include <games/jo/jo.h>
 
 using namespace opennova;
 using opennova::profile::PlayerProfiles;
 using opennova::profile::ProfileDefaults;
 
 namespace {
+
+// The title the profiles are Joint Operations' (its files' magic, Title::profile_magic).
+const Title &kJo = games::jo_title();
 
 ProfileDefaults defaults() {
     ProfileDefaults d;
@@ -166,7 +171,7 @@ int test_merge_bindings() {
 //        PlayerProfile_SaveToFiles @0x54be00] ------------------------------------
 
 int test_load_without_files() {
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     p.select_slot(3);
     PlayerProfiles::LoadInput in;
     in.user_name = "cdouglass";
@@ -208,12 +213,12 @@ int test_load_with_files() {
     extra.id = 700;
     extra.token = "removed";
     file.slots[2].bindings.push_back(extra);
-    const std::vector<uint8_t> player = playersav::write(file);
+    const std::vector<uint8_t> player = playersav::write(file, kJo.profile_magic);
     playersav::File weapons = playersav::make_defaults();
     weapons.slots[2].blue.player_class = 6;
-    const std::vector<uint8_t> weapon = playersav::write(weapons);
+    const std::vector<uint8_t> weapon = playersav::write(weapons, kJo.profile_magic);
 
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     p.select_slot(2);
     PlayerProfiles::LoadInput in;
     in.player_sav = &player;
@@ -240,7 +245,7 @@ int test_load_with_files() {
     bad[0] = 'X';
     in.player_sav = &bad;
     in.weapon_sav = nullptr;
-    PlayerProfiles q;
+    PlayerProfiles q(kJo);
     q.load(in, defaults());
     TEST_EXPECT(q.player_sav().slots[2].name.empty());
     TEST_EXPECT(q.player_sav_bytes()[15] == 3 && q.player_sav_bytes()[8] == 0);
@@ -249,7 +254,7 @@ int test_load_with_files() {
     std::vector<uint8_t> shorter(player.begin(), player.begin() + playersav::kHeaderBytes +
                                  2 * playersav::kPlayerRecordBytes + 100);
     in.player_sav = &shorter;
-    PlayerProfiles r;
+    PlayerProfiles r(kJo);
     r.select_slot(2);
     r.load(in, defaults());
     TEST_EXPECT(r.current().name == "Sandman");  // the first 100 bytes of record 2
@@ -260,7 +265,7 @@ int test_load_with_files() {
 // --- 6. the screens and the session ------------------------------------------------
 
 int test_name_rules() {
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     PlayerProfiles::LoadInput in;
     p.load(in, defaults());
     p.select_slot(1);
@@ -335,7 +340,7 @@ int test_name_rules() {
 }
 
 int test_voice_override() {
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     PlayerProfiles::LoadInput in;
     p.load(in, defaults());
     playersav::ProfileRecord &r = p.current();
@@ -355,7 +360,7 @@ int test_voice_override() {
     TEST_EXPECT(r.voice[0] == 0x0A && r.voice[1] == 7 && profile::voice_override(r, 2) == 0);
     // The pair rides player.sav at +1532 / +1533.
     const std::vector<uint8_t> bytes = p.player_sav_bytes();
-    PlayerProfiles reread;
+    PlayerProfiles reread(kJo);
     PlayerProfiles::LoadInput again;
     again.player_sav = &bytes;
     reread.load(again, defaults());
@@ -365,7 +370,7 @@ int test_voice_override() {
 }
 
 int test_session_steps() {
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     PlayerProfiles::LoadInput in;
     p.load(in, defaults());
     // [orig: SinglePlayer_StartMission @0x561b99]
@@ -397,7 +402,7 @@ int test_session_steps() {
     TEST_EXPECT(p.current_weapons().blue.player_class == 7);
     {
         const std::vector<uint8_t> weapons = p.weapon_sav_bytes();
-        PlayerProfiles reread;
+        PlayerProfiles reread(kJo);
         PlayerProfiles::LoadInput again;
         again.weapon_sav = &weapons;
         reread.load(again, defaults());
@@ -412,7 +417,7 @@ int test_session_steps() {
 // --- 6b. the controls words the game reads (runtime/profile/profile_controls.h) ----
 
 int test_controls_words() {
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     PlayerProfiles::LoadInput in;
     p.load(in, defaults());
     playersav::ProfileRecord &r = p.current();
@@ -671,9 +676,9 @@ int test_program_controls_code() {
 // --- 8. the shipped default weapon.sav, loaded and saved in memory ---------------
 
 int test_default_weapon_sav() {
-    const std::vector<uint8_t> bytes = playersav::write(test_weapon_sav::default_file());
+    const std::vector<uint8_t> bytes = playersav::write(test_weapon_sav::default_file(), kJo.profile_magic);
     TEST_EXPECT(test_weapon_sav::fnv1a64(bytes) == test_weapon_sav::kDefaultWeaponSavFnv1a64);
-    PlayerProfiles p;
+    PlayerProfiles p(kJo);
     PlayerProfiles::LoadInput in;
     in.weapon_sav = &bytes;
     p.load(in, defaults());
@@ -683,6 +688,55 @@ int test_default_weapon_sav() {
     TEST_EXPECT(saved.size() == bytes.size());
     TEST_EXPECT(saved.size() > 16 && std::equal(saved.begin(), saved.begin() + 8, bytes.begin()));
     TEST_EXPECT(saved.size() == bytes.size() && std::equal(saved.begin() + 16, saved.end(), bytes.begin() + 16));
+    return 0;
+}
+
+// --- 9. the title's magic (DFX2-4) ------------------------------------------------
+// Both files open with the title's magic: dfx2.exe's load gates on "2XFD" and its save writes
+// it, so each game refuses the other's files and keeps its seeds [orig: PlayerProfile_SaveToFiles
+// @0x549080 - @0x5490ae; PlayerProfile_LoadAllFromDisk @0x54c720 - @0x54c7dc, the gates @0x54c800
+// and @0x54c93f (dfx2.exe)].
+
+int test_title_magic() {
+    PlayerProfiles jo(kJo);
+    PlayerProfiles::LoadInput none;
+    jo.load(none, defaults());
+    jo.select_slot(1);
+    jo.current().name = "Sandman";
+    jo.current_weapons().blue.player_class = 6;
+    const std::vector<uint8_t> jo_player = jo.player_sav_bytes();
+    const std::vector<uint8_t> jo_weapon = jo.weapon_sav_bytes();
+    TEST_EXPECT(std::memcmp(jo_player.data(), "FPBC0211", 8) == 0);
+    TEST_EXPECT(std::memcmp(jo_weapon.data(), "FPBC0211", 8) == 0);
+
+    const Title &dfx2 = games::dfx2_title();
+    PlayerProfiles d(dfx2);
+    d.select_slot(1);
+    PlayerProfiles::LoadInput in;
+    in.player_sav = &jo_player;
+    in.weapon_sav = &jo_weapon;
+    d.load(in, defaults());
+    // JO's files are there, and refused: the seeds stand.
+    TEST_EXPECT(!d.first_run());
+    TEST_EXPECT(d.current().name.empty() && d.current_weapons().blue.player_class == 8);
+    d.current().name = "Sandman";
+    d.current_weapons().blue.player_class = 6;
+    const std::vector<uint8_t> dfx2_player = d.player_sav_bytes();
+    const std::vector<uint8_t> dfx2_weapon = d.weapon_sav_bytes();
+    TEST_EXPECT(std::memcmp(dfx2_player.data(), "2XFD0211", 8) == 0);
+    TEST_EXPECT(std::memcmp(dfx2_weapon.data(), "2XFD0211", 8) == 0);
+
+    // DFX2's files read back under its own title and are refused under JO's.
+    in.player_sav = &dfx2_player;
+    in.weapon_sav = &dfx2_weapon;
+    PlayerProfiles back(dfx2);
+    back.select_slot(1);
+    back.load(in, defaults());
+    TEST_EXPECT(back.current().name == "Sandman" && back.current_weapons().blue.player_class == 6);
+    PlayerProfiles refused(kJo);
+    refused.select_slot(1);
+    refused.load(in, defaults());
+    TEST_EXPECT(refused.current().name.empty() && refused.current_weapons().blue.player_class == 8);
     return 0;
 }
 
@@ -708,6 +762,7 @@ int main() {
         {"program_kit_pages", test_program_kit_pages},
         {"program_controls_code", test_program_controls_code},
         {"default_weapon_sav", test_default_weapon_sav},
+        {"title_magic", test_title_magic},
     };
     int failures = 0;
     for (const Case &c : cases) {

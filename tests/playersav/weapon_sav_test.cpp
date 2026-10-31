@@ -4,6 +4,7 @@
 // writes the file the original ships beside its expansion from its seed values
 // and pins the shipped bytes' digest (common/default_weapon_sav.h).
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -18,6 +19,10 @@
 using namespace opennova::playersav;
 
 namespace {
+
+// The titles' magic words (Title::profile_magic): Jointops.exe's "FPBC", dfx2.exe's "2XFD".
+constexpr uint32_t kJoMagic = 0x43425046u;
+constexpr uint32_t kDfx2Magic = 0x44465832u;
 
 std::vector<uint8_t> page_bytes(const std::string &blob, size_t size = kKitPageBytes)
 {
@@ -169,7 +174,7 @@ int test_write_layout_and_roundtrip()
     f.slots[2].blue.avatar_packed = 0x8207;
     f.slots[4].red.pages[1].entries.push_back(KitEntry{"WPN_KNIFE2", 12, -1, 3});
 
-    const std::vector<uint8_t> buf = write(f);
+    const std::vector<uint8_t> buf = write(f, kJoMagic);
     TEST_EXPECT(buf.size() == kHeaderBytes + kProfileSlots * kRecordBytes);
     TEST_EXPECT(buf.size() == 337996);
 
@@ -211,11 +216,11 @@ int test_write_layout_and_roundtrip()
     TEST_EXPECT(buf[slot2 + 4] == 0x07 && buf[slot2 + 5] == 0x82);
 
     File back;
-    TEST_EXPECT(read(buf.data(), buf.size(), back));
+    TEST_EXPECT(read(buf.data(), buf.size(), kJoMagic, back));
     TEST_EXPECT(files_equal(f, back));
 
     // Deterministic: a second write of the parsed file is byte-identical.
-    TEST_EXPECT(write(back) == buf);
+    TEST_EXPECT(write(back, kJoMagic) == buf);
     return 0;
 }
 
@@ -223,24 +228,33 @@ int test_write_layout_and_roundtrip()
 
 int test_header_rejection()
 {
-    const std::vector<uint8_t> good = write(make_defaults());
+    const std::vector<uint8_t> good = write(make_defaults(), kJoMagic);
 
     std::vector<uint8_t> bad_magic = good;
     bad_magic[0] = 'X';
     File out;
-    TEST_EXPECT(!read(bad_magic.data(), bad_magic.size(), out));
+    TEST_EXPECT(!read(bad_magic.data(), bad_magic.size(), kJoMagic, out));
 
     std::vector<uint8_t> bad_version = good;
     bad_version[4] = '9';
-    TEST_EXPECT(!read(bad_version.data(), bad_version.size(), out));
+    TEST_EXPECT(!read(bad_version.data(), bad_version.size(), kJoMagic, out));
 
     // Short buffers.
-    TEST_EXPECT(!read(good.data(), 8, out));
-    TEST_EXPECT(!read(good.data(), kHeaderBytes + kRecordBytes, out));
-    TEST_EXPECT(!read(nullptr, 0, out));
+    TEST_EXPECT(!read(good.data(), 8, kJoMagic, out));
+    TEST_EXPECT(!read(good.data(), kHeaderBytes + kRecordBytes, kJoMagic, out));
+    TEST_EXPECT(!read(nullptr, 0, kJoMagic, out));
+    // The magic is the caller's: a DFX2 file opens "2XFD0211" and reads under that magic alone
+    // [orig: PlayerProfile_SaveToFiles @0x549080 - @0x5490ae; PlayerProfile_LoadAllFromDisk
+    //  @0x54c720 - the gate @0x54c93f (dfx2.exe)].
+    const std::vector<uint8_t> dfx2 = write(make_defaults(), kDfx2Magic);
+    TEST_EXPECT(std::memcmp(dfx2.data(), "2XFD0211", 8) == 0);
+    TEST_EXPECT(std::equal(dfx2.begin() + 4, dfx2.end(), good.begin() + 4));
+    TEST_EXPECT(read(dfx2.data(), dfx2.size(), kDfx2Magic, out));
+    TEST_EXPECT(!read(dfx2.data(), dfx2.size(), kJoMagic, out));
+    TEST_EXPECT(!read(good.data(), good.size(), kDfx2Magic, out));
 
     // A header-only file is tolerated and yields the struct defaults.
-    TEST_EXPECT(read(good.data(), kHeaderBytes, out));
+    TEST_EXPECT(read(good.data(), kHeaderBytes, kJoMagic, out));
     for (size_t s = 0; s < kProfileSlots; ++s) {
         TEST_EXPECT(out.slots[s].blue.player_class == 8);
         TEST_EXPECT(out.slots[s].blue.pages[0].entries.empty());
@@ -498,12 +512,12 @@ int test_default_file()
 {
     // The file the original ships beside its expansion (net-re section 5.66),
     // rebuilt from the values PlayerProfile_InitDefaults seeds.
-    const std::vector<uint8_t> bytes = write(test_weapon_sav::default_file());
+    const std::vector<uint8_t> bytes = write(test_weapon_sav::default_file(), kJoMagic);
     TEST_EXPECT(bytes.size() == kHeaderBytes + kProfileSlots * kRecordBytes);
     TEST_EXPECT(test_weapon_sav::fnv1a64(bytes) == test_weapon_sav::kDefaultWeaponSavFnv1a64);
 
     File f;
-    TEST_EXPECT(read(bytes.data(), bytes.size(), f));
+    TEST_EXPECT(read(bytes.data(), bytes.size(), kJoMagic, f));
 
     // Every side's class byte is in range and every selected page resolves.
     for (size_t s = 0; s < kProfileSlots; ++s) {
@@ -536,7 +550,7 @@ int test_default_file()
     TEST_EXPECT(default_records == kProfileSlots);
 
     // Writer parity: the read file re-serializes byte for byte.
-    const std::vector<uint8_t> rewritten = write(f);
+    const std::vector<uint8_t> rewritten = write(f, kJoMagic);
     TEST_EXPECT(rewritten == bytes);
     return 0;
 }

@@ -117,6 +117,11 @@ struct Title {
 	// DFX2-22: the order its mission catalog takes (MissionListOrder above): every list the
 	// catalog feeds, the single-player screen's among them, shows it.
 	MissionListOrder mission_list_order = MissionListOrder::FileName;
+	// DFX2-4: the magic word player.sav and weapon.sav open with (runtime/profile/player_profiles.h):
+	// the one each file's load gates on and its save writes, ahead of the "0211" version word both
+	// titles share. Jointops.exe's "FPBC", dfx2.exe's "2XFD": neither game reads the other's
+	// profile files. 0 unwitnessed.
+	uint32_t profile_magic = 0;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

@@ -85,6 +85,10 @@ Title make() {
 	// DFX2-22: the catalog sorted by title [orig: MissionList_ScanAndBuildFromFiles @0x5620d0 -
 	//  the qsort @0x562550 over CompareFunction @0x561840, _stricmp on entry+1044 (dfx2.exe)].
 	t.mission_list_order = MissionListOrder::Title;
+	// DFX2-4: the profile files' magic, "2XFD" [orig: PlayerProfile_SaveToFiles @0x549080 - the
+	//  header @0x5490ae; PlayerProfile_LoadAllFromDisk @0x54c720 - edi = 0x44465832 @0x54c7dc,
+	//  the player.sav gate @0x54c800, the weapon.sav gate @0x54c93f (dfx2.exe)].
+	t.profile_magic = 0x44465832u;
 	return t;
 }
 

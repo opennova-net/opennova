@@ -3,6 +3,7 @@
 #include "object/avatar_database.h"
 #include "object/weapon_database.h"
 #include "player/player_info_kit_restore.h"
+#include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/weapon_profile_summary.h"
 #include "util/data_format.h"
@@ -124,7 +125,8 @@ std::string profile_text(const String &p_text) {
 
 } // namespace
 
-PlayerProfiles::PlayerProfiles() {
+// The launch's title, whose profile files these are (engine PlayerProfiles' title).
+PlayerProfiles::PlayerProfiles() : store_(ResourceRoot::session_title(Ref<ResourceRoot>())) {
 	defaults_.bindings = opennova::profile::default_binding_table();
 	defaults_.macros = opennova::profile::default_macros(nullptr, nullptr);
 }

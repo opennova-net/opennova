@@ -5,6 +5,7 @@
 // are pinned as cited values read once from the pinned JO:CA Jointops.exe
 // (SHA-256 9a1035440a53af2057ce0995ac42dced840d3b9fd53c04dc86041a962b84fe57).
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -18,6 +19,10 @@
 using namespace opennova::playersav;
 
 namespace {
+
+// The titles' magic words (Title::profile_magic): Jointops.exe's "FPBC", dfx2.exe's "2XFD".
+constexpr uint32_t kJoMagic = 0x43425046u;
+constexpr uint32_t kDfx2Magic = 0x44465832u;
 
 uint32_t u32_at(const std::vector<uint8_t> &b, size_t off) {
     return static_cast<uint32_t>(b[off]) | (static_cast<uint32_t>(b[off + 1]) << 8) |
@@ -103,7 +108,7 @@ int test_layout() {
     r.auto_medic_off = 1;
     r.bindings = {sample_binding(152, "move_forward"), sample_binding(1, "command")};
 
-    const std::vector<uint8_t> buf = write(f);
+    const std::vector<uint8_t> buf = write(f, kJoMagic);
     TEST_EXPECT(buf.size() == kPlayerSavBytes);
     TEST_EXPECT(buf.size() == 77464);
     TEST_EXPECT(std::memcmp(buf.data(), "FPBC0211", 8) == 0);
@@ -164,11 +169,11 @@ int test_round_trip() {
     f.slots[1].macros[3] = "Guard the base";
     f.slots[4].bindings = {sample_binding(500, "CycleSpectatorMode")};
     f.slots[4].word_1460 = 77;
-    const std::vector<uint8_t> buf = write(f);
+    const std::vector<uint8_t> buf = write(f, kJoMagic);
     PlayerSav back;
-    TEST_EXPECT(read(buf.data(), buf.size(), back));
+    TEST_EXPECT(read(buf.data(), buf.size(), kJoMagic, back));
     for (size_t s = 0; s < kProfileSlots; ++s) TEST_EXPECT(records_equal(f.slots[s], back.slots[s]));
-    TEST_EXPECT(write(back) == buf);
+    TEST_EXPECT(write(back, kJoMagic) == buf);
 
     // The word table names every member once, in offset order, the names the
     // tools use [orig: the reads @0x551500 and the seeds @0x54bb40].
@@ -186,27 +191,36 @@ int test_round_trip() {
 // --- 3. the header gate [orig: @0x54f5c6] ------------------------------------------
 
 int test_header_gate() {
-    const std::vector<uint8_t> good = write(PlayerSav{});
+    const std::vector<uint8_t> good = write(PlayerSav{}, kJoMagic);
     PlayerSav out;
-    TEST_EXPECT(read(good.data(), good.size(), out));
+    TEST_EXPECT(read(good.data(), good.size(), kJoMagic, out));
     // The trailer is never read.
-    TEST_EXPECT(read(good.data(), good.size() - kTrailerBytes, out));
+    TEST_EXPECT(read(good.data(), good.size() - kTrailerBytes, kJoMagic, out));
     std::vector<uint8_t> bad = good;
     bad[0] = 'X';
-    TEST_EXPECT(!read(bad.data(), bad.size(), out));
+    TEST_EXPECT(!read(bad.data(), bad.size(), kJoMagic, out));
     bad = good;
     bad[7] = '2';
-    TEST_EXPECT(!read(bad.data(), bad.size(), out));
-    TEST_EXPECT(!read(good.data(), kHeaderBytes + kPlayerRecordBytes, out));
-    TEST_EXPECT(!read(nullptr, 0, out));
+    TEST_EXPECT(!read(bad.data(), bad.size(), kJoMagic, out));
+    TEST_EXPECT(!read(good.data(), kHeaderBytes + kPlayerRecordBytes, kJoMagic, out));
+    TEST_EXPECT(!read(nullptr, 0, kJoMagic, out));
+    // The magic is the caller's: a DFX2 file opens "2XFD0211" and reads under that magic alone
+    // [orig: PlayerProfile_SaveToFiles @0x549080 - @0x5490ae; PlayerProfile_LoadAllFromDisk
+    //  @0x54c720 - the gate @0x54c800 (dfx2.exe)].
+    const std::vector<uint8_t> dfx2 = write(PlayerSav{}, kDfx2Magic);
+    TEST_EXPECT(std::memcmp(dfx2.data(), "2XFD0211", 8) == 0);
+    TEST_EXPECT(std::equal(dfx2.begin() + 4, dfx2.end(), good.begin() + 4));
+    TEST_EXPECT(read(dfx2.data(), dfx2.size(), kDfx2Magic, out));
+    TEST_EXPECT(!read(dfx2.data(), dfx2.size(), kJoMagic, out));
+    TEST_EXPECT(!read(good.data(), good.size(), kDfx2Magic, out));
     // A count past the table's capacity reads the capacity; a negative one none.
     std::vector<uint8_t> big = good;
     big[kHeaderBytes + kBindingCountOffset] = 0xFF;
     big[kHeaderBytes + kBindingCountOffset + 1] = 0x7F;
-    TEST_EXPECT(read(big.data(), big.size(), out));
+    TEST_EXPECT(read(big.data(), big.size(), kJoMagic, out));
     TEST_EXPECT(out.slots[0].bindings.size() == kBindingCapacity);
     big[kHeaderBytes + kBindingCountOffset + 3] = 0x80;
-    TEST_EXPECT(read(big.data(), big.size(), out));
+    TEST_EXPECT(read(big.data(), big.size(), kJoMagic, out));
     TEST_EXPECT(out.slots[0].bindings.empty());
     return 0;
 }
@@ -222,7 +236,7 @@ constexpr uint32_t kProgramTrailerBytes = 8;      // [orig: push 8 @0x54be92]
 constexpr char kProgramTrailer[] = "fsasyaof";    // [orig: off_829F3C -> the string @0x7C8C1C]
 
 int test_program_constants() {
-    const std::vector<uint8_t> written = write(PlayerSav{});
+    const std::vector<uint8_t> written = write(PlayerSav{}, kJoMagic);
     TEST_EXPECT(std::memcmp(written.data(), kProgramMagic, 4) == 0);
     TEST_EXPECT(std::memcmp(written.data() + 4, kProgramVersion, 4) == 0);
     TEST_EXPECT(kPlayerRecordBytes == kProgramRecordBytes);

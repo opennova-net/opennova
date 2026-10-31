@@ -10,8 +10,11 @@
 // @0x54be00]. The embedder owns the files: it hands the loader their bytes and
 // writes the bytes the saver returns, player.sav in the game's working
 // directory and weapon.sav at playersav::weapon_sav_relpath(expansion).
+// Both files' headers open with the title's magic (Title::profile_magic), the
+// one the load gates on and the save writes.
 // Witness record: docs/playerinfo/player-sav-re.md.
 
+#include <base/title/title.h>
 #include <formats/playersav/player_sav.h>
 #include <formats/playersav/weapon_sav.h>
 
@@ -113,7 +116,10 @@ void set_voice_override(playersav::ProfileRecord &record, int side, int value);
 
 class PlayerProfiles {
 public:
-	PlayerProfiles();
+	// The profile of `title`, the title the process runs as (CONTEXT.md "Title"):
+	// its magic (Title::profile_magic) gates both files at the load and heads
+	// both at the save.
+	explicit PlayerProfiles(const Title &title);
 
 	// The files the load reads; a null pointer is a file that does not exist.
 	struct LoadInput {
@@ -229,6 +235,7 @@ public:
 	void clear_intro_pending();
 
 private:
+	uint32_t magic_ = 0;  // Title::profile_magic
 	playersav::PlayerSav player_;
 	playersav::File weapons_;
 	int slot_ = 0;
