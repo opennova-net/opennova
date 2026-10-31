@@ -12,6 +12,7 @@
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_key.hpp>
 
+#include <runtime/controls/controls.h> // title_catalog
 #include <runtime/hud/hud_toggles.h> // hud_key_press_keys
 #include <runtime/world/player_look.h> // kCursorCentreX / Y
 
@@ -24,6 +25,13 @@ namespace {
 bool s_key_locks_started = false;
 bool s_saved_num_lock = false;
 
+// The binding catalog the controls' live records follow (the launch title's).
+const opennova::controls::Catalog &catalog_of(const Ref<ControlsModel> &p_controls) {
+	return p_controls.is_valid() ? p_controls->native_bindings().catalog()
+	                             : opennova::controls::title_catalog(
+	                                       ResourceRoot::session_title(Ref<ResourceRoot>()));
+}
+
 } // namespace
 
 PlayerInputRouter::PlayerInputRouter() : device_(*this), session_(*this) {
@@ -35,8 +43,8 @@ void PlayerInputRouter::setup(Node *p_world, LocalPlayerPresenter *p_presenter,
 	world_id_ = p_world != nullptr ? ObjectID(p_world->get_instance_id()) : ObjectID();
 	presenter_id_ = p_presenter != nullptr ? ObjectID(p_presenter->get_instance_id()) : ObjectID();
 	controls_ = p_controls;
-	// The action table over the controls' catalog, the title's.
-	actions_ = opennova::controls::PlayerActions(catalog_of(controls_));
+	// The frame's rows over the controls' catalog, the title's.
+	frame_.set_catalog(catalog_of(controls_));
 }
 
 // The process's keyboard-lock legs (D-NET-563; engine controls::kVkNumLock carries the
@@ -344,6 +352,7 @@ opennova::inmatch::PlayerInputSession::Facts PlayerInputRouter::Session::facts()
 	out.mp_session = s->is_mp_session();
 	out.game_type = static_cast<uint32_t>(s->get_session_game_type());
 	out.logic_tick = s->get_logic_tick();
+	out.title = &s->game_title();
 	return out;
 }
 
@@ -408,12 +417,20 @@ void PlayerInputRouter::Session::run_action(const opennova::controls::PlayerActi
 		case Action::UseItem: break;
 		// The frame's own records (engine inmatch::PlayerInputFrame::dispatch_record).
 		case Action::EmbedderRow: break;
+		case Action::ViewToggle: break;
 	}
 }
 
 bool PlayerInputRouter::Session::dispatch_action_record(int32_t p_code, int32_t p_param) {
 	const Ref<Simulation> s = sim();
 	return s.is_valid() && s->dispatch_action_record(p_code, p_param);
+}
+
+// The 1st Person Toggle over the session's local view (engine world/player_view.h
+// player_view_apply_view_action carries the witness).
+bool PlayerInputRouter::Session::view_toggle() {
+	const Ref<Simulation> s = sim();
+	return s.is_valid() && s->apply_local_player_view_action(Simulation::VIEW_ACTION_TOGGLE);
 }
 
 void PlayerInputRouter::Session::left_button_down() {
