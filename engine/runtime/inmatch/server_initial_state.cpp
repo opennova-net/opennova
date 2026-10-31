@@ -730,9 +730,11 @@ std::vector<InitialStateMessage> Server_OnPlayerJoin(NapiNPServerCtx &ctx, NapiN
 	// until its pick deploys it.
 	// [orig: Server_TickUpdate @0x51D7E0 - the session blocks @0x51D9A5 and @0x51E211..0x51E383
 	//  (its `jz` @0x51E217 lands on the walk), the tail walk @0x51E385..0x51E46D, its
-	//  Server_SendPlayerSlotStateFrame call @0x51E3E4 ->
-	//  Server_SendEntityStateToPlayer @0x51BBDC; NetPacket_WritePlayerState @0x4FF7B8..0x4FF7BC;
-	//  Server_TickUpdate @0x51a810 - the walk's call @0x51b324 (dfx2.exe)]
+	//  call @0x51E3E4 -> Server_SendPlayerSlotStateFrame @0x51BBA0 (its state-6 call @0x51BBDC)
+	//  -> Server_SendEntityStateToPlayer @0x517BA0; NetPacket_WritePlayerState @0x4FF7B8..0x4FF7BC]
+	// [orig: Server_TickUpdate @0x51a810 - the walk's call @0x51b324 ->
+	//  Server_SendInitialGameStateToPlayer @0x518bd0 (its state-6 call @0x518c0c) ->
+	//  Server_SendEntityStateToPlayer @0x514de0 (dfx2.exe)]
 	conn.link.respawn_pending =
 			world.zones.has_spawn_zone() || in_match.slot_state.join_state_fixed;
 	// The roster row mirrors the undeployed bit, which event 25 reads [orig:
