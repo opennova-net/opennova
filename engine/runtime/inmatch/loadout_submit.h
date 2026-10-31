@@ -180,17 +180,19 @@ world::LoadoutApplySelect grant_apply_select(const Protocol *protocol);
 void apply_weapon_loadout_name_list(world::World &world, const WeaponLoadout &list);
 
 // A listen host's own client's S2C 0x5A apply past its name-list rebuild: with a local body,
-// the select over the local table (on the authority its slot's, which the slot's grant just
-// built) of the weapon the session's protocol picks out of the list (grant_apply_select:
-// JO's the held weapon, DFX2's the list's last primary row, DFX2-35) and the EquippedSlot's
-// mount, which run on the authority as on a joiner; only the spawn-buffer copy and the side
-// class store skip there. The apply's table rebuild from the list is not re-run here.
+// the grant apply over the list's rows (world::local_loadout_apply_own_grant: the class, the
+// local table rebuilt from the rows, which on the authority is the slot's own, their counts,
+// the weight), whose select is the weapon the session's protocol picks out of the list
+// (grant_apply_select: JO's the held weapon, DFX2's the list's last primary row, DFX2-35) with
+// the EquippedSlot's mount. The authority runs it as a joiner does; only the spawn-buffer copy
+// and the side class store skip there.
 // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - `cmp is_authority` @0x4293D1 /
-//  @0x429402 (the two skips), the select @0x4296B4..0x4296E3, Player_MountWeaponSlot @0x4296F4]
+//  @0x429402 (the two skips), the rebuild @0x4294E3..0x4296AE, the select @0x4296B4..0x4296E3,
+//  Player_MountWeaponSlot @0x4296F4]
 // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 - the skips @0x42B218 / @0x42B24F,
-//  the last primary row @0x42B0AB..0x42B0BD, its select @0x42B4F3..0x42B51A,
-//  Player_MountWeaponSlot @0x42B52C (dfx2.exe)]
-void apply_own_weapon_loadout_select(world::World &world, const WeaponLoadout &list,
+//  the last primary row @0x42B0AB..0x42B0BD, the rebuild @0x42B322..0x42B4E9, its select
+//  @0x42B4F3..0x42B51A, Player_MountWeaponSlot @0x42B52C (dfx2.exe)]
+void apply_own_weapon_loadout(world::World &world, const WeaponLoadout &list,
 		const Protocol *protocol);
 
 // NetPacket_SendLoadoutSubmit does not blindly serialize the requested combo.

@@ -355,7 +355,7 @@ void apply_weapon_loadout_name_list(world::World &world, const WeaponLoadout &li
 	names.set = true;
 }
 
-void apply_own_weapon_loadout_select(world::World &world, const WeaponLoadout &list,
+void apply_own_weapon_loadout(world::World &world, const WeaponLoadout &list,
 		const Protocol *protocol) {
 	// [orig: the `if (g_LocalPlayerEntity)` ahead of both @0x4293F0 / @0x42B232 (dfx2.exe);
 	//  the declaration carries the legs]
@@ -363,7 +363,8 @@ void apply_own_weapon_loadout_select(world::World &world, const WeaponLoadout &l
 	if (local == nullptr || world.registry.get(world.cached.local_player) == nullptr) return;
 	std::vector<world::WeaponKitEntry> kit;
 	kit_from_authoritative_grant(world.tables.weapons, list, kit);
-	world::local_loadout_apply_select(world, local->weapon, local->inventory, kit,
+	(void)world::local_loadout_apply_own_grant(world, local->loadout, local->weapon,
+			local->inventory, local->inventory_valid, kit, list.avatar_class,
 			grant_apply_select(protocol));
 }
 

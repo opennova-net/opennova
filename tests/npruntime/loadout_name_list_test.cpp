@@ -149,9 +149,15 @@ void test_a_listen_hosts_own_list_names_every_body_after_its_fold() {
 	// The same tick's spawn pump: the list is the previous one.
 	CHECK(!r.process->loadout_weapon_names.set);
 	CHECK(r.equipped(r.add_joiner(inmatch::kFirstJoinerDcb + 1)) == kM4);
-	// The own client's fold, ahead of the next tick.
+	// The own client's deploy pick raises its deploy hold, as input case 12 does on every role
+	// [orig: Input_HandleActionBinding case 12 - g_ClientDeployHold = 1 @0x49B067].
+	CHECK(own_client->queue_deployment_pick(0xFFFF));
+	CHECK(!own_client->gameplay_gate_open());
+	// The own client's fold, ahead of the next tick; its 0x5A apply clears the hold, as every
+	// valid list's does, the authority's own included [orig: @0x429713].
 	(void)own_client->Client_ProcessNetworkFrame(0);
 	own_client->apply_received_effects(r.world);
+	CHECK(own_client->gameplay_gate_open());
 	const w::LoadoutWeaponNameList &names = r.process->loadout_weapon_names;
 	CHECK(names.set && names.entries.size() == 2);
 	if (names.entries.size() == 2)

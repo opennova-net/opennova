@@ -184,18 +184,13 @@ void store_select_and_mount(World &world, LocalPlayerWeapon &weapon, WeaponInven
     select_current_slot(world, weapon, inventory, /*mount=*/true);
 }
 
-} // namespace
-
-void local_loadout_apply_select(World &world, LocalPlayerWeapon &weapon,
-                                WeaponInventory &inventory,
-                                const std::vector<WeaponKitEntry> &kit,
-                                LoadoutApplySelect select) {
-    store_select_and_mount(world, weapon, inventory, loadout_apply_select_adm(world, kit, select));
-}
-
-void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
-                           LocalPlayerWeapon &weapon, WeaponInventory &inventory,
-                           bool &inventory_valid, bool select_spawn_default) {
+// The rebuild over `kit`: Player_InitPlayer's weapon leg reads the spawn buffer
+// (local_loadout_rebuild), a loadout apply's the kit it applies, which the authority's own
+// S2C 0x5A apply builds from its list's rows without copying them into the spawn buffer
+// (local_loadout_apply_own_grant).
+void rebuild_from_kit(World &world, LocalPlayerLoadout &loadout, LocalPlayerWeapon &weapon,
+                      WeaponInventory &inventory, bool &inventory_valid,
+                      const std::vector<WeaponKitEntry> &kit, bool select_spawn_default) {
     // [orig: Player_InitPlayer @ 0x4e15f0 — the full leg sequence in the
     //  header note.] Entity-optional: a joiner rebuilds before L spawns. It writes
     //  none of the slot's damage-class bytes: their writers are the 0x2F accept
@@ -209,7 +204,6 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     inventory.current_slot = weapon_combo::kDefaultSpawnCombo;
     const WeaponTable &table = world.tables.weapons;
     if (table.empty()) return;
-    const std::vector<WeaponKitEntry> kit = local_loadout_kit(world, loadout);
     inventory.reset(table);
     const std::vector<std::string> display =
             weapon_kit_expand_display_list(kit, table);
@@ -281,6 +275,17 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     //  NapiNPClientMsg_TeamAssign @0x431910 - Player_InitPlayer(1) @0x431B14]
 }
 
+} // namespace
+
+void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
+                           LocalPlayerWeapon &weapon, WeaponInventory &inventory,
+                           bool &inventory_valid, bool select_spawn_default) {
+    // Player_InitPlayer's weapon leg over the spawn buffer [orig: Player_InitPlayer @0x4E15F0 -
+    //  AvatarDef_BuildDisplayList(restrictionData) @0x4E1882].
+    rebuild_from_kit(world, loadout, weapon, inventory, inventory_valid,
+            local_loadout_kit(world, loadout), select_spawn_default);
+}
+
 void local_loadout_rebuild_on_team_assign(World &world, LocalPlayerLoadout &loadout,
                                           LocalPlayerWeapon &weapon, WeaponInventory &inventory,
                                           bool &inventory_valid) {
@@ -315,13 +320,14 @@ void local_loadout_rebuild_after_start(World &world, LocalPlayerLoadout &loadout
     fov = started;
 }
 
-bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
-                                LocalPlayerWeapon &weapon,
-                                WeaponInventory &inventory,
-                                bool &inventory_valid,
-                                const std::vector<WeaponKitEntry> &kit,
-                                int32_t player_class, bool validate_banned,
-                                LoadoutApplySelect select) {
+namespace {
+
+// The apply over `kit`, local_loadout_apply_accept's and, `own_grant`, the authority's own S2C
+// 0x5A apply's: its rows build the table without becoming the spawn buffer.
+bool apply_kit(World &world, LocalPlayerLoadout &loadout, LocalPlayerWeapon &weapon,
+               WeaponInventory &inventory, bool &inventory_valid,
+               const std::vector<WeaponKitEntry> &kit, int32_t player_class,
+               bool validate_banned, LoadoutApplySelect select, bool own_grant) {
     // [orig: WeaponLoadout_ApplyFromBuffer @ 0x565cd0 offline leg.] A joiner
     // applies its kit before L exists; the inventory is sim-side state and the
     // entity stamps (class + equipped adm) defer to the joiner spawn block.
@@ -353,14 +359,19 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // The accepted loadout becomes the respawn kit [orig: the S2C 0x5A apply
     // writes restrictionData @ 0x4293e4; SP shares the buffer]. An explicit
     // empty kit stays empty (the armory all-NONE accept leaves the table bare).
-    loadout.spawn_kit() = std::move(accepted);
+    // The authority's own 0x5A apply skips the copy and builds from its rows: its spawn
+    // buffer is the slot's buffer the list send copied [orig: `cmp is_authority` @0x4293D1,
+    //  its jnz @0x4293D8 past the copy @0x4293E4; Server_SendWeaponSlotListToPlayer
+    //  @0x502617..0x502627] [orig: @0x42B218 (dfx2.exe)].
+    if (!own_grant) loadout.spawn_kit() = std::move(accepted);
+    const std::vector<WeaponKitEntry> &applied = own_grant ? accepted : loadout.spawn_kit();
     // The apply runs no Player_InitPlayer: the current slot word keeps its value
     // through the rebuild's stamp, the rebuild selects nothing, and the selected weapon
     // (`select`: the body's held AdmDef index, or the kit's last primary row) decides the
     // word ahead of the apply's own select below.
-    const uint8_t select_adm = loadout_apply_select_adm(world, loadout.spawn_kit(), select);
+    const uint8_t select_adm = loadout_apply_select_adm(world, applied, select);
     const int32_t current_slot = inventory.current_slot;
-    local_loadout_rebuild(world, loadout, weapon, inventory, inventory_valid,
+    rebuild_from_kit(world, loadout, weapon, inventory, inventory_valid, applied,
             /*select_spawn_default=*/false);
     inventory.current_slot = current_slot;
     // Out of a session the apply stores each entry's fourth value, raw, into the
@@ -370,7 +381,7 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     //  @0x565DA8, the store @0x566182..0x56618C]
     if (!world.rules.mp_session) {
         if (Entity *local = world.registry.get(world.cached.local_player))
-            weapon_kit_store_damage_classes(loadout.spawn_kit(), world.tables.weapons,
+            weapon_kit_store_damage_classes(applied, world.tables.weapons,
                     world.tables.ammo.entries.size(), local->ammo_damage_class);
     }
     // The ACCEPT leg applies the REQUESTED ammo over the default seed: pool =
@@ -380,7 +391,7 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // WeaponSlot_SetAmmoCount @ 0x540b50; the walk over every sub-variant
     // @ 0x56621D..0x566233].
     const WeaponTable &table = world.tables.weapons;
-    for (const WeaponKitEntry &entry : loadout.spawn_kit()) {
+    for (const WeaponKitEntry &entry : applied) {
         const int adm = table.index_of(entry.name.c_str());
         if (adm < 0) continue;
         const WeaponTableEntry *def = table.by_index(static_cast<uint8_t>(adm));
@@ -426,6 +437,29 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
     // (store_select_and_mount carries the witness).
     store_select_and_mount(world, weapon, inventory, select_adm);
     return true;
+}
+
+} // namespace
+
+bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
+                                LocalPlayerWeapon &weapon,
+                                WeaponInventory &inventory,
+                                bool &inventory_valid,
+                                const std::vector<WeaponKitEntry> &kit,
+                                int32_t player_class, bool validate_banned,
+                                LoadoutApplySelect select) {
+    return apply_kit(world, loadout, weapon, inventory, inventory_valid, kit, player_class,
+            validate_banned, select, /*own_grant=*/false);
+}
+
+bool local_loadout_apply_own_grant(World &world, LocalPlayerLoadout &loadout,
+                                   LocalPlayerWeapon &weapon, WeaponInventory &inventory,
+                                   bool &inventory_valid, const std::vector<WeaponKitEntry> &kit,
+                                   int32_t player_class, LoadoutApplySelect select) {
+    // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - the rebuild
+    //  @0x4294E3..0x4296AE, the select and mount @0x4296B4..0x4296F4, the weight @0x4296FE]
+    return apply_kit(world, loadout, weapon, inventory, inventory_valid, kit, player_class,
+            /*validate_banned=*/false, select, /*own_grant=*/true);
 }
 
 // [orig: Armory_ResolveSelectedClass @0x5642f0] The scan-up + gunner fallback
