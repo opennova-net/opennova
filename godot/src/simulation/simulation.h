@@ -225,6 +225,7 @@ private:
 	friend class MapViewWindow; // the CMAP waypoint legs (inmatch/client_squad.cpp)
 	friend class CommandMapScreen; // the CMAP tables' roster and sends (menu/command_map_screen.h)
 	friend class MenuDriver; // the DEATH table's zones (mnu/menu_driver.h fill_deploy_spawn_table)
+	friend class HudOverlay; // the end-game screen's role view (inmatch::end_game_screen_text)
 	std::unique_ptr<opennova::mission::MissionKernel> kernel_;
 	// The private state by owner, each plain data in its own header (ADR 0043
 	// d9; the class-body fragments are gone): the net-session shell inputs and
@@ -2460,10 +2461,9 @@ public:
 	// HudOverlay::set_attach_labels projects and resolves the rows natively.
 	// False without a kernel. (engine: runtime/hud/hud_frame.cpp)
 	bool fill_attach_labels(std::vector<opennova::world::AttachLabel> &r_labels) const;
-	// The friendly-tags gather (D-HUD-20; world::FriendlyTagSource): the raw
-	// positions + per-entity facts; HudOverlay::set_friendly_tags lifts,
-	// projects and feeds the compiler's element natively. NOT ClassDB-bound.
-	// False without a kernel or a local player.
+	// The friendly-tags gather (D-HUD-20; world::FriendlyTagSource): the raw positions + per-entity
+	// facts; HudOverlay::set_friendly_tags lifts, projects and feeds the compiler's element
+	// natively. NOT ClassDB-bound. False without a kernel or a local player.
 	bool fill_friendly_tags(std::vector<opennova::world::FriendlyTagSource> &r_tags) const;
 	opennova::inmatch::HudRoleFacts hud_role_facts(uint32_t p_voice_menus = 0) const; // NOT bound
 	// The radio-request icon's viewer gate over the local player (world::
