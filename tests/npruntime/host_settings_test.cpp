@@ -8,6 +8,7 @@
 #include <runtime/inmatch/host_settings.h>
 #include "common/test_expect.h"
 #include <formats/mnu/mnu.h>
+#include <net/protocol/protocol.h> // the protocol's 0x66 word, another axis
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_state_frame.h>
@@ -393,6 +394,60 @@ int restriction_lists() {
                 nw_screen.table_cell_text(nw_classes, 0, 1) == "Mission");
     return 0;
 }
+
+// The host screen's ARMORY / MISSION words are its Title's (Title::host_armory_word, DFX2-10), not
+// the protocol's: a title on Jointops.exe's screen, speaking JO's protocol (whose S2C 0x66
+// armory-only word is 2), with dfx2.exe's word 3 names 3 ARMORY and 2 MISSION, its press steps past
+// 2 to 0 and its radios write 3 and 2; the schema's words follow. The two axes fork independently.
+// [orig: HostDialog_PopulateWeaponRestrictionList @0x556600 - the switch @0x556655]
+// [orig: HostDialog_PopulateWeaponRestrictionList @0x5547b0 - the switch @0x554805 (dfx2.exe)]
+int host_words_are_the_titles() {
+    opennova::Title title = kJo;
+    title.host_armory_word = 3;
+    TEST_EXPECT(opennova::protocol_in_match(opennova::title_protocol(title.code))
+                        .s2c_66.armory_only_availability == 2);
+    const gamecfg::ServerSettingsTitle words = server_settings_title(title);
+    TEST_EXPECT(words.armory_word == 3 && words.mission_word == 2);
+    const gamecfg::ServerSettingsTitle jo = server_settings_title(kJo);
+    TEST_EXPECT(jo.armory_word == 2 && jo.mission_word == 3);
+
+    mnu::Document doc = host_dialog_document();
+    mnu::Window list_window = control("WEAPON_LIST", mnu::WindowType::Table);
+    list_window.table_data.column.has_count = true;
+    list_window.table_data.column.count = 2;
+    doc.screens[0].roots[0].children.push_back(list_window);
+    opennova::menu::MenuRuntime screen;
+    TEST_EXPECT(screen.open_document(&doc, std::string(), std::string(title.host_screen)));
+    const int list = screen.find_screen_control(std::string(title.host_screen), "WEAPON_LIST");
+    TEST_EXPECT(list >= 0);
+    const opennova::hud::GameTextLookup gametext = [](const char*, const char*, const char* fallback) {
+        return std::string(fallback);
+    };
+    const opennova::hud::GameTextLookup menu_ui = [](const char* section, const char* key,
+                                                      const char* fallback) {
+        if (std::string(section) != "Menu") return std::string(fallback);
+        return std::string(key) == "ARMORY" ? std::string("Armory")
+               : std::string(key) == "MISSION" ? std::string("Mission")
+                                               : std::string(fallback);
+    };
+    const gamecfg::WeaponRoster weapons = {{"None", 0, ""}, {"WPN_M16", 1, ""}, {"WPN_X", 1, ""}};
+    gamecfg::GameCfg cfg = gamecfg::defaults();
+    cfg.weapon_availability[1] = 3;
+    cfg.weapon_availability[2] = 2;
+    populate_host_weapon_list(screen, cfg, title, weapons, gametext, menu_ui);
+    TEST_EXPECT(screen.table_row_count(list) == 2);
+    TEST_EXPECT(screen.table_cell_text(list, 0, 1) == "Armory" &&
+                screen.table_cell_text(list, 1, 1) == "Mission");
+    opennova::menu::HostDialog dialog;
+    for (const int32_t stepped : {0, 1, 2, 0})
+        TEST_EXPECT(host_restriction_list_pressed(screen, dialog, cfg, title, "WEAPON_LIST", 1, 1, menu_ui) &&
+                    cfg.weapon_availability[2] == stepped);
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, title, weapons, "WPN_ARMORY", menu_ui));
+    TEST_EXPECT(cfg.weapon_availability[1] == 3 && screen.table_cell_text(list, 0, 1) == "Armory");
+    TEST_EXPECT(host_restriction_radio_pressed(screen, dialog, cfg, title, weapons, "WPN_MISSION", menu_ui));
+    TEST_EXPECT(cfg.weapon_availability[1] == 2 && screen.table_cell_text(list, 0, 1) == "Mission");
+    return 0;
+}
 } // namespace
 
 int main() {
@@ -400,6 +455,7 @@ int main() {
     if (untouched_dialog() != 0) return 1;
     if (max_players_recommendation() != 0) return 1;
     if (restriction_lists() != 0) return 1;
+    if (host_words_are_the_titles() != 0) return 1;
     gamecfg::GameCfg cfg;
     const auto read = [&](const char* name, const char* value) {
         return apply_host_dialog_control(cfg, kJo, name, value);

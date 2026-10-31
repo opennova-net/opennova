@@ -31,9 +31,9 @@ struct ServerSetting {
 
 // What the schema takes of the title a server runs, which this format library cannot see: its
 // game.cfg table, its host screen's MAX_PLAYERS cap (Title::max_players_host_screen) and the two
-// availability words its binary swaps (DFX2-10: Jointops.exe's armory-only 2 and mission 3,
-// dfx2.exe's 3 and 2; ProtocolInMatch::s2c_66.armory_only_availability). The embedder resolves it
-// from the title (inmatch::server_settings_title).
+// availability words its binary's host screen swaps (DFX2-10: Jointops.exe's armory-only 2 and
+// mission 3, dfx2.exe's 3 and 2; Title::host_armory_word). The embedder resolves it from the title
+// (inmatch::server_settings_title).
 struct ServerSettingsTitle {
 	ConfigTable table = ConfigTable::Jo;
 	int32_t max_players = 0;

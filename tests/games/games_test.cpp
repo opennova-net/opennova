@@ -16,6 +16,7 @@
 #include <games/novalogic_2009/generation.h>
 #include <net/novacrypto/cdkey.h>
 #include <net/protocol/protocol.h>
+#include <runtime/inmatch/host_settings.h> // server_settings_title (DFX2-10's host words)
 #include <runtime/world/title_rules.h>
 
 #include <algorithm>
@@ -106,7 +107,7 @@ auto title_fields_past_identity(const Title &t) {
 			nvg_gain_rect, inset_reticle_quad, frame_fx_work_side, low_health_screen_effect,
 			map_capture_rings_under_layers, death_map_zone_markers, loading_screen, controls,
 			hud_sp_how_to, stat_screen_done, menu_font_scale, host_vehicle_missions,
-			host_switch_starts_off, armory_lists_none_row, death_map_no_names,
+			host_switch_starts_off, host_armory_word, armory_lists_none_row, death_map_no_names,
 			player_avatar_by_viewer_side, hud_game_info_board, hud_vehicle_panel_riders,
 			epilog_debriefing_screens, player_info_combo_names, player_info_combo_spins,
 			player_info_preview_hover] = t;
@@ -133,10 +134,10 @@ auto title_fields_past_identity(const Title &t) {
 			nvg_gain_rect.y0, nvg_gain_rect.x1, nvg_gain_rect.y1, inset_reticle_quad,
 			frame_fx_work_side, low_health_screen_effect, map_capture_rings_under_layers,
 			death_map_zone_markers, loading_screen, controls, hud_sp_how_to, stat_screen_done,
-			menu_font_scale, host_vehicle_missions, host_switch_starts_off, armory_lists_none_row,
-			death_map_no_names, player_avatar_by_viewer_side, hud_game_info_board,
-			hud_vehicle_panel_riders, epilog_debriefing_screens, player_info_combo_names,
-			player_info_combo_spins, player_info_preview_hover);
+			menu_font_scale, host_vehicle_missions, host_switch_starts_off, host_armory_word,
+			armory_lists_none_row, death_map_no_names, player_avatar_by_viewer_side,
+			hud_game_info_board, hud_vehicle_panel_riders, epilog_debriefing_screens,
+			player_info_combo_names, player_info_combo_spins, player_info_preview_hover);
 }
 
 // Each of two titles' fields past the identity equal, a failure naming the field by its index in
@@ -495,21 +496,23 @@ void bump_rule_sheet_per_protocol() {
 		CHECK(sheet(code) == "no in-match protocol");
 }
 
-// DFX2-10's mission word sits on two axes: the protocol's (the S2C 0x66 group's armory-only word,
-// the mission's the other) and the game.cfg defaults' (Config_SetDefaults fills every weapon with
-// the mission's word, keyed by the title's config table, as formats/gamecfg cannot read a
-// protocol). Each title's config table fills its protocol's mission word, so the two never part.
+// DFX2-10's host-screen words are the Title's (Title::host_armory_word, its MISSION the other of
+// 2 and 3), and the game.cfg defaults fill every weapon with the executable's MISSION word, keyed
+// by the title's config table, as formats/gamecfg cannot read a Title. Each title's config table
+// fills its own host screen's MISSION word, so the two never part. (The word S2C 0x66 carries is
+// the protocol's, another axis: no title's protocol is read here.)
 // [orig: Config_SetDefaults @0x54D030 - memset32(3, 0xFF) @0x54D410]
 // [orig: Config_SetDefaults @0x54a2c0 - memset32(dword_254F25C, 2, 0xFF) (dfx2.exe)]
-void config_table_fills_the_protocols_mission_word() {
+void config_table_fills_the_titles_mission_word() {
 	for (size_t i = 0; i < title_count(); ++i) {
-		const Title *title = title_at(i);
-		const Protocol *protocol = title != nullptr ? title_protocol(title->code) : nullptr;
-		if (protocol == nullptr || !protocol->in_match.has_value())
-			continue;
-		const gamecfg::GameCfg cfg = gamecfg::defaults({}, 0, 0, title->config_table);
-		CHECK(cfg.weapon_availability[0] == protocol->in_match->s2c_66.mission_availability());
+		const Title &title = *title_at(i);
+		const gamecfg::GameCfg cfg = gamecfg::defaults({}, 0, 0, title.config_table);
+		CHECK(cfg.weapon_availability[0] == inmatch::server_settings_title(title).mission_word);
 	}
+	// Jointops.exe's ARMORY 2 and MISSION 3, dfx2.exe's 3 and 2; OP: Acid Gambit's are JO's.
+	CHECK(games::jo_title().host_armory_word == 2 && games::dfx2_title().host_armory_word == 3);
+	CHECK(inmatch::server_settings_title(games::jo_title()).mission_word == 3);
+	CHECK(inmatch::server_settings_title(games::dfx2_title()).mission_word == 2);
 }
 
 // A version line's title parts (title_versions): the title's name where the line names no game,
@@ -548,7 +551,7 @@ int main() {
 	retail_rules_values();
 	retail_local_input_title_values();
 	bump_rule_sheet_per_protocol();
-	config_table_fills_the_protocols_mission_word();
+	config_table_fills_the_titles_mission_word();
 	title_parts_of_the_version_line();
 	if (g_failures == 0) {
 		std::printf("games: all checks passed\n");

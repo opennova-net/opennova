@@ -628,7 +628,7 @@ GameCfg defaults(const DefaultTexts &texts, int32_t player_index, int32_t hw3d_d
 	cfg.play_exit_credits = -1;
 	cfg.mpattrib = 14850;
 	// Every weapon the mission's word, the title's (DFX2-10): Jointops.exe's 3, dfx2.exe's 2. It is
-	// the word of the protocol the title speaks (ProtocolInMatch::s2c_66, which this library cannot
+	// its host screen's MISSION word (Title::host_armory_word's other, which this library cannot
 	// read), which games_test pins each title's config table to.
 	// [orig: Config_SetDefaults @0x54D030 - memset32(3, 0xFF) @0x54D410]
 	// [orig: Config_SetDefaults @0x54a2c0 - memset32(dword_254F25C, 2, 0xFF) (dfx2.exe)]

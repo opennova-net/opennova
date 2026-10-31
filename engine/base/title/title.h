@@ -459,6 +459,17 @@ struct Title {
 	// option) 0. False (Jointops.exe): 1 for a team, non-objective mission [orig:
 	// HostDialog_AddRemoveSelectedMissions @0x557c10 (@0x557e72..0x557e94)].
 	bool host_switch_starts_off = false;
+	// DFX2-10: the weapon availability word the host screen's WEAPON_LIST names ARMORY (its cells,
+	// a press's step and the WPN_ARMORY radio; inmatch::server_settings_title); the other of 2 and
+	// 3 is its MISSION (as -1 is), the WPN_MISSION radio's word and the last a press steps to
+	// before NEVER. Jointops.exe's 2, MISSION 3; dfx2.exe's 3, MISSION 2, so a dfx2.exe press never
+	// reaches its ARMORY. On the Title, not the Protocol: the executable's own screen. The word
+	// S2C 0x66 carries, the host's grant and the joiner's fold test is the protocol's
+	// (ProtocolInMatch::s2c_66). [orig: HostDialog_PopulateWeaponRestrictionList @0x556600 - the
+	// switch @0x556655 (-1 and 3 MISSION, 2 ARMORY); HostDialog_WeaponRestrictionCycleHandler
+	// @0x5576c0 - the step past 3 @0x55772F; UI_RegisterHostSettingsCallbacks @0x5580f0 -
+	// WPN_ARMORY's 2 @0x55820A, WPN_MISSION's 3 @0x558228]
+	int32_t host_armory_word = 2;
 	// DFX2-73: the WEAPON screen's three category lists (PRIMARY / SECONDARY / ACCESSORY, and the
 	// DEATH screen's under death_screen_loadout) open with the "Menu" / "NONE" row
 	// (menu::ArmoryLoadout::populate). Jointops.exe's do [orig: UI_PopulateThreeCategoryLists

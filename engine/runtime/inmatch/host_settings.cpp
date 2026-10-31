@@ -2,7 +2,6 @@
 
 #include <base/io/crt_ftol.h>
 #include <formats/mnu/mnu.h>
-#include <net/protocol/protocol.h> // the availability words (DFX2-10)
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/hud/hud_game_text.h> // hud_sprintf (the CRT sprintf over a localized format)
@@ -318,13 +317,14 @@ constexpr size_t kClassWordCount = gamecfg::kClassAvailabilityCount;
 } // namespace
 
 gamecfg::ServerSettingsTitle server_settings_title(const Title& title) {
-    // The host screen's cap (DFX2-8) and the words of the protocol the title speaks (DFX2-10).
-    const ProtocolInMatch& in_match = protocol_in_match(title_protocol(title.code));
+    // The host screen's cap (DFX2-8) and its availability words (DFX2-10), the title's own: its
+    // ARMORY word and the other of 2 and 3, its MISSION (Title::host_armory_word carries the
+    // witness).
     gamecfg::ServerSettingsTitle out;
     out.table = title.config_table;
     out.max_players = title_player_caps(title).host_screen;
-    out.armory_word = in_match.s2c_66.armory_only_availability;
-    out.mission_word = in_match.s2c_66.mission_availability();
+    out.armory_word = title.host_armory_word;
+    out.mission_word = title.host_armory_word == 2 ? 3 : 2;
     return out;
 }
 

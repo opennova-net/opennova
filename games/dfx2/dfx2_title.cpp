@@ -467,6 +467,12 @@ Title make() {
 	//  (dfx2.exe)].
 	t.host_vehicle_missions = true;
 	t.host_switch_starts_off = true;
+	// DFX2-10: the host screen's ARMORY is word 3 and its MISSION 2 [orig:
+	//  HostDialog_PopulateWeaponRestrictionList @0x5547b0 - the switch @0x554805 (-1 and 2 MISSION,
+	//  3 ARMORY); @0x5558a0 - the step past 2 @0x55590F; @0x5562c0 - WPN_ARMORY's 3 @0x5563DA,
+	//  WPN_MISSION's 2 @0x5563F8 (dfx2.exe)], the twins of Jointops.exe's @0x556600, @0x5576c0 and
+	//  @0x5580f0.
+	t.host_armory_word = 3;
 	// DFX2-73: the three category lists carry no NONE row [orig: UI_PopulateThreeCategoryLists
 	//  @0x565d10 - the three ListWidget_SortRows @0x565e33..0x565e4d go straight to the ammo
 	//  populate @0x565e55; no TextResource_GetStringWithFallback("Menu", "NONE") (dfx2.exe)], the
