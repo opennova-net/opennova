@@ -233,14 +233,15 @@ std::vector<std::string> render_serve_args(const HostedSettings &settings, std::
 		std::string_view expansion_code, const std::string &master_host, uint16_t master_gate_port,
 		const NovaLogicListing &novalogic) {
 	// A supervised server's: no status page (its lines would ride the server's
-	// log stream every 200 ms), its tick health and its exit's line for the
-	// agent (hosted/protocol/slots.h).
+	// log stream every 200 ms), its tick health, its exit's line and its build for
+	// the agent (hosted/protocol/slots.h).
 	std::vector<std::string> args = { "/HOST", kHostFileName, "--credentials", kCredentialsFileName,
 		"--master-host", master_host, "--master-gate-port", std::to_string(master_gate_port),
 		"--status-page", "off", "--stats-file", kTickStatsFileName, "--exit-file", kExitFileName,
-		"--send-holdoff-ticks", std::to_string(settings.send_holdoff_ticks),
-		"--entity-send-budget", std::to_string(settings.entity_send_budget),
-		"--rotation-first", "/game", std::string(title) };
+		"--build-file", kBuildFileName, "--send-holdoff-ticks",
+		std::to_string(settings.send_holdoff_ticks), "--entity-send-budget",
+		std::to_string(settings.entity_send_budget), "--rotation-first", "/game",
+		std::string(title) };
 	if (!expansion_code.empty()) {
 		args.push_back("/exp");
 		args.emplace_back(expansion_code);

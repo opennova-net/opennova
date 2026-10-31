@@ -353,7 +353,7 @@ int test_renders() {
 	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
-		"--send-holdoff-ticks", "12", "--entity-send-budget", "600",
+		"--build-file", "build.json", "--send-holdoff-ticks", "12", "--entity-send-budget", "600",
 		"--rotation-first", "/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(spec.serve_args == args);
 	TEST_EXPECT(hosted::render_serve_args(s, "jo", "jox01", "203.0.113.5", 7597, in.novalogic) == args);
@@ -496,12 +496,12 @@ int test_renders() {
 	const std::vector<std::string> dfx2_args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
-		"--send-holdoff-ticks", "12", "--entity-send-budget", "600",
+		"--build-file", "build.json", "--send-holdoff-ticks", "12", "--entity-send-budget", "600",
 		"--rotation-first", "/game", "dfx2" };
 	TEST_EXPECT(dfx2.serve_args == dfx2_args);
 	const hosted::LaunchSpec on = hosted::render_launch(s, "jo", "", in);
-	TEST_EXPECT(on.serve_args.size() == 21 && on.serve_args[18] == "--rotation-first" &&
-			on.serve_args[19] == "/game" && on.serve_args[20] == "jo");
+	TEST_EXPECT(on.serve_args.size() == 23 && on.serve_args[20] == "--rotation-first" &&
+			on.serve_args[21] == "/game" && on.serve_args[22] == "jo");
 	return 0;
 }
 
@@ -1102,7 +1102,7 @@ int test_lifecycle_and_stop() {
 	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
 		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597",
 		"--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
-		"--send-holdoff-ticks", "12", "--entity-send-budget", "600",
+		"--build-file", "build.json", "--send-holdoff-ticks", "12", "--entity-send-budget", "600",
 		"--rotation-first", "/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(c->desired.args == args);
 	{

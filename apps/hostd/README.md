@@ -135,7 +135,8 @@ POST /hosted/machines/<id>/sync           Authorization: Bearer <agent secret>
   ["reason",] "cpu_percent", "memory_bytes", "egress_bytes", "net_in_bytes",
   ["tick": {"p50_ms", "p99_ms", "max_ms", "late"}],
   ["second_listing": {"state", ["try", "tries",] ["next_try_at",] ["reason", ["tag"],]
-                      ["slots"]}]}],
+                      ["slots"]}],
+  ["build": {"version", "commit"}]}],
   ["listing_failed": true]}
 -> 200 {"protocol": 3, "drain", "desired": [{"name", "slot", "image", "uid", "base_tree",
   "expansion_tree", "expansion_code", "args", "files", "env", "cpus", "memory_mb", "pids",
@@ -168,7 +169,11 @@ JSON, read by the protocol's strict decoder, so a file of another shape says not
 member rides only a server whose start the service rendered it for, with the serve image
 the same release's service pins, so a hostd that rolls ahead of the fleet program sends it
 to no service that cannot read it; the protocol stays 3, and a report without it reads as
-no state (`apps/novaworld_common/hosted/protocol/agent_protocol.h`). The agent, root, reads
+no state (`apps/novaworld_common/hosted/protocol/agent_protocol.h`). `build` rides a running
+server the same way: the ONE build it says it runs (its `--build-file`, `build.json`, written
+once as it starts, read with the ticks and of any age, by the protocol's strict decoder), which
+every start the service renders names, so it too reaches only a service that reads it; the
+service shows it beside the server's listing. The agent, root, reads
 each of these files as a file the slot's user controls: opened from the slot's directory with `O_NOFOLLOW` and
 `O_NONBLOCK`, a regular file of at most 4 KiB alone, its age its open file's own; a link, a
 FIFO, a directory or a larger file reads as nothing written. Each desired container names

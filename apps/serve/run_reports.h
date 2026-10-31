@@ -3,8 +3,9 @@
 // What a supervised run of opennova-serve leaves its supervisor (a hosted
 // server's machine agent, apps/hostd) in its working directory, none of it
 // retail's: the run's tick health (--stats-file), rewritten once a minute, the
-// line it exits with (--exit-file), written at a non-zero exit, and its second
-// listing's state (--second-listing-file), rewritten whenever it changes.
+// line it exits with (--exit-file), written at a non-zero exit, its second
+// listing's state (--second-listing-file), rewritten whenever it changes, and
+// ONE's build (--build-file), written once as it starts.
 //
 // Tick health. The loop runs one session frame per pass, paced by the session's
 // frame lock (main.cpp); each frame's time is its work, from its start to its
@@ -18,6 +19,8 @@
 // times are the caller's steady clock in nanoseconds, so a test steps them by
 // hand. Instrumentation only: the loop runs as it did. Service policy, not a
 // port.
+
+#include <base/version/one_build.h>
 
 #include <cstdint>
 #include <optional>
@@ -112,5 +115,13 @@ inline bool operator!=(const SecondListingReport &a, const SecondListingReport &
 // while retrying, "reason" (every control character a space) with "tag" when
 // there is one while retrying or not listed, and "slots" while there are any.
 std::string second_listing_json(const SecondListingReport &report);
+
+// The --build-file's text, one JSON line: {"version": "<ONE's version>", "commit": "<its short
+// sha>"} ("0.0.22.123" and "a1b2c3d" for a staging build; the commit "" where the build names
+// none), the build the server runs as it says it of itself (base/version/one_build.h
+// one_build()). Its supervisor reads it with the agent protocol's strict decoder
+// (apps/novaworld_common/hosted/protocol/agent_protocol.h decode_serve_build), so the service
+// shows the server's own build beside its listing.
+std::string build_file_json(const OneBuild &build);
 
 } // namespace opennova::serve

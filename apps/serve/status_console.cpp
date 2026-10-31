@@ -100,7 +100,10 @@ bool StatusConsole::present(const hud::ServerStatusPageState &page, uint32_t now
 	std::string rows = status_page_rows(page);
 	if (rows == last_rows_) return false;
 	last_rows_ = std::move(rows);
-	const std::string text = render_status_page(page);
+	std::string text;
+	if (!version_line_.empty())
+		text = "opennova-serve " + version_line_ + "\n";
+	text += render_status_page(page);
 	std::fprintf(out_, "\n%s", text.c_str());
 	std::fflush(out_);
 	return true;

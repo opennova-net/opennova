@@ -723,10 +723,10 @@ std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 				"net_in_bytes, tick_p50_ms, tick_p99_ms, tick_max_ms, late_ticks, "
 				"second_listing_state, second_listing_try, second_listing_tries, "
 				"second_listing_next_try_at, second_listing_reason, second_listing_tag, "
-				"second_listing_slots) "
+				"second_listing_slots, one_version, one_commit) "
 				"VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8::double precision), $9, $10, "
 				"$11, $12, $13, $14, $15, $16, $17, $18, $19, $20, "
-				"to_timestamp($21::double precision), $22, $23, $24);",
+				"to_timestamp($21::double precision), $22, $23, $24, $25, $26);",
 				{ BindValue(id), BindValue(static_cast<int64_t>(slot)), BindValue(c->name),
 						BindValue(std::string(container_state_text(c->state))),
 						BindValue(std::string(container_wait_text(c->waiting))),
@@ -744,7 +744,9 @@ std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 						listing ? db::int_or_null(listing->next_try_at) : BindValue(std::monostate{}),
 						BindValue(listing ? listing->reason : std::string()),
 						BindValue(listing ? listing->tag : std::string()),
-						BindValue(listing ? join_slots(listing->slots) : std::string()) });
+						BindValue(listing ? join_slots(listing->slots) : std::string()),
+						BindValue(c->build ? c->build->version : std::string()),
+						BindValue(c->build ? c->build->commit : std::string()) });
 	}
 	auto row = find_machine(db, id);
 	tx.commit();
@@ -880,7 +882,8 @@ std::vector<SlotReport> query_slot_reports(
 					 "r.tick_p50_ms, r.tick_p99_ms, r.tick_max_ms, r.late_ticks, "
 					 "r.second_listing_state, r.second_listing_try, r.second_listing_tries, "
 					 "CAST(extract(epoch FROM r.second_listing_next_try_at) AS bigint), "
-					 "r.second_listing_reason, r.second_listing_tag, r.second_listing_slots "
+					 "r.second_listing_reason, r.second_listing_tag, r.second_listing_slots, "
+					 "r.one_version, r.one_commit "
 					 "FROM fleet_slot_reports r " +
 							tail,
 					binds)) {
@@ -917,6 +920,10 @@ std::vector<SlotReport> query_slot_reports(
 			listing.slots = split_slots(r.as_text(23).value_or(""));
 			s.second_listing = std::move(listing);
 		}
+		// '' in both: no build reported (migration 0016's default).
+		ServeBuild build{ r.as_text(24).value_or(""), r.as_text(25).value_or("") };
+		if (!build.version.empty() || !build.commit.empty())
+			s.build = std::move(build);
 		out.push_back(std::move(s));
 	}
 	return out;
@@ -937,6 +944,21 @@ std::optional<SlotReport> slot_report_of(db::Database &db, int64_t server_id) {
 	if (rows.empty())
 		return std::nullopt;
 	return std::move(rows.front());
+}
+
+std::map<int64_t, ServeBuild> running_builds_by_account(db::Database &db) {
+	std::map<int64_t, ServeBuild> out;
+	for (const db::Row &r :
+			db.query("SELECT s.service_user_id, r.one_version, r.one_commit "
+					 "FROM hosted_servers s JOIN fleet_slot_reports r "
+					 "ON r.machine_id = s.machine_ref AND r.slot = s.slot "
+					 "AND r.container = s.machine_id "
+					 "WHERE s.state = 'running' AND s.service_user_id IS NOT NULL "
+					 "AND r.state = 'running' AND (r.one_version <> '' OR r.one_commit <> '');")) {
+		if (const auto account = r.as_int(0))
+			out[*account] = ServeBuild{ r.as_text(1).value_or(""), r.as_text(2).value_or("") };
+	}
+	return out;
 }
 
 // --- the slots ---

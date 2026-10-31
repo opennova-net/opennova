@@ -64,6 +64,9 @@ std::optional<hosted::TickHealth> parse_tick_stats(std::string_view text);
 // protocol's own strict read (hosted::decode_second_listing): nullopt when it
 // does not read.
 std::optional<hosted::SecondListingStatus> parse_second_listing(std::string_view text);
+// A server's --build-file line as the ONE build it runs, by the same strict read
+// (hosted::decode_serve_build): nullopt when it does not read.
+std::optional<hosted::ServeBuild> parse_serve_build(std::string_view text);
 
 // How the agent reaches the service's internal listener.
 class ServiceLink {
@@ -250,14 +253,15 @@ private:
 	uint64_t stats_at_ = 0;
 	bool stats_read_ = false;
 	// The machine's use: the last CPU reading (a percent needs two), the last
-	// good read of the rest, and the running servers' fresh tick health and
-	// second listings by name.
+	// good read of the rest, and the running servers' fresh tick health, second
+	// listings and builds by name.
 	std::optional<novaworld_server::proc_stats::CpuTimes> cpu_mark_;
 	std::optional<hosted::MachineStats> machine_stats_;
 	uint64_t machine_at_ = 0;
 	bool machine_read_ = false;
 	std::map<std::string, hosted::TickHealth> ticks_;
 	std::map<std::string, hosted::SecondListingStatus> listings_;
+	std::map<std::string, hosted::ServeBuild> builds_;
 	std::map<std::string, uint64_t> stop_requested_; // by name: when its SIGTERM went
 	std::map<std::string, FailedStart> failed_starts_; // by name
 	std::map<std::string, uint64_t> pulls_; // image -> when its pull began

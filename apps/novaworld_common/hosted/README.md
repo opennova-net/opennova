@@ -350,11 +350,14 @@ this directory's.
   the row's own columns, read by `hosted::admin_login_of` alone. `opennova-serve` runs
   with `/HOST server.host --credentials credentials.txt --master-host <host>
   --master-gate-port <port> --status-page off --stats-file tick-stats.json --exit-file
-  exit.txt --send-holdoff-ticks <ticks> --entity-send-budget <bytes> --rotation-first /game <title>`
+  exit.txt --build-file build.json --send-holdoff-ticks <ticks> --entity-send-budget <bytes>
+  --rotation-first /game <title>`
   and `/exp <code>` with an expansion: no status page (it would
-  stream the players' names and chat into the server's log every 200 ms), and the two
-  files the machine's agent reads in the slot's directory, the server's tick health and the
-  error a non-zero exit ended on (`apps/serve/README.md`, "Supervised runs"). A server whose
+  stream the players' names and chat into the server's log every 200 ms), and the three
+  files the machine's agent reads in the slot's directory, the server's tick health, the
+  error a non-zero exit ended on and the ONE build it runs (`apps/serve/README.md`,
+  "Supervised runs"; the build is the slot report's `one_version` and `one_commit`, which
+  the public server list shows beside the server's listing). A server whose
   owner asked to be listed on NovaLogic's NovaWorld (`list_on_novalogic`) also gets
   `--second-listing-file second-listing.json`, the listing's state, which the agent forwards
   and its page shows (off when the service offers no listing at that start), and, while the

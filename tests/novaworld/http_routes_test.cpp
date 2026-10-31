@@ -7067,6 +7067,144 @@ int test_no_agent_routes_on_public_listener(Harness &h) {
 	return 0;
 }
 
+// GET /api/lobbies and /api/lobbies/<rid> carry each listing's ONE build where the service knows
+// it: a running hosted server's, as its machine's agent last reported its own container's
+// --build-file (fleet_slot_reports one_version / one_commit), by the service account its
+// listing's HostKey names. Null for a listing no hosted server holds (a player's own server,
+// self-hosted or retail, whose retail listing carries no build), for a hosted server whose agent
+// reported none, and for a report from another container than the one its row names (a slot's
+// earlier server); a build that names no commit has a null commit.
+int test_lobby_hosted_build(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	using crow::json::type;
+	const int64_t owner = make_account(h, "build_owner", "pw-build-owner");
+	TEST_EXPECT(owner > 0 && nws::billing::set_comp_grants(*h.pool.acquire(), owner, { 1, 0 }));
+	hosted::HostedSettings settings;
+	settings.product_id = h.jo_id;
+	settings.game_name = "Build Hosted";
+	settings.missions = { "a.bms" };
+	const auto request = hosted::request_server(
+			*h.pool.acquire(), owner, settings, offered(h), 1000, nws::wall_now_s());
+	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
+	const int64_t server_id = request.id;
+	const auto service = nws::upsert_service_account(
+			*h.pool.acquire(), nws::service_username(server_id), "pw-build-service");
+	TEST_EXPECT(service.ok);
+	hosted::set_service_account(*h.pool.acquire(), server_id, service.id);
+
+	// The server running on slot 0 of a ready machine, its listing held by its service account;
+	// and a server its owner hosts, its listing held by the owner's own account.
+	constexpr uint32_t kHostedRid = 0x0A0000B1;
+	constexpr uint32_t kOwnRid = 0x0A0000B2;
+	const std::string container = hosted::hosted_container_name(server_id, 1);
+	int64_t machine = 0;
+	{
+		auto db = h.pool.acquire();
+		machine = hosted::create_machine(
+				*db, { "docker", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 })
+						  .id;
+		hosted::LaunchedMachine launched;
+		launched.cloud_id = "local-build-1";
+		launched.private_address = "10.56.0.40";
+		launched.public_address = "198.51.100.56";
+		launched.instance_type = "t3a.large";
+		TEST_EXPECT(hosted::mark_launched(*db, machine, launched));
+		db->exec("UPDATE hosted_servers SET state = 'running', machine_ref = $1, slot = 0, "
+				 "machine_id = $2 WHERE id = $3;",
+				{ opennova::db::BindValue(machine), opennova::db::BindValue(container),
+						opennova::db::BindValue(server_id) });
+		const struct {
+			uint32_t rid;
+			const char *name;
+			int64_t account;
+		} listings[] = { { kHostedRid, "Build Hosted", service.id },
+			{ kOwnRid, "Build Own", owner } };
+		for (const auto &l : listings) {
+			opennova::hostdb::HostRow row;
+			row.rid = l.rid;
+			row.gsid = "GSID-" + std::to_string(l.rid);
+			row.game = "jop_2_consumer";
+			row.server_name = l.name;
+			row.host_ip = "10.56.0.9";
+			row.host_port = 32768;
+			opennova::hostdb::upsert_host(*db, row);
+			db->exec("UPDATE active_hosts SET host_user_id = $1 WHERE rid = $2;",
+					{ opennova::db::BindValue(l.account),
+							opennova::db::BindValue(static_cast<int64_t>(l.rid)) });
+		}
+	}
+	// A card's build in words: "<version> <commit>" (each "null" when it is), "null" for none,
+	// "absent" with no member, "missing" with no card.
+	const auto build_words = [](const crow::json::rvalue &card) -> std::string {
+		if (!card.has("build"))
+			return "absent";
+		const auto &b = card["build"];
+		if (b.t() == type::Null)
+			return "null";
+		const auto part = [&b](const char *key) {
+			return b[key].t() == type::Null ? std::string("null") : str(b[key]);
+		};
+		return part("version") + " " + part("commit");
+	};
+	// A listing's build, from the list and from its page (both must agree to be read as one).
+	const auto build_of = [&h, &build_words](uint32_t rid) -> std::string {
+		const auto list = crow::json::load(body_text(h.send("GET", "/api/lobbies")));
+		std::string listed = "missing";
+		if (list)
+			for (const auto &game : list["games"])
+				for (const auto &host : game["hosts"])
+					if (host["id"].i() == static_cast<int64_t>(rid))
+						listed = build_words(host);
+		const auto page =
+				crow::json::load(body_text(h.send("GET", "/api/lobbies/" + std::to_string(rid))));
+		const std::string paged = page ? build_words(page) : std::string("missing");
+		return listed == paged ? listed : "list " + listed + ", page " + paged;
+	};
+	const auto report = [&h, machine](
+								const std::string &name, std::optional<hosted::ServeBuild> build) {
+		hosted::ContainerReport running;
+		running.name = name;
+		running.slot = 0;
+		running.state = hosted::ContainerState::Running;
+		running.build = std::move(build);
+		return hosted::record_sync(*h.pool.acquire(), machine, "test-agent", { running })
+				.has_value();
+	};
+
+	// Before its agent reports a build: none known, the member there and null.
+	TEST_EXPECT(build_of(kHostedRid) == "null");
+	TEST_EXPECT(report(container, std::nullopt));
+	TEST_EXPECT(build_of(kHostedRid) == "null");
+
+	// Its agent reports the build its server wrote: the list and the page carry it.
+	TEST_EXPECT(report(container, hosted::ServeBuild{ "0.0.22.123", "a1b2c3d" }));
+	const std::string reported = build_of(kHostedRid);
+	if (reported != "0.0.22.123 a1b2c3d")
+		std::fprintf(stderr, "  hosted build: %s\n", reported.c_str());
+	TEST_EXPECT(reported == "0.0.22.123 a1b2c3d");
+	// The owner's own server is no hosted server's: no build.
+	TEST_EXPECT(build_of(kOwnRid) == "null");
+
+	// A build that names no commit.
+	TEST_EXPECT(report(container, hosted::ServeBuild{ "0.0.22", "" }));
+	TEST_EXPECT(build_of(kHostedRid) == "0.0.22 null");
+
+	// A report from the slot's earlier container answers for no one.
+	TEST_EXPECT(report(hosted::hosted_container_name(server_id, 0),
+			hosted::ServeBuild{ "0.0.21", "b0c2b38" }));
+	TEST_EXPECT(build_of(kHostedRid) == "null");
+
+	// A server that is no longer running (stopping) shows none, though its report stands.
+	TEST_EXPECT(report(container, hosted::ServeBuild{ "0.0.22.123", "a1b2c3d" }));
+	h.pool.acquire()->exec("UPDATE hosted_servers SET state = 'stopping' WHERE id = $1;",
+			{ opennova::db::BindValue(server_id) });
+	TEST_EXPECT(build_of(kHostedRid) == "null");
+
+	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), kHostedRid);
+	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), kOwnRid);
+	return 0;
+}
+
 // The admin's fleet routes (hosted/fleet_routes.h) over fleet rows made by hand
 // (no supervisor): the fleet view's machines (kind, state, type, slots and the
 // slots used, the public address, the month's egress; no credential of the
@@ -9710,6 +9848,7 @@ int run(Harness &h, const char *part) {
 		{ "hosted", "hosted_stats_routes", test_hosted_stats_routes },
 		{ "hosted", "hosted_usage_route", test_hosted_usage_route },
 		{ "hosted", "no_agent_routes_on_public_listener", test_no_agent_routes_on_public_listener },
+		{ "hosted", "lobby_hosted_build", test_lobby_hosted_build },
 		{ "billing", "billing_routes", test_billing_routes },
 		{ "billing", "billing_checkout_guard", test_billing_checkout_guard },
 		{ "billing", "billing_capacity", test_billing_capacity },

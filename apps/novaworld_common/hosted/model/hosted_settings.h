@@ -236,8 +236,8 @@ std::string render_credentials(const std::string &username, const std::string &p
 // opennova-serve's arguments for a server whose product speaks `title` (its
 // base row's title code) with the expansion `expansion_code` ("" for
 // none): /HOST, --credentials, --master-host, --master-gate-port, the status
-// page off with the tick-health and exit files (hosted/protocol/slots.h), /game with the
-// title, and /exp with the code; for a server whose owner asked to be listed on
+// page off with the tick-health, exit and build files (hosted/protocol/slots.h), /game with
+// the title, and /exp with the code; for a server whose owner asked to be listed on
 // NovaLogic's NovaWorld, the second listing's state file (--second-listing-file,
 // off while the service offers none), and while `novalogic` is offered the second
 // listing too (--also-master-host, --also-master-gate-port, --also-credentials with

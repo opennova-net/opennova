@@ -71,6 +71,10 @@
           <dt class="text-ink-muted">Tracers</dt>
           <dd>{{ shown.tracers ? 'On' : 'Off' }}</dd>
         </template>
+        <template v-if="shown.build">
+          <dt class="text-ink-muted">Server build</dt>
+          <dd class="server-build"><BuildText :build="shown.build" /></dd>
+        </template>
       </dl>
 
       <section class="space-y-3" aria-labelledby="server-players">
@@ -106,12 +110,13 @@
 
 <script setup lang="ts">
 // A listed server's public page, from either source: one our NovaWorld lists
-// (/lobby/<id>, GET /api/lobbies/<id>, with its scores on a server NovaWorld
-// hosts) or one on NovaLogic's (/lobby/novalogic/<id>, its row of the
-// service's copy of their list). Read every 15 s. A signed-in visitor whose
-// own listing it is (GET /api/me/hosts) gets a Manage link to it.
+// (/lobby/<id>, GET /api/lobbies/<id>, with its scores and its ONE build on a
+// server NovaWorld hosts) or one on NovaLogic's (/lobby/novalogic/<id>, its row
+// of the service's copy of their list). Read every 15 s. A signed-in visitor
+// whose own listing it is (GET /api/me/hosts) gets a Manage link to it.
 import { computed, ref, watch } from 'vue';
 import { RouterLink, useRoute, type RouteLocationRaw } from 'vue-router';
+import BuildText from '../components/BuildText.vue';
 import GameText from '../components/GameText.vue';
 import Badge from '../components/ui/Badge.vue';
 import Notice from '../components/ui/Notice.vue';
@@ -120,7 +125,7 @@ import { fetchLobbyServer, fetchNovaLogicLobbies, LobbyGone } from '../api/lobbi
 import { listMyServers } from '../api/myServers';
 import { usePolling } from '../composables/usePolling';
 import { useSession } from '../composables/useSession';
-import type { LobbyScore, LobbyServer, NovaLogicServer } from '../types/lobby';
+import type { LobbyBuild, LobbyScore, LobbyServer, NovaLogicServer } from '../types/lobby';
 import { serverName, titleName } from '../utils/games';
 import { stripGameText } from '../utils/gameText';
 
@@ -152,6 +157,8 @@ interface Shown {
   tracers: boolean | null;
   roster: string[];
   scoreboard: LobbyScore[] | null;
+  // Its server's ONE build, where ours knows it (a server NovaWorld hosts).
+  build: LobbyBuild | null;
 }
 
 // A host's time of day; "Unknown" is none.
@@ -181,6 +188,7 @@ function fromOurs(s: LobbyServer): Shown {
     tracers: null,
     roster: s.roster,
     scoreboard: s.scoreboard,
+    build: s.build ?? null,
   };
 }
 
@@ -213,6 +221,7 @@ function fromNovaLogic(s: NovaLogicServer): Shown {
     tracers: s.tracers,
     roster: s.roster,
     scoreboard: null,
+    build: null,
   };
 }
 

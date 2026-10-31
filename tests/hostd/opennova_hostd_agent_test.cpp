@@ -1477,6 +1477,28 @@ int test_machine_report() {
 	TEST_EXPECT(hostd::parse_second_listing("{\"state\":\"trying\",\"try\":1,\"tries\":5}\n") &&
 			!hostd::parse_second_listing("{\"state\":\"trying\"}"));
 
+	// The servers' builds (their --build-file, written once as each starts): a line that reads
+	// rides its running container's report whatever its age, one that does not read gives none.
+	const std::string build_0 = rig.slots_root + "/slot-0/build.json";
+	const std::string build_1 = rig.slots_root + "/slot-1/build.json";
+	std::ofstream(build_0) << "{\"version\":\"0.0.22.123\",\"commit\":\"a1b2c3d\"}\n";
+	std::ofstream(build_1) << "{\"version\":\"0.0.22\",\"commit\":\"a1b2c3d\",\"staging\":true}\n";
+	fs::last_write_time(build_0, fs::file_time_type::clock::now() - std::chrono::hours(30));
+	rig.clock_ms += hostd::Agent::kStatsIntervalMs;
+	rig.step();
+	a = rig.service.reported("srv-1-g1");
+	b = rig.service.reported("srv-2-g1");
+	TEST_EXPECT(
+			a && a->build && a->build->version == "0.0.22.123" && a->build->commit == "a1b2c3d");
+	TEST_EXPECT(b && !b->build);
+	fs::remove(build_0);
+	rig.clock_ms += hostd::Agent::kStatsIntervalMs;
+	rig.step();
+	TEST_EXPECT(!rig.service.reported("srv-1-g1")->build);
+	fs::remove(build_1);
+	TEST_EXPECT(hostd::parse_serve_build("{\"version\":\"0.0.22\",\"commit\":\"\"}\n") &&
+			!hostd::parse_serve_build("{\"version\":\"0.0.22\"}"));
+
 	// An exit: its --exit-file line rides the report; one that exited 0 wrote none,
 	// and a link in the file's place (to a file root may read) gives no line.
 	std::ofstream(rig.slots_root + "/slot-0/exit.txt")

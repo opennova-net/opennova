@@ -2,9 +2,10 @@
 // hand-stepped clock: a minute of 62.5 Hz frames summed up as their p50, p99 and longest frame
 // time and the late frames (a frame that starts past its own end's deadline), nothing before the
 // minute is out, the window starting over after it; the nearest-rank quantile; the
-// --stats-file's JSON line, the --exit-file's one line and the --second-listing-file's JSON line
-// in each state; and the four flags on the command line (--status-page on|off, --stats-file,
-// --exit-file, --second-listing-file).
+// --stats-file's JSON line, the --exit-file's one line, the --second-listing-file's JSON line
+// in each state and the --build-file's JSON line; and the flags on the command line
+// (--status-page on|off, --stats-file, --exit-file, --second-listing-file, --build-file, and
+// --version, which needs nothing a run does).
 
 #include "run_reports.h"
 #include "server.h"
@@ -154,7 +155,17 @@ void files() {
 	CHECK(serve::exit_file_text("the session ended: map\r\nB did\tnot boot") ==
 			"the session ended: map  B did not boot\n");
 	CHECK(serve::exit_file_text("") == "\n");
-	std::printf("  the --stats-file line and the --exit-file line\n");
+	// The build the server runs: ONE's version (a staging build's run number among it) and its
+	// commit's short sha, none for a build that names none.
+	OneBuild build;
+	build.version = *Version::parse("0.0.22.123");
+	build.commit = "a1b2c3d";
+	build.staging = true;
+	CHECK(serve::build_file_json(build) == "{\"version\":\"0.0.22.123\",\"commit\":\"a1b2c3d\"}\n");
+	build.version = *Version::parse("0.0.22");
+	build.commit.clear();
+	CHECK(serve::build_file_json(build) == "{\"version\":\"0.0.22\",\"commit\":\"\"}\n");
+	std::printf("  the --stats-file line, the --exit-file line and the --build-file line\n");
 }
 
 void second_listing_lines() {
@@ -207,16 +218,18 @@ void flags() {
 	std::string error;
 	CHECK(serve::parse_serve_options(base, defaults, error) == 0);
 	CHECK(defaults.status_page && defaults.stats_file.empty() && defaults.exit_file.empty() &&
-			defaults.second_listing_file.empty());
+			defaults.second_listing_file.empty() && defaults.build_file.empty() &&
+			!defaults.print_version);
 
 	std::vector<std::string> args = base;
 	args.insert(args.end(),
 			{ "--status-page", "off", "--stats-file", "tick-stats.json", "--exit-file", "exit.txt",
-					"--second-listing-file", "second-listing.json" });
+					"--second-listing-file", "second-listing.json", "--build-file", "build.json" });
 	serve::ServeOptions hosted;
 	CHECK(serve::parse_serve_options(args, hosted, error) == 0);
 	CHECK(!hosted.status_page && hosted.stats_file == "tick-stats.json" &&
-			hosted.exit_file == "exit.txt" && hosted.second_listing_file == "second-listing.json");
+			hosted.exit_file == "exit.txt" && hosted.second_listing_file == "second-listing.json" &&
+			hosted.build_file == "build.json" && !hosted.print_version);
 
 	args = base;
 	args.insert(args.end(), { "--status-page", "on" });
@@ -230,16 +243,30 @@ void flags() {
 		CHECK(serve::parse_serve_options(args, refused, error) == 1);
 		CHECK(error == "--status-page takes on or off");
 	}
-	for (const char *flag :
-			{ "--status-page", "--stats-file", "--exit-file", "--second-listing-file" }) {
+	for (const char *flag : { "--status-page", "--stats-file", "--exit-file",
+				 "--second-listing-file", "--build-file" }) {
 		args = base;
 		args.push_back(flag);
 		serve::ServeOptions refused;
 		CHECK(serve::parse_serve_options(args, refused, error) == 1);
 		CHECK(error == std::string(flag) + " needs a value");
 	}
+	// --version needs no /HOST and no --resource-dir; what else it is given still parses (the
+	// game its line names), and a bad value of it is still refused.
+	serve::ServeOptions version;
+	CHECK(serve::parse_serve_options({ "--version" }, version, error) == 0 &&
+			version.print_version && version.resource_dir.empty() && version.host_file.empty());
+	serve::ServeOptions version_of_game;
+	CHECK(serve::parse_serve_options(
+				  { "--resource-dir", "/opt/game", "/game", "dfx2", "--version" }, version_of_game,
+				  error) == 0 &&
+			version_of_game.print_version && version_of_game.resource_dir == "/opt/game" &&
+			version_of_game.game == "dfx2");
+	serve::ServeOptions version_refused;
+	CHECK(serve::parse_serve_options({ "--version", "--lan-port", "x" }, version_refused, error) ==
+			1);
 	std::printf("  the command line: --status-page on|off, --stats-file, --exit-file, "
-				"--second-listing-file\n");
+				"--second-listing-file, --build-file, --version\n");
 }
 
 } // namespace

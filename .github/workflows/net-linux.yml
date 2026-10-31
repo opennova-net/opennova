@@ -190,7 +190,7 @@ jobs:
         if: inputs.run-tests
         run: |
           ctest --test-dir build --output-on-failure --parallel "$(nproc)" -R \
-            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|child_process|admin_protocol|session_hello_roundtrip|nw_codec_identity|nw_self_capture|nwmsg_replay|nwmsg_codec_parity|mission_kernel|mission_kernel_lifecycle|host_role|inspect|terrain_field_store|opennova_serve_lan_join|opennova_serve_game_cfg|serve_registration_parity|nwu_demux|opennova_serve_lister_options|opennova_serve_run_reports|npruntime_host_file|npruntime_host_config|opennova_serve_status_console|opennova_serve_admin|npruntime_server_log_recorder|npruntime_punt_log|sha256|os_random|nwu_lobby_draws|opennova_hostd_runtime|opennova_hostd_tree_store|opennova_hostd_agent)$"
+            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|child_process|admin_protocol|session_hello_roundtrip|nw_codec_identity|nw_self_capture|nwmsg_replay|nwmsg_codec_parity|mission_kernel|mission_kernel_lifecycle|host_role|inspect|terrain_field_store|opennova_serve_lan_join|opennova_serve_game_cfg|serve_registration_parity|nwu_demux|opennova_serve_lister_options|opennova_serve_run_reports|opennova_serve_version|npruntime_host_file|npruntime_host_config|opennova_serve_status_console|opennova_serve_admin|npruntime_server_log_recorder|npruntime_punt_log|sha256|os_random|nwu_lobby_draws|opennova_hostd_runtime|opennova_hostd_tree_store|opennova_hostd_agent)$"
 
       - name: sccache stats
         if: always()

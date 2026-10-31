@@ -70,8 +70,9 @@
           <RouterLink :to="row.to" class="entity-link min-w-0 break-words font-semibold"><GameText :text="serverName(row.serverName)" /></RouterLink>
           <span class="shrink-0 font-mono text-sm">{{ row.players }} / {{ row.maxPlayers }}<span class="sr-only"> players</span></span>
         </div>
-        <p v-if="row.gameName || row.source" class="text-xs text-ink-muted">
-          {{ row.gameName }}<template v-if="row.source"> · {{ sourceName(row) }}</template>
+        <p v-if="row.gameName || row.source || row.build" class="text-xs text-ink-muted">
+          {{ row.gameName }}<template v-if="row.source"> · {{ sourceName(row) }}</template
+          ><template v-if="row.build"> · <BuildText :build="row.build" class="server-build" /></template>
         </p>
         <p class="break-words text-sm text-ink-muted">
           <GameText :text="row.mission || 'Mission not reported'" /><span v-if="row.gameType"> · <GameText :text="row.gameType" /></span>
@@ -120,8 +121,9 @@
                 <span v-else-if="row.locked" class="badge">Locked</span>
                 <span v-if="row.punkBuster" class="badge">PunkBuster</span>
               </span>
-              <span v-if="row.gameName || row.source" class="mt-1 block text-xs font-normal text-ink-muted">
-                {{ row.gameName }}<template v-if="row.source"> · {{ sourceName(row) }}</template>
+              <span v-if="row.gameName || row.source || row.build" class="mt-1 block text-xs font-normal text-ink-muted">
+                {{ row.gameName }}<template v-if="row.source"> · {{ sourceName(row) }}</template
+                ><template v-if="row.build"> · <BuildText :build="row.build" class="server-build" /></template>
               </span>
             </th>
             <td>
@@ -143,9 +145,11 @@
 // alike: each row opens its server's page; the headers sort (most players
 // first until one is picked); a search, a game type and three switches filter.
 // Names, missions and game types draw in the game's markup and sort and match
-// by their visible text (utils/gameText.ts).
+// by their visible text (utils/gameText.ts). A row whose server's ONE build is
+// known (one NovaWorld hosts) names it under the server's name.
 import { computed, ref, useId } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
+import BuildText from './BuildText.vue';
 import GameText from './GameText.vue';
 import TableState from './ui/TableState.vue';
 import { serverName } from '../utils/games';

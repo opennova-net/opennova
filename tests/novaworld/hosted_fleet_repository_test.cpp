@@ -765,6 +765,27 @@ int test_slots() {
 		read = hosted::slot_report_of(db, a);
 		TEST_EXPECT(read && !read->second_listing);
 	}
+	// Its server's ONE build: kept as reported (a commit of none too), and gone again with a
+	// report that carries none.
+	{
+		hosted::ContainerReport built =
+				report("srv-" + std::to_string(a) + "-g1", 0, hosted::ContainerState::Running, 777);
+		TEST_EXPECT(!hosted::slot_report_of(db, a)->build);
+		built.build = hosted::ServeBuild{ "0.0.22.123", "a1b2c3d" };
+		TEST_EXPECT(hosted::record_sync(db, shared.id, "v1", { built }));
+		auto read = hosted::slot_report_of(db, a);
+		TEST_EXPECT(read && read->build && read->build->version == "0.0.22.123" &&
+				read->build->commit == "a1b2c3d");
+		built.build = hosted::ServeBuild{ "0.0.22", "" };
+		TEST_EXPECT(hosted::record_sync(db, shared.id, "v1", { built }));
+		read = hosted::slot_report_of(db, a);
+		TEST_EXPECT(read && read->build && read->build->version == "0.0.22" &&
+				read->build->commit.empty());
+		built.build.reset();
+		TEST_EXPECT(hosted::record_sync(db, shared.id, "v1", { built }));
+		read = hosted::slot_report_of(db, a);
+		TEST_EXPECT(read && !read->build);
+	}
 
 	// Placement reads every live machine with the slots its live servers hold.
 	const hosted::CreatedMachine own =
