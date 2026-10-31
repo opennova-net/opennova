@@ -85,6 +85,10 @@ const ActionRow kRowsTail[] = {
 	// F7; the value is replaced by the fire's sign (fire_signed) when the row fires.
 	// [orig: row 51 = dispatch 23 @0x49b3de]
 	{"NextWaypoint", {Action::WaypointCycle, 1}, kActive},
+	// dfx2.exe's 1st Person Toggle, F1 (code 412, flags 0x0C000801: the head drops it for a dead
+	// player, under the pause word and the round-over gate). Jointops.exe carries no such row.
+	// [orig: row 108 @0x817630; Input_HandleActionBinding @0x49AD50 case 412 @0x49c107 (dfx2.exe)]
+	{"viewtoggle", {Action::ViewToggle}, kActive},
 };
 
 // The weapon row a catalog row is, if any: a code 200..210 requests its category.

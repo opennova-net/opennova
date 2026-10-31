@@ -112,6 +112,9 @@ enum class PlayerAction {
 	// [orig: Input_HandleActionBinding @0x49AD40 - case 12 @0x49B024 (its Input_ResetAllState
 	//  @0x49B042), case 18 @0x49B234 (Player_ResetLocalInput)]
 	EmbedderRow,
+	// dfx2.exe's 1st Person Toggle row (viewtoggle, code 412): the view toggle the embedder
+	// applies (world::player_view_apply_view_action) past the head.
+	ViewToggle,
 };
 
 // The arm a frame's held USE takes, as the embedder's press latch decides it

@@ -212,6 +212,7 @@ struct SimulationConstants {
 		VIEW_ACTION_FIRST_PERSON = opennova::world::kViewActionFirstPerson,
 		VIEW_ACTION_WITH_GUN = opennova::world::kViewActionWithGun,
 		VIEW_ACTION_CHASE = opennova::world::kViewActionChase,
+		VIEW_ACTION_TOGGLE = opennova::world::kViewActionToggle,
 	};
 
 	// The equipped-weapon FSM action ids, re-exported with the engine's values

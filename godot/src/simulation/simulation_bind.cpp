@@ -266,6 +266,7 @@ void Simulation::_bind_methods() {
 	BIND_CONSTANT(VIEW_ACTION_FIRST_PERSON);
 	BIND_CONSTANT(VIEW_ACTION_WITH_GUN);
 	BIND_CONSTANT(VIEW_ACTION_CHASE);
+	BIND_CONSTANT(VIEW_ACTION_TOGGLE);
 	ClassDB::bind_method(D_METHOD("set_local_player_debug_third_person", "enabled"), &Simulation::set_local_player_debug_third_person);
 	ClassDB::bind_method(D_METHOD("get_local_player_view"), &Simulation::get_local_player_view);
 	ClassDB::bind_method(D_METHOD("present_local_player_view"), &Simulation::present_local_player_view);

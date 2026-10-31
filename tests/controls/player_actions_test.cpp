@@ -1226,6 +1226,11 @@ bool test_title_weapon_rows() {
 	const PlayerActionFrame pressed = poll_frame(held, mouse, kLive);
 	CHECK(pressed.requests.size() == 1 && pressed.requests[0].action == Action::WeaponCategory &&
 			pressed.requests[0].value == 4 && pressed.requests[0].code == 204);
+	// dfx2.exe's 1st Person Toggle (code 412) is the view toggle's record; Jointops.exe has no
+	// row for it [orig: row 108 @0x817630 (dfx2.exe)].
+	const auto toggle = player_action_request(dfx2, InputEventRecord{412, 0, 0, 0, false});
+	CHECK(toggle && toggle->action == Action::ViewToggle && toggle->code == 412);
+	CHECK(!player_action_request(jo, InputEventRecord{412, 0, 0, 0, false}));
 	return true;
 }
 

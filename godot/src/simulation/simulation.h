@@ -1411,7 +1411,7 @@ public:
 	// bit (engine: world/player_view.h player_view_apply_view_action); the
 	// camera mode itself is RESOLVED per tick by the arbiter from the
 	// preference and the seat (player_view_resolve_mode).
-	void apply_local_player_view_action(int p_action);
+	bool apply_local_player_view_action(int p_action);
 	// The debug menu's on-foot third person — stock JO never resolves it
 	// (net-re §5.39, the onhook debug affordance); never a gameplay key.
 	void set_local_player_debug_third_person(bool p_enabled);

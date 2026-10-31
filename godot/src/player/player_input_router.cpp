@@ -159,6 +159,7 @@ void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActi
 		case Action::UseItem: break;
 		// The router's own records (PlayerInputRouter::dispatch_record): never handed here.
 		case Action::EmbedderRow: break;
+		case Action::ViewToggle: break;
 	}
 }
 
@@ -491,6 +492,18 @@ void PlayerInputRouter::dispatch_record(const opennova::controls::InputEventReco
 	}
 	if (const auto request =
 					opennova::controls::player_action_request(catalog_of(controls_), p_record)) {
+		// The 1st Person Toggle past the head: its first-person arm turns the FP gun bit on, the
+		// HUD toggles' flag, which the presenter pushes on the event (engine world/player_view.h
+		// player_view_apply_view_action carries the witness).
+		if (request->action == opennova::controls::PlayerAction::ViewToggle) {
+			if (record_sim->action_head_admits(request->code) &&
+					record_sim->apply_local_player_view_action(Simulation::VIEW_ACTION_TOGGLE) &&
+					hud_toggles_.is_valid()) {
+				hud_toggles_->mutable_state().showhud_flags |= opennova::hud::kShowHudFlagGun;
+				hud_toggle_events_.push_back(HudToggles::EVENT_GUN_BIT_CHANGED);
+			}
+			return;
+		}
 		apply_player_action(*record_sim.ptr(), *request);
 		return;
 	}
