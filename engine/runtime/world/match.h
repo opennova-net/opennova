@@ -339,7 +339,9 @@ enum class MatchGameplayEventKind : uint8_t {
 
 // A semantic objective transition plus the exact entity-state snapshot the
 // wire layer needs after the transition. Captured CTF flags can be gone
-// from the registry by the time the binding drains this record.
+// from the registry by the time the binding drains this record. A FlagCapture
+// record is the capture's 0x13 feed (and CTF's removal) alone: a non-CTF
+// capture's drop and definition-pose sync raise their own FlagDrop records.
 struct MatchGameplayEvent {
     MatchGameplayEventKind kind = MatchGameplayEventKind::FlagPickup;
     EntityHandle actor;
@@ -398,7 +400,7 @@ class Match {
     // its 0x2F state; one displaced further snaps home, takes the entity a
     // downward ray meets as its ground, rebuilds its proximity list and
     // publishes. Returns true only for the snap. Its callers: the 1 Hz
-    // carry-limit break and the own-flag arms.
+    // carry-limit break, the own-flag arms and a non-CTF capture.
     // [orig: Entity_SyncPositionFromDefinition @0x43A9B0 — equality return
     //  @0x43a9f8, near path @0x43aa3b..0x43aa7c, snap + ground raycast +
     //  send @0x43aa7d..0x43ab40]

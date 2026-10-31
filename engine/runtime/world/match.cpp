@@ -765,37 +765,38 @@ void Match::record_flag_capture(World &world, EntityHandle player_handle,
         add_team_record_event(1, MatchStats::kFlagCaptures, score_value(10));
     else if (flag->item_id == kNeutralFlag)
         add_team_event(carrier->team, MatchStats::kFlagCaptures, score_value(10));
-    const EntityPosition capture_position = flag->position;
-    const uint8_t flags_before = static_cast<uint8_t>(flag->flags);
-    carrier->mounted_child = EntityHandle{};
-    flag->primary_occupant = EntityHandle{};
+    // The 0x13 feed at the flag's words as the capture finds them; then CTF
+    // retires the flag (its 0x12; the destroy clears the occupant's carried
+    // link), and every other type drops it at the carrier (the drop's 0x2F) and
+    // syncs it to its definition pose (the sync's 0x2F, the heading and the
+    // ground with it). The capture itself sends no 0x2F.
+    // [orig: Server_ProcessScoringAndBroadcast @0x5169C0 - GameEvent_ProcessScoring
+    //  event 9 @0x5169E3, the 0x13 at the flag's +4/+8 @0x5169F5..0x516A37, the CTF
+    //  test @0x516A3C, Server_RemoveEntityAndNotify @0x516A49,
+    //  Entity_DropCarriedObject @0x516A55, Entity_SyncPositionFromDefinition @0x516A5B;
+    //  Entity_Destroy @0x43E9F1..0x43EA03]
+    // [orig: the twin's @0x513C10 - the CTF test @0x513C8C, the drop @0x513CA5, the
+    //  sync @0x513CAB (dfx2.exe)]
     const bool remove = rules_.game_type == gt::kCaptureTheFlag;
-    MatchGameplayEvent event{MatchGameplayEventKind::FlagCapture,
-                             player_handle,
-                             flag_handle,
-                             capture_position,
-                             capture_position,
-                             flags_before,
-                             EntityHandle{},
-                             flag->ground_target,
-                             remove,
-                             static_cast<uint16_t>(flag->item_id)};
+    gameplay_events_.push_back({MatchGameplayEventKind::FlagCapture,
+                                player_handle,
+                                flag_handle,
+                                flag->position,
+                                flag->position,
+                                static_cast<uint8_t>(flag->flags),
+                                EntityHandle{},
+                                flag->ground_target,
+                                remove,
+                                static_cast<uint16_t>(flag->item_id)});
     if (remove) {
+        if (Entity *occupant = world.registry.get(flag->primary_occupant);
+            occupant != nullptr && occupant->mounted_child == flag_handle)
+            occupant->mounted_child = EntityHandle{};
         world.registry.despawn(flag_handle);
-    } else {
-        CarryObjectiveState *state = carry_state(world, flag_handle);
-        if (state != nullptr) {
-            flag = world.registry.get(flag_handle);
-            flag->flags &= ~kEntityFlagCarried;
-            flag->position = state->home;
-            flag->ground_target = EntityHandle{};
-            state->return_ticks = 0;
-            event.objective_position = flag->position;
-            event.objective_flags = static_cast<uint8_t>(flag->flags);
-            event.ground = flag->ground_target;
-        }
+        return;
     }
-    gameplay_events_.push_back(event);
+    drop_carried_object(world, player_handle);
+    sync_flag_to_authored_pose(world, flag_handle);
 }
 
 void Match::record_target_destroyed(const World &world, EntityHandle target_handle,

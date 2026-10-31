@@ -1240,12 +1240,18 @@ void test_flag_me_keeps_retails_unreachable_score_arm() {
     CHECK(world->match.player(victim)->stats[MatchStats::kDeaths] == 0);
     CHECK(!world->match.winner_if_finished(*world).has_value());
 
+    // The capture's feed record, then its drop's and its sync's 0x2F lanes.
+    // [orig: Server_ProcessScoringAndBroadcast @0x516A37 / @0x516A55 / @0x516A5B]
     const std::vector<MatchGameplayEvent> events =
         world->match.drain_gameplay_events();
-    CHECK(events.size() == 2);
-    CHECK(events[0].kind == MatchGameplayEventKind::FlagPickup);
-    CHECK(events[1].kind == MatchGameplayEventKind::FlagCapture);
-    CHECK(!events[1].remove_objective);
+    CHECK(events.size() == 4);
+    if (events.size() == 4) {
+        CHECK(events[0].kind == MatchGameplayEventKind::FlagPickup);
+        CHECK(events[1].kind == MatchGameplayEventKind::FlagCapture);
+        CHECK(!events[1].remove_objective);
+        CHECK(events[2].kind == MatchGameplayEventKind::FlagDrop);
+        CHECK(events[3].kind == MatchGameplayEventKind::FlagDrop);
+    }
 
     // The retail win check still reads raw capture field 12; the ordinary
     // scorer simply has no valid row capable of incrementing it.
@@ -1922,14 +1928,83 @@ void test_flagball_four_team_bays_consume_exact_contacts() {
 
     const std::vector<MatchGameplayEvent> events =
         world->match.drain_gameplay_events();
-    CHECK(events.size() == 4);
-    if (events.size() == 4) {
-        CHECK(events[0].kind == MatchGameplayEventKind::FlagPickup);
-        CHECK(events[1].kind == MatchGameplayEventKind::FlagCapture);
-        CHECK(events[2].kind == MatchGameplayEventKind::FlagPickup);
-        CHECK(events[3].kind == MatchGameplayEventKind::FlagCapture);
-        CHECK(!events[1].remove_objective && !events[3].remove_objective);
+    // Each capture: its feed record, then the drop's and the sync's 0x2F lanes.
+    CHECK(events.size() == 8);
+    if (events.size() == 8) {
+        for (const size_t side : {size_t{0}, size_t{4}}) {
+            CHECK(events[side].kind == MatchGameplayEventKind::FlagPickup);
+            CHECK(events[side + 1].kind == MatchGameplayEventKind::FlagCapture);
+            CHECK(!events[side + 1].remove_objective);
+            CHECK(events[side + 2].kind == MatchGameplayEventKind::FlagDrop);
+            CHECK(events[side + 3].kind == MatchGameplayEventKind::FlagDrop);
+        }
     }
+}
+
+// A non-CTF capture drops the flag at its carrier and syncs it to its
+// definition pose: after the capture's own feed record (the flag's words as
+// carried), the drop's 0x2F lane (the carrier's X/Y, its Z + 0x4000, no
+// parent, the carried bit clear) and the sync's (home, no parent); the flag
+// ends at home with its authored heading and the drop's fall installed.
+// [orig: Server_ProcessScoringAndBroadcast @0x5169C0 - the 0x13 @0x516A37,
+//  Entity_DropCarriedObject @0x516A55 (the pose @0x439E9F..0x439EC3, the fall
+//  @0x439E95), Entity_SyncPositionFromDefinition @0x516A5B (the snap
+//  @0x43AA7D..0x43AA96)]
+// [orig: the twin's @0x513CA5 / @0x513CAB (dfx2.exe)]
+void test_non_ctf_capture_drops_the_flag_then_syncs_it_home() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 4);
+    world->registry.configure_pool(1, 8);
+    WaypointContactHarness contacts(*world);
+    MatchRules flag_ball;
+    flag_ball.game_type = gt::kFlagBall;
+    flag_ball.max_score = 99;
+    world->match.configure(flag_ball);
+    const EntityHandle carrier = player(*world, 0, 1, "Blue");
+    Entity *carrier_entity = world->registry.get(carrier);
+    carrier_entity->net_move_input = Entity::kMoveOrderMoving;
+    const EntityHandle flag = objective(*world, 4095, 0, {0.0f, 0.0f, 0.0f});
+    const EntityHandle bay = objective(*world, 4098, 1, {20.0f, 0.0f, 0.0f});
+    contacts.bind(flag);
+    contacts.bind(bay);
+    const int32_t home_heading = world->registry.get(flag)->heading;
+
+    contacts.touch(*world, carrier, flag);
+    run_match_frame(*world);
+    CHECK(carrier_entity->mounted_child == flag);
+    (void)world->match.drain_gameplay_events();
+    const EntityPosition carried_at = world->registry.get(flag)->position;
+    contacts.touch(*world, carrier, bay);
+    run_match_frame(*world);
+    CHECK(!carrier_entity->mounted_child.valid());
+    const EntityPosition carrier_at = carrier_entity->position;
+    const std::vector<MatchGameplayEvent> events = world->match.drain_gameplay_events();
+    CHECK(events.size() == 3);
+    if (events.size() == 3) {
+        CHECK(events[0].kind == MatchGameplayEventKind::FlagCapture);
+        CHECK(!events[0].remove_objective);
+        CHECK(events[0].position.x.q16 == carried_at.x.q16 &&
+              events[0].position.y.q16 == carried_at.y.q16);
+        CHECK(events[1].kind == MatchGameplayEventKind::FlagDrop);
+        CHECK(events[1].objective_position.x.q16 == carrier_at.x.q16 &&
+              events[1].objective_position.y.q16 == carrier_at.y.q16 &&
+              events[1].objective_position.z.q16 == carrier_at.z.q16 + 0x4000);
+        CHECK(!events[1].parent.valid());
+        CHECK((events[1].objective_flags & kEntityFlagCarried) == 0);
+        CHECK(events[2].kind == MatchGameplayEventKind::FlagDrop);
+        CHECK(events[2].objective_position.x.q16 == 0 &&
+              events[2].objective_position.y.q16 == 0 &&
+              events[2].objective_position.z.q16 == 0);
+        CHECK(!events[2].parent.valid());
+    }
+    const Entity *home = world->registry.get(flag);
+    CHECK(home != nullptr);
+    if (home == nullptr)
+        return;
+    CHECK(home->position.x.q16 == 0 && home->position.y.q16 == 0 && home->position.z.q16 == 0);
+    CHECK(home->heading == home_heading && home->veh.yaw_bam == home_heading);
+    CHECK(home->drop_motion == DropMotion::Fall);
+    CHECK(!home->primary_occupant.valid() && (home->flags & kEntityFlagCarried) == 0);
 }
 
 void test_cac_combines_flag_and_zone_objectives() {
@@ -1973,10 +2048,12 @@ void test_cac_combines_flag_and_zone_objectives() {
 
     const std::vector<MatchGameplayEvent> events =
         world->match.drain_gameplay_events();
-    CHECK(events.size() == 2);
-    if (events.size() >= 2) {
+    CHECK(events.size() == 4);
+    if (events.size() == 4) {
         CHECK(events[0].kind == MatchGameplayEventKind::FlagPickup);
         CHECK(events[1].kind == MatchGameplayEventKind::FlagCapture);
+        CHECK(events[2].kind == MatchGameplayEventKind::FlagDrop);
+        CHECK(events[3].kind == MatchGameplayEventKind::FlagDrop);
     }
 }
 
@@ -2385,6 +2462,7 @@ int main() {
     test_entity_update_consumes_its_movement_contacts();
     test_aas_capture_scoring_and_outcomes();
     test_flagball_four_team_bays_consume_exact_contacts();
+    test_non_ctf_capture_drops_the_flag_then_syncs_it_home();
     test_cac_combines_flag_and_zone_objectives();
     test_end_result_is_frozen_in_retail_board_order();
     test_end_round_team_row_count_rule();

@@ -755,6 +755,90 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 			"the carrier dies through the ordinary death transaction");
 }
 
+// A bay capture's records: the 0x13 feed at the carried flag's words, then in
+// CTF the flag's 0x12 removal and no 0x2F; in any other type the drop's 0x2F at
+// the carrier (Z + 0x4000, no parent, the carried bit clear) and the
+// definition-pose sync's 0x2F at home, in that order, and no 0x2F of the
+// capture's own.
+// [orig: Server_ProcessScoringAndBroadcast @0x5169C0 - the 0x13 @0x516A37, the
+//  CTF test @0x516A3C, Server_RemoveEntityAndNotify @0x516A49,
+//  Entity_DropCarriedObject @0x516A55 (its 0x2F @0x439F34),
+//  Entity_SyncPositionFromDefinition @0x516A5B (its 0x2F @0x43AB40)]
+bool check_flag_capture_fans_its_feed_then_the_drop_and_the_sync(uint32_t game_type_value) {
+	const bool ctf = game_type_value == game_type::kCaptureTheFlag;
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	w::MatchRules rules;
+	rules.game_type = game_type_value;
+	world.match.configure(rules);
+	const w::Vec3 carrier_position{30.0f, 40.0f, 2.0f};
+	const w::EntityHandle carrier = w::spawn_remote_player(world,
+			player_spawn(carrier_position.x, carrier_position.y, carrier_position.z));
+	world.match.upsert_player({carrier, 3, "Carrier"});
+	w::Entity flag_seed;
+	flag_seed.kind = w::EntityKind::Item;
+	flag_seed.item_id = 4095;
+	flag_seed.has_item_def = true;
+	flag_seed.alive = true;
+	flag_seed.spawn_position = {5.0f, 6.0f, 2.0f};
+	flag_seed.position = carrier_position;
+	flag_seed.primary_occupant = carrier;
+	flag_seed.flags = w::kEntityFlagCarried;
+	const w::EntityHandle flag = world.registry.spawn(1, flag_seed);
+	world.registry.get(carrier)->mounted_child = flag;
+
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.np_protocol.identity = title_protocol("jo");
+	ctx.config.game_type = game_type_value;
+	ns::UdpSessionTransport remote(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(
+			make_seeded_conn(3, 1, &remote, ns::TransportMode::Client, carrier, true));
+
+	tick_to_periodic_second(ctx);
+	drain(remote);
+	const w::FixedVec3 at_capture = world.registry.get(carrier)->position.q16();
+	world.match.record_flag_capture(world, carrier, flag);
+	inmatch::Server_TickUpdate(ctx); // not a periodic second: no refresh joins them
+	const std::vector<ns::Datagram> sent = drain(remote);
+	int feed_at = -1;
+	int remove_at = -1;
+	int first_state_at = -1;
+	for (size_t i = 0; i < sent.size(); ++i) {
+		const ns::Datagram &d = sent[i];
+		if (d.tag == s2c::GAME_EVENT && d.body == std::vector<uint8_t>{0x13,
+				static_cast<uint8_t>(carrier.slot()), 0xFF, 0xFF, 30, 0, 40, 0})
+			feed_at = static_cast<int>(i);
+		if (d.tag == s2c::ENTITY_REMOVE && remove_at < 0) remove_at = static_cast<int>(i);
+		if (d.tag == s2c::OBJECTIVE_ENTITY_STATE && first_state_at < 0)
+			first_state_at = static_cast<int>(i);
+	}
+	const std::vector<ObjectiveEntityState> states = objective_states(sent);
+	if (ctf) {
+		return expect(feed_at >= 0 && remove_at > feed_at && states.empty() &&
+						world.registry.get(flag) == nullptr &&
+						!world.registry.get(carrier)->mounted_child.valid(),
+				"a CTF capture fans its 0x13 then the flag's 0x12, never a 0x2F");
+	}
+	if (!expect(feed_at >= 0 && first_state_at > feed_at && remove_at < 0,
+			"the capture's 0x13 leads its 0x2F records and no 0x12 follows"))
+		return false;
+	return expect(states.size() == 2 &&
+					states[0].entity_handle == flag.packed && states[0].attach_handle == 0xFFFF &&
+					(states[0].flags_byte & w::kEntityFlagCarried) == 0 &&
+					states[0].pos_x == at_capture.x && states[0].pos_y == at_capture.y &&
+					states[0].pos_z == at_capture.z + 0x4000 &&
+					states[1].entity_handle == flag.packed && states[1].attach_handle == 0xFFFF &&
+					states[1].pos_x == 5 * 65536 && states[1].pos_y == 6 * 65536 &&
+					states[1].pos_z == 2 * 65536 &&
+					!world.registry.get(carrier)->mounted_child.valid(),
+			"a non-CTF capture fans the drop's 0x2F at the carrier, then the sync's at home");
+}
+
 // The flag reset's death is the player body's edge on its Health -1, raised in
 // the same frame's entity update, after the tick's send pump and ahead of the
 // next receive pump (D-NET-550; the edge's own since D-AI-9's org2 half, its
@@ -3784,6 +3868,9 @@ int main() {
 	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kTeamDeathmatch, false) && ok;
 	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kCaptureTheFlag, true,
 			/*uplinked=*/true) && ok;
+	ok = check_flag_capture_fans_its_feed_then_the_drop_and_the_sync(game_type::kFlagBall) && ok;
+	ok = check_flag_capture_fans_its_feed_then_the_drop_and_the_sync(game_type::kCaptureTheFlag) &&
+			ok;
 	ok = check_flag_reset_dies_ahead_of_the_next_pump(c2s::TEAM_CHANGE_REQUEST, false) && ok;
 	ok = check_flag_reset_dies_ahead_of_the_next_pump(c2s::DEATH_TIMEOUT_RESET, false) && ok;
 	ok = check_flag_reset_dies_ahead_of_the_next_pump(c2s::TEAM_CHANGE_REQUEST, true) && ok;
