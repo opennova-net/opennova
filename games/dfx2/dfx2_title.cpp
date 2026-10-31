@@ -182,6 +182,9 @@ Title make() {
 	// DFX2-86: no magnification readout [orig: sub_59CEE0 @0x59CEE0 - the zero readout @0x59D428
 	//  ends it (dfx2.exe)].
 	t.hud_scope_no_magnification = true;
+	// DFX2-84: the crosshair holds still, and no seat swaps it [orig: sub_590A80 @0x590A80 -
+	//  @0x590F7F, the arms @0x590FB0..0x591032 (dfx2.exe)].
+	t.hud_crosshair_fixed = true;
 	return t;
 }
 

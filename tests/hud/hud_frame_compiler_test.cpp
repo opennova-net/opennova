@@ -536,6 +536,49 @@ void test_compiler_crosshair_user_options(const fnt_font_t *font) {
 	}
 	CHECK(same_positions,
 			"spread off collapses to the zero-spread geometry (arms centered)");
+
+	// dfx2.exe's crosshair holds still (DFX2-84): the spread input moves no arm, as the
+	// option's off does [orig: sub_590A80 @0x590A80 - `fmul flt_7C2244` (0.0) @0x590F7F
+	// (dfx2.exe)].
+	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+	const opennova::Title *jo = opennova::title_by_code("jo");
+	CHECK(dfx2 != nullptr && dfx2->hud_crosshair_fixed, "dfx2.exe's crosshair is fixed");
+	CHECK(jo != nullptr && !jo->hud_crosshair_fixed, "Jointops.exe's spreads");
+	HudFrameState held = state;
+	held.title = dfx2;
+	const HudDrawList dfx2_list = compiler.compile(held, 1024.0f, 768.0f);
+	bool dfx2_centered = dfx2_list.tris.size() == spread_off.tris.size();
+	for (size_t i = 0; dfx2_centered && i < dfx2_list.tris.size(); ++i)
+		dfx2_centered = dfx2_list.tris[i].a.x == spread_off.tris[i].a.x &&
+				dfx2_list.tris[i].a.y == spread_off.tris[i].a.y;
+	CHECK(dfx2_centered, "dfx2's spread input leaves the arms centred");
+	held.title = jo;
+	const HudDrawList jo_list = compiler.compile(held, 1024.0f, 768.0f);
+	CHECK(jo_list.tris.size() == 14 && jo_list.tris[0].a.y != spread_off.tris[0].a.y,
+			"JO's spread input moves the arms");
+
+	// In a Controller / Driver seat (camera mode 1) Jointops.exe swaps the driver crosshair in;
+	// dfx2.exe keeps the ordinary one in the user's colour [orig: HUD_DrawCrosshair
+	// @0x592bf8..0x592c2d] [orig: sub_590A80 @0x590A80, no swap (dfx2.exe)].
+	HudLayout seats = layout;
+	seats.combat.driver_crosshair.valid = true;
+	seats.combat.driver_crosshair.width = 32;
+	seats.combat.driver_crosshair.height = 32;
+	compiler.update_layout(seats);
+	HudFrameState seat = state;
+	seat.combat.driver_crosshair = true;
+	seat.title = jo;
+	const HudDrawList jo_seat = compiler.compile(seat, 1024.0f, 768.0f);
+	CHECK(!jo_seat.tris.empty() &&
+					jo_seat.tris[0].texture == opennova::hud::kHudTexDriverCrosshair &&
+					jo_seat.tris[0].color == 0xFF007F00u,
+			"JO's seat draws the driver crosshair");
+	seat.title = dfx2;
+	const HudDrawList dfx2_seat = compiler.compile(seat, 1024.0f, 768.0f);
+	CHECK(!dfx2_seat.tris.empty() && dfx2_seat.tris[0].texture == opennova::hud::kHudTexCrosshair &&
+					dfx2_seat.tris[0].color == 0xFF20FF40u,
+			"dfx2's seat keeps the ordinary crosshair");
+	compiler.update_layout(layout);
 }
 
 // The projected (3P / spectate) anchor: an integer surface pixel through the

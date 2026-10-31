@@ -1480,7 +1480,13 @@ void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
 				state.keep_crosshair_while_aimed)) {
 		return;
 	}
-	if (!(state.combat.driver_crosshair ? layout_.combat.driver_crosshair.valid
+	// dfx2.exe's crosshair holds still and keeps its own record (Title::hud_crosshair_fixed,
+	// DFX2-84): its arms' offset is the projection times 0.0, and no Controller / Driver seat
+	// swaps in the driver record [orig: sub_590A80 @0x590a80 - `fmul flt_7C2244` (0.0)
+	// @0x590f7f, the arms @0x590fb0..0x591032 (dfx2.exe)].
+	const bool fixed = state.title != nullptr && state.title->hud_crosshair_fixed;
+	const bool driver = state.combat.driver_crosshair && !fixed;
+	if (!(driver ? layout_.combat.driver_crosshair.valid
 										: layout_.crosshair_texture_valid)) {
 		return;
 	}
@@ -1507,15 +1513,15 @@ void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
 	// Spread off zeroes the offset and still draws all five arms
 	// [orig: the g_cfgCrossHairSpread arm @ 0x592b82; the disabled fldz
 	// @ 0x592bcc].
-	const float spread = layout_.crosshair_spread_enabled && !state.combat.driver_crosshair
+	const float spread = layout_.crosshair_spread_enabled && !driver && !fixed
 			? static_cast<float>(crosshair_spread_px_fp16(
 					state.hud_spread_fp16, state.fov_deg, w))
 			: 0.0f;
 
-    const int half_w = (state.combat.driver_crosshair ? layout_.combat.driver_crosshair.width
+    const int half_w = (driver ? layout_.combat.driver_crosshair.width
 													  : layout_.crosshair_tex_w) /
 			2;
-	const int half_h = (state.combat.driver_crosshair ? layout_.combat.driver_crosshair.height
+	const int half_h = (driver ? layout_.combat.driver_crosshair.height
 													  : layout_.crosshair_tex_h) /
 			2;
 	constexpr float uv[5][5][2] = { { { 0, 0 }, { .45f, .45f }, { .5f, 0 }, { .55f, .45f },
@@ -1597,10 +1603,10 @@ void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
 			// The decompiler mislabeled RHW as diffuse and diffuse as specular.
 			// Color is diffuse; specular is zero. [orig: @0x5914CC..0x591500;
 			// GDynamicVB_DrawPrimitive SetFVF @0x678962 / @0x678A3E]
-			tri.color = state.combat.driver_crosshair ? 0xFF007F00u
+			tri.color = driver ? 0xFF007F00u
 					: state.combat.hit_feedback		  ? 0xFFFF5050u
 													  : layout_.crosshair_color;
-			tri.texture = state.combat.driver_crosshair ? kHudTexDriverCrosshair : kHudTexCrosshair;
+			tri.texture = driver ? kHudTexDriverCrosshair : kHudTexCrosshair;
 			draw_list_.tris.push_back(tri);
 		}
 	}

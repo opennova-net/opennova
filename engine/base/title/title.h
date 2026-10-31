@@ -228,6 +228,15 @@ struct Title {
 	// [orig: HUD_DrawScopeOverlayDetails @0x59E420 (the readout @0x59E97C..0x59E9F6)]
 	// [orig: sub_59CEE0 @0x59CEE0 (dfx2.exe) - the zero readout @0x59D428 ends it]
 	bool hud_scope_no_magnification = false;
+	// DFX2-84: the crosshair's arms hold still and a Controller / Driver seat keeps the ordinary
+	// crosshair: Jointops.exe spreads the arms by the weapon's ERROR row for the stance (prone,
+	// crouched, standing; 2 in the air, the water or on a ladder, 1 mounted) plus the recoil
+	// words, and in camera mode 1 swaps a Controller / Driver seat to the driver crosshair, its
+	// arms closed, in half-bright palette 1.
+	// [orig: HUD_DrawCrosshair @0x592640 (the spread @0x592b25..0x592bf5, the seat swap
+	//  @0x592bf8..0x592c2d)] [orig: sub_590A80 @0x590A80 (dfx2.exe) - the projection times
+	//  flt_7C2244 (0.0) @0x590F7F, no seat swap]
+	bool hud_crosshair_fixed = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

@@ -48,6 +48,7 @@ Title make() {
 	t.hud_map_cycle_skips_window = jo_title().hud_map_cycle_skips_window;
 	t.hud_kill_list_no_class = jo_title().hud_kill_list_no_class;
 	t.hud_scope_no_magnification = jo_title().hud_scope_no_magnification;
+	t.hud_crosshair_fixed = jo_title().hud_crosshair_fixed;
 	return t;
 }
 
