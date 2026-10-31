@@ -1804,9 +1804,24 @@ void test_view_actions_write_their_input_bits() {
     CHECK(!v.third_person_selected);
     player_view_apply_view_action(v, nullptr, kViewActionChase);
     CHECK(v.third_person_selected);
-    player_view_apply_view_action(v, &bits, 412);
+    CHECK(!player_view_apply_view_action(v, &bits, 411));
     CHECK(bits == (0x10000000u | 0x8000000u | 0x4000000u));
-    CHECK(v.third_person_selected);
+    // The 1st Person Toggle (412, dfx2.exe's F1): the third-person bit set -> both cleared, the
+    // cockpit bit set, first person, the FP gun bit on; else both cleared, the third-person bit
+    // set, the chase. The first-person bit stays.
+    // [orig: case 412 @0x49c09a..0x49c0c8] [orig: @0x49c107..0x49c135 (dfx2.exe)]
+    CHECK(player_view_apply_view_action(v, &bits, kViewActionToggle));
+    CHECK(bits == (0x10000000u | 0x4000000u) && !v.third_person_selected);
+    CHECK(!player_view_apply_view_action(v, &bits, kViewActionToggle));
+    CHECK(bits == (0x8000000u | 0x4000000u) && v.third_person_selected);
+    CHECK(player_view_apply_view_action(v, &bits, kViewActionToggle));
+    CHECK(bits == (0x10000000u | 0x4000000u) && !v.third_person_selected);
+    // A first-person pick after a chase leaves the third-person bit, so the toggle takes the
+    // first-person arm again.
+    player_view_apply_view_action(v, &bits, kViewActionChase);
+    player_view_apply_view_action(v, &bits, kViewActionFirstPerson);
+    CHECK(player_view_apply_view_action(v, &bits, kViewActionToggle) && !v.third_person_selected);
+    CHECK(player_view_apply_view_action(v, &bits, kViewActionWithGun));
 }
 
 int main() {

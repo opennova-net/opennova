@@ -116,6 +116,8 @@ void HostRole::reset_session(bool serve_and_play) {
 	ctx.nwu_player_removed = &client_process_->nwu_player_removed;
 	ctx.file_transfer_session = &client_process_->file_transfer_session;
 	ctx.punt_crc_counters = &client_process_->punt_crc_counters;
+	// A host start clears the map change's state, the kept clock's latch with it
+	// [orig: UI_HandleHostSessionStart @0x556D00 - dword_24D5A0C = 0 @0x556DD1].
 	map_change = HostMapChange{};
 }
 
@@ -164,7 +166,7 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	// authority then ORs the scope-zero bit 0x10000 into the word, in a session or out
 	// (DFX2-18) [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51b89e (dfx2.exe)].
 	const uint32_t rules_word = (in_session ? config.mp_attributes : GameConfig::kSpRulesWord) |
-			protocol_in_match(protocol).rules_word_bits;
+			protocol_in_match(protocol).s2c_64.rules_word_bits;
 	kernel.world.rules.mpattrib = rules_word;
 	kernel.world.rules.hit_feedback = config.hit_feedback;
 	kernel.world.rules.auto_scope_zero =
@@ -194,9 +196,11 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	//  restart's start (Game_RestartRoundSP pushes 1 @0x5263D9)].
 	// The restart's spawn raises read the word the previous start left: the same mission's
 	// mission-start word (D-PWR-8) [orig: Game_StartMission - the 0 @0x525CDD, the objective
-	//  Co-op's -1 @0x525CFA].
+	//  Co-op's -1 @0x525CFA]; dfx2.exe's start leaves the profile's (DFX2-28) [orig:
+	//  Game_StartMission @0x521530 - nothing between @0x522EA9 and @0x522EAE (dfx2.exe)].
 	if (!kernel.world.rules.mp_session)
-		kernel.world.rules.difficulty = kernel.restart_boot()
+		kernel.world.rules.difficulty =
+				kernel.restart_boot() && config.title_rules().mission_start_sets_difficulty
 				? world::mission_start_difficulty(config.game_type)
 				: config.profile_difficulty;
 }
@@ -297,8 +301,10 @@ GameConfig singleplayer_game_config(const Title &title, uint32_t game_type,
 	// mp_difficulty, host_config.cpp). Our SP stream queues at the bring-up,
 	// ahead of the mission start [orig: Game_StartMission @0x525CDD / @0x525CFA;
 	// ServerConfig_SerializeToPacket's live read @0x505D1C, from
-	// Server_SendPlayerSlotStateFrame @0x51BF95 in Server_TickUpdate].
-	config.config_bytes[6] = static_cast<uint8_t>(world::mission_start_difficulty(game_type));
+	// Server_SendPlayerSlotStateFrame @0x51BF95 in Server_TickUpdate]. dfx2.exe's start leaves
+	// the profile's word, so its byte is that (DFX2-28) [orig: Game_StartMission @0x521530 -
+	// nothing between @0x522EA9 and @0x522EAE; ServerConfig_SerializeToPacket @0x502E4C
+	// (dfx2.exe)].
 	if (profile != nullptr) {
 		// Outside a session the restriction words come from the current
 		// profile record: +0x548 -> g_SessionNoCharAbilities, +0x54C ->
@@ -317,6 +323,9 @@ GameConfig singleplayer_game_config(const Title &title, uint32_t game_type,
 		config.no_scope_drift = profile->sp_no_scope_drift;
 		config.profile_difficulty = profile->sp_difficulty;
 	}
+	config.config_bytes[6] = static_cast<uint8_t>(config.title_rules().mission_start_sets_difficulty
+			? world::mission_start_difficulty(game_type)
+			: config.profile_difficulty);
 	return config;
 }
 
@@ -837,15 +846,19 @@ void HostRole::send_own_mission_status() {
 				team = conn.assigned_team;
 		const JoinerConnection::LoadoutKit *kit = state.client_runtime->host_loadout_kit();
 		const world::WeaponTable &weapons = kernel.world.tables.weapons;
+		// The fresh profile of the title the session runs as (DFX2-29: dfx2.exe's pages).
+		const playersav::Record fresh =
+				profile::fresh_weapon_record(state.host_owner.ctx.config.title);
 		auto submit_for = [&](bool alternate) {
 			LoadoutSubmit submit = kit != nullptr
 					? profile_loadout_submit(*kit, team, false)
-					: fresh_profile_loadout_submit(&weapons, team);
+					: fresh_profile_loadout_submit(fresh, &weapons, team,
+							  loadout_fixed_class(protocol, kernel.mission.header.mission_type));
 			if (alternate && kernel.local.inventory_valid)
 				submit.weapon_slot_index = static_cast<uint32_t>(resolve_loadout_submit_combo(
 						weapons, &kernel.local.inventory, team,
 						kernel.local.inventory.current_slot));
-			if (protocol_in_match(protocol).loadout_class_fixed)
+			if (protocol_in_match(protocol).c2s_2f.loadout_class_fixed)
 				submit.player_class =
 						kernel.mission.header.mission_type == bms::MissionType::CombatVehicleMission
 						? uint8_t{7}

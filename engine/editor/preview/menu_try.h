@@ -8,10 +8,12 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/title/title.h>
 #include <base/vfs/file_source.h>
 #include <editor/preview/viewport_follow.h>
 #include <formats/mnu/mnu.h>
 #include <formats/playersav/player_sav.h>
+#include <formats/rtxt/rtxt.h>
 #include <runtime/menu/menu_commands.h>
 #include <runtime/menu/menu_flow.h>
 #include <runtime/menu/menu_frame_assets.h>
@@ -54,6 +56,11 @@ struct MenuTrySource {
 	std::string expansion;
 	// The line the STARTUP screen's VERSION label shows (UTF-8, the editor's: editor_version_line).
 	std::string version_line;
+	// The project's game (its target title): its Mods list's base row (Title::mod_list_base), the
+	// binding catalog the sandbox profile's table and the Options screens' records follow
+	// (controls::title_catalog) and its single-player screen (menu::MenuFlow::set_title, the
+	// campaign tabs); null: none, the default title's catalog and no campaign tabs.
+	const Title *title = nullptr;
 };
 
 // What the game would have done, which Try says instead: a command the code binds by name (its
@@ -184,6 +191,11 @@ private:
 	menu::ModList mods_;
 	std::string expansion_; // the game running, as the last open's source said ("" the base game)
 	menu::OptionsScreen options_;
+	// The binding catalog of the game the last start ran as (MenuTrySource::title).
+	const controls::Catalog *catalog_ = &controls::default_catalog();
+	// The campaign reader's menu table (the project's Game.bin, g_TextMenuUi), which flow_
+	// borrows; null for none read.
+	std::unique_ptr<rtxt::File> menu_text_;
 	// The sandbox's player profile record (a fresh one's words and binding
 	// table), which the Options screens seed from and their Accepts write.
 	playersav::ProfileRecord profile_;

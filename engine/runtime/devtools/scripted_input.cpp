@@ -45,7 +45,8 @@ bool script_pose_from_mission(double x, double y, double z, double yaw_deg, doub
 	return true;
 }
 
-bool ScriptedInput::load(const std::vector<ScriptStep> &steps, std::string &error) {
+bool ScriptedInput::load(const controls::Catalog &catalog, const std::vector<ScriptStep> &steps,
+		std::string &error) {
 	std::vector<Event> events;
 	events.reserve(steps.size() + 1);
 	bool have_end = false;
@@ -62,7 +63,7 @@ bool ScriptedInput::load(const std::vector<ScriptStep> &steps, std::string &erro
 			case ScriptStep::Kind::Down:
 			case ScriptStep::Kind::Up:
 			case ScriptStep::Kind::Press: {
-				const controls::ActionDef *def = controls::action_for_code(s.code);
+				const controls::ActionDef *def = catalog.for_code(s.code);
 				if (def == nullptr) {
 					error = step_label(i) + ": no controls catalog row dispatches action code " +
 							std::to_string(s.code);

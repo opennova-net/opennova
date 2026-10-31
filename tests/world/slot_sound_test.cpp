@@ -236,6 +236,50 @@ void test_player_female_profile_selection() {
     if (!evs.empty()) CHECK(std::string(evs[0].set_name) == "T_DIRT_L");
 }
 
+// DFX2-53: the profile slot reads the sex of the character a player's avatar blip names, which
+// under dfx2.exe's per-frame pick is the good side's first combo for the local player itself and
+// for its teammates, the evil side's for another team's player; without the pick (Jointops.exe's)
+// the spawn's id stands. Here 0x0200 is the first good combo (male), 0x8207 the first evil
+// (female).
+// [orig: Entity_GetProfileSlotSound @0x525490 - the blip @0x52549F, its sex byte @0x5254AC;
+//  Terrain_RenderSectorEntitiesBySide @0x5C6C20 - the Team compare @0x5C6EEE..0x5C6F00 (dfx2.exe)]
+void test_player_female_profile_by_viewer_side() {
+    const auto first_set = [](bool by_viewer_side, bool local, uint16_t net_id) {
+        Rig rig(local);
+        Entity *player = rig.world.registry.get(rig.e->handle);
+        CHECK(player != nullptr);
+        if (player == nullptr) return std::string("<none>");
+        player->player_class = 5;
+        player->minimap_net_id = net_id;
+        player->team = 2;
+        if (!local) {
+            Entity viewer;
+            viewer.kind = EntityKind::Organic;
+            viewer.team = 1;
+            rig.world.cached.local_player = rig.world.registry.spawn(0, viewer);
+        }
+        CharacterTraitsTable &traits = rig.world.tables.character_traits;
+        traits.set(0x0200, false);
+        traits.set(0x0400, false);
+        traits.set(0x8207, true);
+        traits.by_viewer_side = by_viewer_side;
+        traits.side_first[0] = 0x0200;
+        traits.side_first[1] = 0x8207;
+        rig.e->profile.sound_profile_female = static_cast<int16_t>(
+                rig.world.tables.sound_profiles.index_of("SP_TestFemale"));
+        rig.src.events = 0x1;
+        rig.run(0, 2);
+        const auto evs = rig.take();
+        return evs.empty() ? std::string("<none>") : std::string(evs[0].set_name);
+    };
+    // The local player, an evil (female) spawn: the good side's first under the pick.
+    CHECK(first_set(true, true, 0x8207) == "T_DIRT_L");
+    CHECK(first_set(false, true, 0x8207) == "T_FEMALE_DIRT_L");
+    // Another team's player, a good (male) spawn: the evil side's first under the pick.
+    CHECK(first_set(true, false, 0x0400) == "T_FEMALE_DIRT_L");
+    CHECK(first_set(false, false, 0x0400) == "T_DIRT_L");
+}
+
 void test_foot_dip_water_and_surface_picks() {
     Rig rig;
     rig.src.events = 0x3; // both feet
@@ -683,6 +727,7 @@ int main() {
     test_bodies_update_in_slot_order();
     test_player_feet_even_ticks_only();
     test_player_female_profile_selection();
+    test_player_female_profile_by_viewer_side();
     test_foot_dip_water_and_surface_picks();
     test_foot_obj_pick();
     test_foley_bits_and_empty_slot_noop();

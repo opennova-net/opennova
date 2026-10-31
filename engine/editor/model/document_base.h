@@ -76,6 +76,10 @@ class DocumentBase {
 public:
 	virtual ~DocumentBase() = default;
 
+	// The game the document was loaded for (the project's target game): its kind's reads and a
+	// preview's rules follow it.
+	const std::string &game() const { return game_; }
+
 	// The file at `absolute_path` read, then load_bytes: the document keeps the path and what
 	// the file held, which Save writes over and checks against.
 	bool load(const std::string &absolute_path, const std::string &relative_path, AssetKind kind,
@@ -298,7 +302,6 @@ protected:
 	virtual void on_saved() = 0;
 
 	const std::string &absolute_path() const { return absolute_path_; }
-	const std::string &game() const { return game_; }
 
 private:
 	// The first source finding that blocks (null for none): what a Save of a blocked document says.

@@ -667,7 +667,7 @@ void AdminConsole::handle_mission_add(const Args &args, std::vector<std::string>
 //  (dfx2.exe)].
 void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &replies) {
 	const world::WeaponTable *table = ctx_.world != nullptr ? &ctx_.world->tables.weapons : nullptr;
-	const int armory = protocol_in_match(ctx_.np_protocol.identity).armory_only_availability;
+	const int armory = protocol_in_match(ctx_.np_protocol.identity).s2c_66.armory_only_availability;
 	const auto listed = [&](int index) {
 		const world::WeaponTableEntry *row =
 				table != nullptr ? table->by_index(static_cast<uint8_t>(index)) : nullptr;
@@ -744,6 +744,7 @@ void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &rep
 bool AdminConsole::local_command(const std::string &line) {
 	ClientLocalCommandSeams seams;
 	seams.in_session = ctx_.is_in_session != 0;
+	seams.catalog = seams_.catalog;
 	seams.save_nfo = [this] {
 		const char *name = "debug.nfo";
 		const std::string file = entity_usage_file_name(name);
@@ -804,6 +805,7 @@ void AdminConsole::console_command(const std::string &line) {
 	std::vector<std::string> lines;
 	ClientConsoleContext walk;
 	walk.in_session = ctx_.is_in_session != 0;
+	walk.catalog = seams_.catalog;
 	walk.novaworld = ctx_.transport_mode == NetworkType::NovaWorld;
 	walk.authority = true;
 	walk.state = &console_state_;

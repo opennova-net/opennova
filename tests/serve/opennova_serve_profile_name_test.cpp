@@ -13,6 +13,7 @@
 
 #include "profile_name.h"
 
+#include <games/jo/jo.h>
 #include <runtime/profile/player_profiles.h>
 
 #include <cstdio>
@@ -22,6 +23,9 @@
 namespace {
 
 using namespace opennova;
+
+// The server runs as Joint Operations (its profile files' magic, Title::profile_magic).
+const Title &kJo = games::jo_title();
 
 int failures = 0;
 #define CHECK(c)                                                                               \
@@ -33,7 +37,7 @@ int failures = 0;
 	} while (0)
 
 std::string seed_name(int32_t index, const std::string &account) {
-	return serve::load_serve_profile(index, account, nullptr, nullptr, inmatch::CharacterRegistry{})
+	return serve::load_serve_profile(kJo, index, account, nullptr, nullptr, inmatch::CharacterRegistry{})
 			.name;
 }
 
@@ -48,7 +52,7 @@ void test_the_first_record_takes_the_account() {
 	CHECK(seed_name(6, "cdouglass") == "cdouglass");
 	CHECK(seed_name(-1, "cdouglass") == "cdouglass");
 	// No weapon.sav: the row keeps the fresh record's sides.
-	CHECK(!serve::load_serve_profile(0, "cdouglass", nullptr, nullptr, inmatch::CharacterRegistry{})
+	CHECK(!serve::load_serve_profile(kJo, 0, "cdouglass", nullptr, nullptr, inmatch::CharacterRegistry{})
 					.character_vars.has_value());
 }
 
@@ -60,7 +64,7 @@ void test_the_saved_files_read_over_the_seed() {
 	characters.add_entry(0, 0, 0, 1, 1, 1, /*alignment=*/0, /*head_voice=*/3, false);
 	characters.add_entry(1, 0, 0, 2, 1, 1, /*alignment=*/1, /*head_voice=*/7, false);
 	const uint16_t red_id = characters.first_character_id(1);
-	profile::PlayerProfiles minted;
+	profile::PlayerProfiles minted(kJo);
 	profile::PlayerProfiles::LoadInput none;
 	minted.load(none, profile::ProfileDefaults{});
 	minted.select_slot(2);
@@ -73,7 +77,7 @@ void test_the_saved_files_read_over_the_seed() {
 	const std::vector<uint8_t> weapon_sav = minted.weapon_sav_bytes();
 
 	const serve::ServeProfile row =
-			serve::load_serve_profile(2, "cdouglass", &player_sav, &weapon_sav, characters);
+			serve::load_serve_profile(kJo, 2, "cdouglass", &player_sav, &weapon_sav, characters);
 	CHECK(row.name == "Sarge");
 	CHECK(row.character_vars.has_value());
 	if (row.character_vars) {
@@ -84,7 +88,7 @@ void test_the_saved_files_read_over_the_seed() {
 	}
 	// player.sav alone: its names, the fresh sides.
 	const serve::ServeProfile names_only =
-			serve::load_serve_profile(2, "cdouglass", &player_sav, nullptr, characters);
+			serve::load_serve_profile(kJo, 2, "cdouglass", &player_sav, nullptr, characters);
 	CHECK(names_only.name == "Sarge" && !names_only.character_vars.has_value());
 }
 

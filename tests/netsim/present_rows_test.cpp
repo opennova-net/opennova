@@ -2,6 +2,8 @@
 // ADR 0043 G3): the host/SP pool walk and the joiner's decoded-replica walk,
 // pinned over a bare MissionKernel whose registry rows and ClientState are
 // authored directly (no boot, no socket, no Godot).
+#include <base/title/title.h>
+#include <runtime/inmatch/character_registry.h>
 #include <runtime/inmatch/client_replica_emplaced.h>
 #include <runtime/inmatch/client_replica_present_projection.h>
 #include <runtime/inmatch/client_runtime.h>
@@ -1740,6 +1742,74 @@ bool test_rotor_hides_reach_world_and_joiner_rows() {
 	return ok;
 }
 
+// DFX2-53: both collectors' player rows carry the character the local view draws: under
+// dfx2.exe's per-frame pick the first combo of the side relative to the local player, a
+// teammate good and a foe evil whatever its NetId; under Jointops.exe's the NetId. The host's
+// rows come off its own pools, a joiner's off the decoded replica.
+// [orig: Terrain_RenderSectorEntitiesBySide @0x5C6C20 - @0x5C6EA6..0x5C6F42 (dfx2.exe)]
+bool test_player_rows_carry_the_drawn_character() {
+	im::CharacterRegistry registry;
+	registry.add_entry(0, 0, 0, 0, 0, 1, 0, 1, false); // 0x0200, the first good
+	registry.add_entry(0, 0, 1, 0, 0, 2, 0, 3, false); // 0x0400
+	registry.add_entry(1, 0, 0, 7, 0, 1, 1, 10, true); // 0x8207, the first evil
+	const nw::Title *jo = nw::title_by_code("jo");
+	const nw::Title *dfx2 = nw::title_by_code("dfx2");
+	bool ok = expect(jo != nullptr && dfx2 != nullptr, "both titles are installed");
+	if (!ok) return false;
+	const auto character_of = [](const std::vector<float> &rows, uint16_t handle) {
+		for (size_t i = 0; i < rows.size() / w::PF_STRIDE; ++i)
+			if (static_cast<int>(row_at(rows, i)[w::PF_WIRE_HANDLE]) == handle)
+				return static_cast<int>(row_at(rows, i)[w::PF_CHARACTER_ID]);
+		return -1;
+	};
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(0, 8);
+	const auto player = [&](int slot, uint8_t team) {
+		w::Entity *e = spawn_pool_row(kernel, 0, slot, nw::kPlayerPersonTypeId);
+		e->net_class_code = static_cast<uint8_t>(nw::EntityClass::Player);
+		e->team = team;
+		e->minimap_net_id = 0x0400;
+		return e->handle.packed;
+	};
+	kernel.world.cached.local_player = w::EntityHandle{player(0, 1)};
+	const uint16_t mate = player(1, 1);
+	const uint16_t foe = player(2, 2);
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	for (const nw::Title *title : {jo, dfx2}) {
+		const im::PresentRowsContext host{kernel, nullptr, false, nullptr, nullptr, nullptr, title,
+				&registry};
+		im::build_world_present_rows(host, lifecycle, rows, doors);
+		ok = expect(title == jo ? character_of(rows, mate) == 0x0400 && character_of(rows, foe) == 0x0400
+								: character_of(rows, mate) == 0x0200 && character_of(rows, foe) == 0x8207,
+				"the host's player rows carry the drawn character") && ok;
+	}
+	im::ClientRuntime runtime("DrawnCharacter");
+	for (const uint16_t handle : {uint16_t{0x0011}, uint16_t{0x0012}}) {
+		opennova::replication::ClientEntityState &es = runtime.state().upsert(handle);
+		es.cls = nw::EntityClass::Player;
+		es.type_id = nw::kPlayerPersonTypeId;
+		es.net_id = 0x0400;
+		es.team = handle == 0x0011 ? 1 : 2;
+		es.team_known = true;
+	}
+	for (const nw::Title *title : {jo, dfx2}) {
+		const im::PresentRowsContext joiner{kernel, &runtime, true, nullptr, nullptr, nullptr, title,
+				&registry};
+		im::build_client_replica_present_rows(joiner, lifecycle, rows, doors);
+		ok = expect(title == jo ? character_of(rows, 0x0011) == 0x0400 && character_of(rows, 0x0012) == 0x0400
+								: character_of(rows, 0x0011) == 0x0200 && character_of(rows, 0x0012) == 0x8207,
+				"a joiner's player rows carry the drawn character") && ok;
+	}
+	// No local body: every player draws good.
+	kernel.world.cached.local_player = w::EntityHandle{};
+	const im::PresentRowsContext alone{kernel, &runtime, true, nullptr, nullptr, nullptr, dfx2, &registry};
+	im::build_client_replica_present_rows(alone, lifecycle, rows, doors);
+	ok = expect(character_of(rows, 0x0012) == 0x0200, "without a local player a foe draws good") && ok;
+	return ok;
+}
+
 int main() {
     test_attached_rows_retain_subdegree_frame();
     test_joiner_bldg_section_offset_reaches_present_rows();
@@ -1773,6 +1843,7 @@ int main() {
 	ok = test_replica_rows_present_the_served_ring_entries() && ok;
 	ok = test_seated_replica_row_presents_its_channel() && ok;
 	ok = test_rotor_hides_reach_world_and_joiner_rows() && ok;
+	ok = test_player_rows_carry_the_drawn_character() && ok;
 	if (!ok || failures != 0) {
 		std::printf("present_rows_test: %d failure(s)\n", failures);
 		return 1;

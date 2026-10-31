@@ -290,6 +290,28 @@ bool run_the_shell_host_applies_the_block_at_a_map_change() {
 	              "keeps the session's own");
 }
 
+// A map change's live slot limit takes the apply's ceiling only under the block's network connect
+// type 1: a cap the block holds past it stands under the LAN screen's 2. The block's word rides
+// the session config as every block word does (GameConfig::network_connect_type).
+// [orig: Game_ApplySessionSettingsToGlobals @0x551B20..0x551B48 - the type test
+//  @0x551B3B..0x551B41, the cap test @0x551B43..0x551B46]
+bool run_the_map_change_ceiling_reads_the_network_type() {
+	opennova::gamecfg::GameCfg block = opennova::gamecfg::defaults();
+	block.mp_max_players = 4;
+	const opennova::Title &jo = *opennova::title_by_code("jo");
+	const inmatch::GameConfig session = inmatch::host_screen_from_block(block, jo).config;
+	inmatch::MissionRotation rotation;
+	rotation.map_file = "next.bms";
+	block.mp_max_players = 99;
+	const inmatch::GameConfig novaworld =
+			inmatch::stage_next_mission(session, &block, rotation, "Next Map");
+	block.networkconnecttype = 2;
+	const inmatch::GameConfig lan = inmatch::stage_next_mission(session, &block, rotation, "Next Map");
+	return expect(session.network_connect_type == 1 && novaworld.live_slot_limit() == 65 &&
+	                      lan.network_connect_type == 2 && lan.live_slot_limit() == 99,
+	              "the next map's ceiling applies under network connect type 1 alone");
+}
+
 } // namespace
 
 int main() {
@@ -300,6 +322,7 @@ int main() {
 	if (!run_a_map_change_keeps_the_settings_passwords()) ++failures;
 	if (!run_the_hello_reads_the_protocols_copies()) ++failures;
 	if (!run_the_shell_host_applies_the_block_at_a_map_change()) ++failures;
+	if (!run_the_map_change_ceiling_reads_the_network_type()) ++failures;
 	if (failures != 0) return 1;
 	std::printf("OK\n");
 	return 0;

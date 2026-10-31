@@ -124,6 +124,7 @@ std::vector<std::string> protocol_missing(const Protocol &p, ProtocolPart part) 
 	missing_if(out, p.product_code == nullptr, "product code");
 	missing_if(out, p.gate_tag == nullptr, "gate tag");
 	missing_if(out, p.gate_tag_keys == nullptr, "gt.ssc key chain");
+	missing_if(out, !p.nwpssk_mix.has_value(), "NWPSSK mix");
 	return out;
 }
 

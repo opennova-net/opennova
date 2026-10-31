@@ -118,14 +118,6 @@ double dfx2_hit_zone_damage_multiplier(int32_t hit_zone) {
 	return world::hit_zone_is_critical(hit_zone) ? 3.0 : 1.0;
 }
 
-// dfx2.exe compiles in its own profile-less spawn page, WPN_MK23 where Jointops.exe's names
-// WPN_colt45; WPN_M4 is on the page and absent from DFX2's data, which retail drops the same way
-// (docs/titles/dfx2-vs-jo-re.md DFX2-33).
-// [orig: Buffer_CopyUntilDoubleNull(restrictionData, 0x832368, 2048) @0x52188f / @0x54ec2a, the
-//  profile's copy @0x548f67 (dfx2.exe)]
-constexpr const char *kSpawnKit[] = { "WPN_M4AUTO", "WPN_M4", "WPN_MK23", "WPN_AT4",
-	"WPN_GRENADEFB", "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE", nullptr };
-
 // dfx2.exe's rules: Jointops.exe's code, edited at the sites each knob names
 // (docs/titles/dfx2-vs-jo-re.md §7, the §8 rows; runtime/world/title_rules.h carries Jointops.exe's
 // side of each).
@@ -170,6 +162,21 @@ world::TitleRules make() {
 	// DFX2-20: no revive window [orig: GameEvent_PlayerDeath `mov [edi+170h], ebx` @0x51419b
 	// (dfx2.exe)].
 	r.revive_window = false;
+	// DFX2-23: the part spin, about twice Jointops.exe's [orig: Entity_UpdatePartSpinAccumulator
+	// @0x4928C0 - 372827 @0x492903 / @0x492925, 326222 and 279619 @0x49291E..0x492945, the decay
+	// 372827 @0x492964; Entity_UpdateHeloRotorSpin @0x48FA80 - 372827 @0x48FB1C / @0x48FB3E, the
+	// decay 93206 @0x48FB77; Entity_SpawnFromBMSRecord @0x40ECD0; the aircraft bone init
+	// @0x4902FD (dfx2.exe)].
+	r.part_spin = world::PartSpinRates{ 372827, 326222, 279619, 372827, 93206 };
+	// DFX2-24: the load's table warnings [orig: Mission_LoadBMSFile @0x40F330 - `jle` @0x40F40A,
+	// @0x40F443, @0x40F47C, @0x40F4B5 (dfx2.exe)].
+	r.bms_table_warnings = true;
+	// DFX2-27: the loadout chunk walked as the file holds it [orig: Mission_LoadBMSFile @0x40F330 -
+	// strlen @0x40F599 where Jointops.exe calls AIProfile_SanitizeConfigData (dfx2.exe)].
+	r.bms_loadout_sanitized = false;
+	// DFX2-28: no mission-start difficulty [orig: Game_StartMission @0x521530 - the block gone
+	// between @0x522EA9 and @0x522EAE (dfx2.exe)].
+	r.mission_start_sets_difficulty = false;
 	// DFX2-25: the counter-rotation [orig: Entity_UpdateTransformAndTurret @0x440B20 (dfx2.exe) -
 	// IsTurret @0x440F87, Matrix_Multiply3x4_FixedPoint @0x440FC4, the words
 	// @0x440FDB..0x440FFE].
@@ -185,8 +192,30 @@ world::TitleRules make() {
 	// AI_CheckVehicleStuckState @0x4652a0 (dfx2.exe)].
 	r.ai_vehicle_near_reach = 0x40000;
 	r.ai_vehicle_write_off_count = 1860;
-	// DFX2-33: the page above.
-	r.spawn_kit = kSpawnKit;
+	// DFX2-33: the profile-less spawn page dfx2.exe compiles in, the single-player page a fresh
+	// profile takes too (dfx2_title.cpp's kSinglePlayerKit holds the names)
+	// [orig: Buffer_CopyUntilDoubleNull(restrictionData, 0x832368, 2048) @0x52188f / @0x54ec2a
+	//  (dfx2.exe)].
+	r.spawn_kit = dfx2_title().profile_single_player_kit;
+	// DFX2-37: the lone gunner's fire [orig: the twin of Input_HandleActionBinding_0 @0x4DD4C0
+	// (dfx2.exe) - @0x4DD8FE..0x4DD92C, @0x4DDABB..0x4DDADB].
+	r.emplaced_solo_holds_fire = true;
+	// DFX2-111: the canopy opens on the jump bit [orig: the twin of Entity_UpdateInfantryPlayerBody
+	// @0x4B4140 - @0x4B7BCD (dfx2.exe)].
+	r.parachute_opens_on_jump = true;
+	// DFX2-112: the airborne glide [orig: the twin of Entity_UpdateInfantryPlayerBody @0x4B4140 -
+	// @0x4B7933..0x4B7A13 (dfx2.exe)].
+	r.airborne_steer_glide = true;
+	// DFX2-113: the impact speed's order [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 -
+	// @0x47CCC7..0x47CCD1 (dfx2.exe)].
+	r.tracked_impact_speed_xz_first = true;
+	// DFX2-42: the voice waves' gain 240 [orig: WacCmd_SsnWave @0x4F49B0 (`imul 0F0h` @0x4F4A40);
+	//  WacCmd_SsnRadio @0x4F4A90 (imul @0x4F4B20); Wac_PlayScriptedVoiceWave @0x4EA6F0 (imul
+	//  @0x4EA745) (dfx2.exe)].
+	r.script_voice_volume = 240;
+	// DFX2-46: the trail lanes follow the ground, the alternate effect on snow
+	//  [orig: Entity_UpdateBoneTrailEffects @0x4589A0 - @0x458AAA..0x458AB3 (dfx2.exe)].
+	r.trail_surface_alternate = true;
 	return r;
 }
 

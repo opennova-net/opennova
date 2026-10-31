@@ -1,6 +1,7 @@
 #include "jo.h"
 
 #include <formats/gamecfg/game_cfg.h>
+#include <formats/playersav/weapon_sav.h> // kJointOpsSinglePlayerKit, kJointOpsClassKits
 
 namespace opennova::games {
 
@@ -31,6 +32,64 @@ constexpr const char *kReadDefs[] = {
 	// function @ 0x5A2450].
 	nullptr,
 };
+
+// Jointops.exe's HUD label fonts: Arial12b / Arial14n under 641 pixels, Arial14b / 14n under 801,
+// Arial16b / 16n above, over 640 / 800 / 1024; Impac22b and Impac38b over 800.
+// [orig: HUD_InitAllFonts @0x51EE20 - the widths @0x51EE7E / @0x51EEAB, the names
+//  @0x51EE8A..0x51EF0E, the scale @0x51EF26, Impac22b @0x51EF48 and Impac38b @0x51EF7B over 800
+//  @0x51EF62, the divide's magic 0x51EB851F @0x51EF53..0x51EF62 shifting by 8 (`sar edx, 8`
+//  @0x51EF5A)]
+constexpr TitleHudFontTier kHudFontTiers[] = {
+	{640, "Arial14n.fnt", "Arial12b.fnt", 640},
+	{800, "Arial14n.fnt", "Arial14b.fnt", 800},
+	{0, "Arial16n.fnt", "Arial16b.fnt", 1024},
+};
+constexpr TitleHudFonts kHudFonts{kHudFontTiers, "Impac22b.fnt", "Impac38b.fnt", 800};
+
+// Jointops.exe's F12 map legend: its 26 records, 40 design units a row (DFX2-89).
+// [orig: HUD_DrawHelpScreenIcons @0x497480 - the records from aHudIconPerson @0x8154F8 (44 bytes:
+//  name, cell +0x20, size +0x24, colour +0x28) to the empty name @0x815970, the row step
+//  @0x497524]
+constexpr TitleHudMapLegendIcon kHudMapLegendIcons[] = {
+	{"hud_icon_person", 3, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_medic", 0, 3.0f, 0xFFFFFFFFu},
+	{"hud_icon_persondead", 8, 1.0f, 0x7F2F3F7Fu},
+	{"hud_icon_personmedicable", 14, 1.0f, 0x7F2F3F7Fu},
+	{"hud_icon_waypoint", 1, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_psp", 0, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_lfp_attack", 26, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_lfp_defend", 27, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_emplaced", 4, 0.8f, 0x7F7F6200u},
+	{"hud_icon_emplaced2", 12, 0.8f, 0x7F7F6200u},
+	{"hud_icon_vehicle", 10, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_watervehicle", 15, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_helo", 11, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_motorcycle", 25, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_farp", 5, 1.0f, 0x7F7F6200u},
+	{"hud_icon_armoury", 13, 0.8f, 0x7F207F20u},
+	{"hud_icon_bldg", 0, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_bridge", 9, 1.0f, 0x7F207F20u},
+	{"hud_icon_ridewanted", 23, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_enemyloc", 24, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_recentspeaker", 28, 0.8f, 0x7F7F7F7Fu},
+	{" ", 0, 0.0f, 0x00000000u},
+	{"hud_icon_flag", 2, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_flagbay", 6, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_pwrmed", 16, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_pwrammo", 17, 1.0f, 0x7F7F7F7Fu},
+};
+constexpr TitleHudMapLegend kHudMapLegend{
+		kHudMapLegendIcons, static_cast<int>(sizeof(kHudMapLegendIcons) / sizeof(kHudMapLegendIcons[0])),
+		40};
+
+// Jointops.exe's loading screen: Arials18.fnt and Arial22.fnt at every width, the label in 80E0FF,
+// the band to 661 over a custom background and 782 over the stock one, no progress lines (the
+// stage argument is never read).
+// [orig: Render_LoadingScreen @0x521D10 - "Arials18.fnt" @0x521EEC, "Arial22.fnt" @0x521F5A, the
+//  label "<c80E0FF>%s:\r\n<cFFFFFF>" @0x522087 (0x7D01A8), the band `neg bl; sbb; and 0FFFFFF87h;
+//  add 30Eh` @0x521FEC..0x522006]
+constexpr TitleLoadingScreen kLoadingScreen{"Arials18.fnt", "Arial22.fnt", 0, nullptr, nullptr,
+		0x80E0FFu, 661, 782, false, 0, 0};
 
 Title make() {
 	Title t;
@@ -68,6 +127,52 @@ Title make() {
 	// @ 0x4a76ac (/exp, /mod), Expansion_LoadAssets @ 0x4a4730].
 	t.expansions = true;
 	t.read_defs = kReadDefs;
+	t.hud_fonts = &kHudFonts;
+	// The catalog sorted by file name [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 - the
+	//  qsort @ 0x5635f0 over Mission_CompareMapNames @ 0x5628e0].
+	t.mission_list_order = MissionListOrder::FileName;
+	// The profile files' magic, "FPBC" [orig: PlayerProfile_SaveToFiles @ 0x54be00 - the header
+	//  @ 0x54be2e; PlayerProfile_LoadAllFromDisk @ 0x54f4d0 - edi = 0x43425046 @ 0x54f590, the
+	//  player.sav gate @ 0x54f5b4, the weapon.sav gate @ 0x54f6ef].
+	t.profile_magic = 0x43425046u;
+	// The `/maxplayers N` switch [orig: Game_ParseCommandLineAndInit @ 0x4a7310 - "/maxplayers"
+	//  @ 0x4a76ef..0x4a76ff, j__atol into g_MaxPlayerCommandLineArg @ 0x4a7710;
+	//  ServerConfig_ApplyHostSetting @ 0x4a6000 - the MaxPlayers line's override
+	//  @ 0x4a6233..0x4a6243].
+	t.max_players_switch = true;
+	// A fresh profile's kit pages, the eleven static pages the format holds with their witness
+	// [orig: PlayerProfile_InitDefaults @ 0x54bb40 - @ 0x54bced, @ 0x54bd1a..0x54bdd1].
+	t.profile_single_player_kit = playersav::kJointOpsSinglePlayerKit;
+	t.profile_class_kits = playersav::kJointOpsClassKits;
+	// DFX2-61: the Mods list's base row [orig: Options_PopulateModList @ 0x559fb0 (the literal
+	//  @0x7C7114, read @ 0x559fe2)].
+	t.mod_list_base = "Joint Operations: Typhoon Rising";
+	t.hud_map_legend = &kHudMapLegend;
+	// DFX2-43: the cube's eye at least 10 units over the terrain [orig: EnvCube_Update @0x6106A0 -
+	//  `add eax, 0A0000h` @0x61072B over Terrain_GetHeightAtPosition, the raise @0x610739..0x61073B].
+	t.env_cube_terrain_clearance = 0xA0000;
+	// DFX2-44: the NVG gain scale's corners [orig: NVG_DrawMaskAndGain @0x5CFF70 - 0x3C0 @0x5D0005,
+	//  0x20 @0x5D000D, 0x3F0 @0x5D0015, 0x40 @0x5D001D, each pair through
+	//  Viewport_ScaleToVirtualCoords @0x5D0025 / @0x5D0039].
+	t.nvg_gain_rect = TitleRect{ 960, 32, 1008, 64 };
+	// DFX2-47: the 256-square FrameFX work targets [orig: FrameFX_CreateRenderTargets @0x583C40 -
+	//  `mov eax, 100h` @0x583CF7 into [fx+9Ch] / [fx+0A0h] @0x583CFE / @0x583D04, the sides both
+	//  targets take @0x583D36 / @0x583D85 and FrameFX_DrawPass's work rect @0x582B32..0x582B49].
+	t.frame_fx_work_side = 256;
+	t.loading_screen = &kLoadingScreen;
+	// DFX2-74: the PLAYER_INFO combo list's rows read "<head> - <body>" [orig:
+	//  PlayerInfo_PopulateAvatarComboList @0x560210 - the head and body keys @0x5602cc / @0x5602ea,
+	//  their "Avatars" strings @0x5602f7 / @0x560300, sprintf("%s - %s") @0x560313, UIList_AddRow
+	//  @0x56032c].
+	t.player_info_combo_names = true;
+	// DFX2-75: COMBO_LIST's callback heard on a list's select, its player.mnu's control a combo
+	// box [orig: PlayerInfo_RegisterAllControls @0x561470 - the mask 0x220 @0x561597,
+	//  PlayerInfo_HandleComboListSelect registered @0x5615a6].
+	t.player_info_combo_spins = false;
+	// DFX2-76: the PLAYER_INFO portrait hovers while the pointer is over PLAYER_PREVIEW [orig:
+	//  PlayerInfo_UpdatePlayerPreviewAnimation @0x55dba0 - CWnd_IsMouseOver @0x55dc1f, the walk
+	//  ending past PLAYER_PREVIEW @0x55dc36].
+	t.player_info_preview_hover = true;
 	return t;
 }
 

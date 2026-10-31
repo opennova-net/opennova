@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 
+#include <base/title/title.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/controls.h>
@@ -54,21 +55,23 @@ opennova::rtxt::File make_shipped_keys_table() {
   } while (0)
 
 const ActionDef *find_action(const char *token) {
-  std::size_t n = 0;
-  const ActionDef *cat = catalog(&n);
-  for (std::size_t i = 0; i < n; ++i) {
-    if (std::string(cat[i].token) == token) {
-      return &cat[i];
-    }
-  }
-  return nullptr;
+  return opennova::controls::default_catalog().for_token(token);
+}
+
+// The code of Jointops.exe's static row `id` (its +0x00 word), -1 for a row the
+// catalog does not carry.
+int row_code(int id) {
+  const Catalog &cat = opennova::controls::default_catalog();
+  for (std::size_t i = 0; i < cat.count; ++i)
+    if (cat.rows[i].id == id) return cat.rows[i].code;
+  return -1;
 }
 
 // The catalog is present and the well-known movement actions carry their canonical
 // JO defaults (Forward=W/Up, Back=S/Down, Strafe A/D, Jump=Space, Reload=R).
 bool test_catalog_defaults() {
-  std::size_t n = 0;
-  const ActionDef *cat = catalog(&n);
+  const std::size_t n = opennova::controls::default_catalog().count;
+  const ActionDef *cat = opennova::controls::default_catalog().rows;
   CHECK(cat != nullptr && n > 80, "catalog should hold the full action table");
 
   const ActionDef *fwd = find_action("move_forward");
@@ -237,7 +240,7 @@ bool test_format_binding() {
 // The keyboard rows are populated with class/action/control and exclude the
 // admin/internal classes. [orig: UI_PopulateControlMappingList @ 0x55c0c0]
 bool test_build_rows_keyboard() {
-  const std::vector<ControlRow> rows = build_rows(Device::Keyboard);
+  const std::vector<ControlRow> rows = build_rows(opennova::controls::default_catalog(), Device::Keyboard);
   CHECK(rows.size() > 40, "keyboard rows populated");
 
   bool found_forward = false;
@@ -279,8 +282,8 @@ bool test_build_rows_keyboard() {
 
 // Mouse/joystick share the action list but have no static default bindings (D-CTRL-1).
 bool test_build_rows_other_devices() {
-  const std::vector<ControlRow> kb = build_rows(Device::Keyboard);
-  const std::vector<ControlRow> mouse = build_rows(Device::Mouse);
+  const std::vector<ControlRow> kb = build_rows(opennova::controls::default_catalog(), Device::Keyboard);
+  const std::vector<ControlRow> mouse = build_rows(opennova::controls::default_catalog(), Device::Mouse);
   CHECK(kb.size() == mouse.size(), "same action set across devices");
   for (const ControlRow &r : mouse) {
     if (r.action == "Prone") CHECK(r.control == "Middle", "middle button defaults to prone");
@@ -293,7 +296,7 @@ bool test_build_rows_other_devices() {
 // @ 0x55bb20; CLEAR_KEY @ 0x55bfd0; DEFAULTS @ 0x55bd90; mouse capture
 // @ 0x55c780].
 bool test_mouse_dispatch() {
-  BindingSet set;
+  BindingSet set(opennova::controls::default_catalog());
   bool ctrl = false;
   auto held = [&ctrl](int vk) { return ctrl && vk == 17; };
   auto token = [&set](const char *name) { return set.index_of_token(name); };
@@ -307,7 +310,7 @@ bool test_mouse_dispatch() {
   CHECK(set.mouse_click_action(0x200, held) == token("ScopeZeroDec"), "Ctrl wheel decrements zero only");
   ctrl = false;
   {
-    BindingSet held_wheel;
+    BindingSet held_wheel(opennova::controls::default_catalog());
     held_wheel.assign_mouse(held_wheel.index_of_token("move_forward"), kMouseWheelUp);
     CHECK(held_wheel.mouse_click_action(0x100, held) == held_wheel.index_of_token("move_forward"),
           "a held row bound to the wheel takes the notch");
@@ -329,7 +332,7 @@ bool test_mouse_dispatch() {
 //  2048, 32 / 64 / 4096); Input_TryDispatchBindingByWeaponType @0x499180 (the flag-4 test
 //  @0x4991A9..0x4991E1, the switches @0x4991F7..0x499327)]
 bool test_mouse_click_dispatch() {
-  BindingSet set;
+  BindingSet set(opennova::controls::default_catalog());
   auto held = [](int) { return false; };
   auto token = [&set](const char *name) { return set.index_of_token(name); };
   CHECK(set.mouse_click_action(2, held) == token("attack_1"), "left down: attack_1");
@@ -373,7 +376,7 @@ bool test_mouse_click_dispatch() {
 // playback file @0x49d4d5, the held keyboard pass behind !g_InputCaptureMode
 // @0x49d509].
 bool test_keyboard_capture_leaves_the_mouse_rows() {
-  BindingSet set;
+  BindingSet set(opennova::controls::default_catalog());
   const int fwd = set.index_of_token("move_forward");
   const int fire = set.index_of_token("attack_1");
   const BindingRecord *r = set.record(fwd);
@@ -391,7 +394,7 @@ bool test_keyboard_capture_leaves_the_mouse_rows() {
 }
 
 bool test_binding_set_assignment() {
-  BindingSet set;
+  BindingSet set(opennova::controls::default_catalog());
   const int fwd = set.index_of_token("move_forward");
   CHECK(fwd >= 0, "move_forward is in the catalog");
   const BindingRecord *r = set.record(fwd);
@@ -487,7 +490,7 @@ bool test_binding_set_assignment() {
         "the Options table shows the seat chord");
 
   // Live rows mirror the static build and consume edits.
-  const std::vector<ControlRow> stat = build_rows(Device::Keyboard);
+  const std::vector<ControlRow> stat = build_rows(opennova::controls::default_catalog(), Device::Keyboard);
   const std::vector<ControlRow> live = set.build_rows(Device::Keyboard);
   CHECK(stat.size() == live.size(), "live rows match the static row set");
   bool all_equal = true;
@@ -556,7 +559,7 @@ bool test_format_display_string() {
   // keyed text before it is discarded: the static ScopeZeroDec/Inc rows
   // (VK 0xDE + Ctrl-wheel) render "Ctrl- or Mouse Whl Dn/Up", never the
   // apostrophe [orig: KeyBinding_FormatDisplayString @0x496f34..0x496fd4].
-  BindingSet set;
+  BindingSet set(opennova::controls::default_catalog());
   const int dec = set.index_of_token("ScopeZeroDec");
   const int inc = set.index_of_token("ScopeZeroInc");
   CHECK(dec >= 0 && inc >= 0, "the scope-zero rows exist");
@@ -577,7 +580,7 @@ bool test_format_display_string() {
 // Ctrl over an unclaimed key still reaches its modifier-less row, and a mixed
 // record follows the ROW's modifier.
 bool test_pressed_key_two_passes() {
-  BindingSet set;
+  BindingSet set(opennova::controls::default_catalog());
   const int seat1 = set.index_of_token("seat1");
   const int knife = set.index_of_token("Knife");
   const int respawn = set.index_of_token("respawn");
@@ -642,7 +645,7 @@ bool test_pressed_key_two_passes() {
 //  queue @0x49d42f and jump @0x49d437, the fallback's queue @0x49d488 and jump
 //  @0x49d490]
 bool test_key_scan_first_match() {
-  BindingSet set;
+  BindingSet set(opennova::controls::default_catalog());
   std::set<int> down;
   const auto key_down = [&](int vk) { return down.count(vk) != 0; };
   const int flip = set.index_of_token("flipmouse");
@@ -654,8 +657,7 @@ bool test_key_scan_first_match() {
   CHECK(flip >= 0 && scale >= 0 && accessory >= 0 && radarout >= 0 && huddetail >= 0 &&
             hudcolor >= 0,
         "the rows exist");
-  CHECK(action_code(catalog(nullptr)[flip].id) == 9 &&
-            action_code(catalog(nullptr)[scale].id) == 17,
+  CHECK(set.catalog().rows[flip].code == 9 && set.catalog().rows[scale].code == 17,
         "flipmouse is code 9, mousescale 17");
 
   // flipmouse and mousescale on one bare K: the press flips the invert only.
@@ -700,7 +702,7 @@ bool test_key_scan_first_match() {
 //  @0x49d40a (flag 4), @0x49d380..0x49d393 / @0x49d40f..0x49d43d (the mode
 //  bit)]
 bool test_key_scan_gates() {
-  BindingSet set;
+  BindingSet set(opennova::controls::default_catalog());
   std::set<int> down;
   const auto key_down = [&](int vk) { return down.count(vk) != 0; };
   const int medpack = set.index_of_token("medpack");
@@ -753,7 +755,7 @@ bool test_key_scan_gates() {
 // [orig: Input_ProcessAnalogBindings @0x4995f0 - the keys @0x499608..0x499629,
 //  the mode bit @0x499637..0x499650, the queue @0x499660]
 bool test_held_row_reads_its_keys_alone() {
-  BindingSet set;
+  BindingSet set(opennova::controls::default_catalog());
   std::set<int> down;
   const auto key_down = [&](int vk) { return down.count(vk) != 0; };
   const int forward = set.index_of_token("move_forward");
@@ -802,7 +804,7 @@ bool test_held_row_reads_its_keys_alone() {
 //  Input_TryDispatchBindingByWeaponType @0x499180; Input_TryTriggerJoystickButton
 //  @0x497b30].
 bool test_fire_sign() {
-  BindingSet set;
+  BindingSet set(opennova::controls::default_catalog());
   const int scale = set.index_of_token("mousescale");
   CHECK(scale >= 0, "the mousescale row exists");
   std::set<int> down;
@@ -841,7 +843,7 @@ bool test_fire_sign() {
 }
 
 bool test_joystick_pov_dispatch() {
-  BindingSet bindings;
+  BindingSet bindings(opennova::controls::default_catalog());
   const std::array<int, 8> boundaries{2200, 6800, 11200, 15000, 20200, 24800, 29200, 33800};
   const std::array<uint8_t, 9> masks{1, 9, 8, 10, 2, 6, 4, 5, 1};
   for (size_t i = 0; i < boundaries.size(); ++i) {
@@ -896,7 +898,7 @@ bool test_joystick_pov_dispatch() {
 //  Input_InitBindingSystem @0x499AB0 - the list @0x49A201..0x49A56C; Joystick_UpdateInputBitfield
 //  @0x7653C0 - the latch's release @0x765744; Options_UpdatePendingState @0x55C6D4..0x55C720]
 bool test_joystick_toggle_pass() {
-  BindingSet set;
+  BindingSet set(opennova::controls::default_catalog());
   for (std::size_t i = 0; i < set.size(); ++i) {
     BindingRecord r = *set.record(static_cast<int>(i));
     r.joy_button = 0;
@@ -929,8 +931,8 @@ bool test_joystick_toggle_pass() {
     }
     return out;
   };
-  const int kc = action_code(knife), sc = action_code(sidearm), pc = action_code(primary),
-            lc = action_code(look);
+  const int kc = set.catalog().rows[knife].code, sc = set.catalog().rows[sidearm].code,
+            pc = set.catalog().rows[primary].code, lc = set.catalog().rows[look].code;
 
   bind(knife, 3, 0, 0);
   press({3});
@@ -1000,7 +1002,7 @@ bool test_joystick_toggle_pass() {
   CHECK(codes() == std::vector<int>{lc}, "with the word set they are");
 
   // The capture: the lowest set bit is the byte, none leaves the record as it was.
-  BindingSet capture;
+  BindingSet capture(opennova::controls::default_catalog());
   const int row = capture.index_of_token("Knife");
   const uint8_t before = capture.record(row)->joy_button;
   CHECK(!capture.assign_joystick(row, JoystickBits{}) && capture.record(row)->joy_button == before,
@@ -1021,29 +1023,137 @@ bool test_joystick_toggle_pass() {
 // the row whose +0x00 code is i, so the death screen's record 217 is
 // MedicReq and the HUDLS key label's record 200 + category is the weapon
 // category row (201..209 Knife..medpack, 211 magazine); 200 and 210 hold the
-// zero record, which formats to "" [orig: word_8159A8 + 108 * row;
+// zero record, which formats to "" [orig: g_BindingRows + 108 * row;
 // KeyBinding_SortBySequentialId @0x498260; g_BindingRowMedicReq @0x81B534;
 // HUD_DrawWeaponSlotBar @0x599e8c..0x599e9f].
 bool test_action_codes() {
-  CHECK(action_code(64) == 217 && action_code(67) == 18 && action_code(70) == 25,
+  CHECK(row_code(64) == 217 && row_code(67) == 18 && row_code(70) == 25,
         "MedicReq / escape / pause carry their dispatch codes");
-  CHECK(action_code(101) == 33 && action_code(102) == 54 && action_code(99) == 422,
+  CHECK(row_code(101) == 33 && row_code(102) == 54 && row_code(99) == 422,
         "AudioEmote / RadioMacro / ShowScore carry their dispatch codes");
-  CHECK(action_code(118) == 74 && action_code(119) == -1 && action_code(-1) == -1,
-        "the 119 static rows, nothing past them");
-  const ActionDef *medic = action_for_code(217);
+  CHECK(row_code(118) == 74 && row_code(119) == -1 && row_code(66) == -1 &&
+            opennova::controls::default_catalog().count == 118,
+        "the 119 static rows but the unreachable row 66, nothing past them");
+  const ActionDef *medic = opennova::controls::default_catalog().for_code(217);
   CHECK(medic != nullptr && std::string(medic->token) == "MedicReq", "record 217 is MedicReq");
-  const ActionDef *knife = action_for_code(201);
-  const ActionDef *medpack = action_for_code(209);
-  const ActionDef *magazine = action_for_code(211);
+  const ActionDef *knife = opennova::controls::default_catalog().for_code(201);
+  const ActionDef *medpack = opennova::controls::default_catalog().for_code(209);
+  const ActionDef *magazine = opennova::controls::default_catalog().for_code(211);
   CHECK(knife != nullptr && std::string(knife->token) == "Knife", "record 201 is Knife");
   CHECK(medpack != nullptr && std::string(medpack->token) == "medpack", "record 209 is medpack");
   CHECK(magazine != nullptr && std::string(magazine->token) == "magazine",
         "record 211 is magazine");
-  CHECK(action_for_code(200) == nullptr && action_for_code(210) == nullptr,
+  CHECK(opennova::controls::default_catalog().for_code(200) == nullptr && opennova::controls::default_catalog().for_code(210) == nullptr,
         "no row dispatches 200 or 210");
-  CHECK(action_for_code(768) == nullptr, "past the 768-record table");
+  CHECK(opennova::controls::default_catalog().for_code(768) == nullptr, "past the 768-record table");
   CHECK(format_display_string(BindingRecord{}).empty(), "the zero record formats to \"\"");
+  return true;
+}
+
+// DFX2-110: each title's catalog is its executable's. Jointops.exe's title runs the default
+// catalog; dfx2.exe's rows re-assign the weapon codes (Grenades 204, Accessory 205, Powerup6..9
+// 206..209, Powerup0 200, Detonator 210), add Objectives 58, EmoteToggle 59 and the 1st Person
+// Toggle 412, drop Flashbang / FragGrenade / SmokeGrenade / medpack / ToSpecial / dotsize /
+// ScopeZeroDec / ScopeZeroInc / commander_menu, move second keys onto F2..F5 and carry their own
+// cheat CRCs; every other row is Jointops.exe's field for field.
+// [orig: the table @0x8148A0, rows 31..38 @0x8155B4..0x8158A8, 53 @0x815EFC, 96..109
+//  @0x817120..0x81769C, 113..117 @0x81784C..0x8179FC (dfx2.exe); g_BindingRows + 108 * row]
+bool test_dfx2_catalog() {
+  const opennova::Title *jo_title = opennova::title_by_code("jo");
+  const opennova::Title *dfx2_title = opennova::title_by_code("dfx2");
+  CHECK(jo_title != nullptr && dfx2_title != nullptr, "both titles are installed");
+  const Catalog &jo = title_catalog(*jo_title);
+  const Catalog &dfx2 = title_catalog(*dfx2_title);
+  CHECK(&jo == &default_catalog(), "Jointops.exe's title runs the default catalog");
+  CHECK(&dfx2 != &jo && dfx2.count == 118, "dfx2.exe's 119 rows but its unreachable code-36 row");
+  struct Row {
+    const char *token;
+    int code, key, key2, mod;
+    uint32_t help;
+  };
+  const Row rows[] = {
+      {"Grenades", 204, '4', 0, 0, 2004},     {"Accessory", 205, '5', 0, 0, 2005},
+      {"Powerup6", 206, '6', 0, 0, 2006},     {"Powerup7", 207, '7', 0, 0, 2007},
+      {"Powerup8", 208, '8', 0, 0, 2008},     {"Powerup9", 209, '9', 0, 0, 2009},
+      {"Powerup0", 200, '0', 0, 0, 2010},     {"Detonator", 210, 0x08, 0, 0, 2011},
+      {"Objectives", 58, 'O', 0, 0, 5002},    {"EmoteToggle", 59, 0, 0, 0, 5013},
+      {"viewtoggle", 412, 0x70, 0, 0, 3001},  {"view1st", 400, 0x70, 0, 0x11, 3001},
+      {"help", 8, 0xBF, 0, 0, 10003},         {"map_toggle", 28, 'M', 0x73, 0, 4001},
+      {"ShowFriendly", 30, 'F', 0x74, 0, 5011}, {"binoculars", 26, 'B', 0x71, 0, 2019},
+      {"NVG", 41, 'N', 0x72, 0, 2020},        {"scope", 6, 0, 0, 0, 2015},
+      {"ShowScore", 422, 0, 0, 0, 10009},     {"viewwithgun", 401, 0, 0, 0, 3002},
+      {"viewchase", 402, 0, 0, 0, 3003},
+  };
+  std::set<std::string> changed;
+  for (const Row &row : rows) {
+    const ActionDef *def = dfx2.for_token(row.token);
+    CHECK(def != nullptr && def->code == row.code && def->default_key == row.key &&
+              def->default_key2 == row.key2 && def->default_mod == row.mod &&
+              def->help == row.help && dfx2.for_code(row.code) == def,
+          row.token);
+    changed.insert(row.token);
+  }
+  CHECK(dfx2.for_token("Objectives")->flags == 0x05000800u &&
+            dfx2.for_token("Objectives")->cls == ActionClass::Communications,
+        "Objectives is a Communications row of flags 0x05000800");
+  CHECK(dfx2.for_token("EmoteToggle")->flags == 0x0C000C01u &&
+            dfx2.for_token("viewtoggle")->flags == 0x0C000801u &&
+            std::string(dfx2.for_token("viewtoggle")->name) == "1st Person Toggle",
+        "the two toggles' flags and the view toggle's name");
+  CHECK(dfx2.for_token("scope")->default_mouse == 0x2, "Toggle Scope keeps its right button");
+  for (const char *gone : {"Flashbang", "FragGrenade", "SmokeGrenade", "medpack", "ToSpecial",
+                           "dotsize", "ScopeZeroDec", "ScopeZeroInc", "commander_menu"}) {
+    CHECK(dfx2.for_token(gone) == nullptr && jo.for_token(gone) != nullptr, gone);
+  }
+  for (const int code : {216, 220, 221, 222, 223})
+    CHECK(dfx2.for_code(code) == nullptr, "no dfx2.exe row dispatches a JO-only code");
+  for (const int code : {58, 59, 200, 210, 412})
+    CHECK(jo.for_code(code) == nullptr, "no Jointops.exe row dispatches a DFX2-only code");
+  CHECK(jo.for_token("Accessory")->code == 207 && jo.for_token("Detonator")->code == 208 &&
+            jo.for_code(204) == jo.for_token("Flashbang"),
+        "Jointops.exe's Accessory 207, Detonator 208, Flashbang 204");
+  // The cheat rows: Jointops.exe's codes and texts, dfx2.exe's own command CRCs (the token
+  // field's first dword).
+  const auto dword = [](const ActionDef *def) {
+    uint32_t v = 0;
+    for (int i = 0; i < 4; ++i) v |= static_cast<uint32_t>(static_cast<uint8_t>(def->token[i])) << (8 * i);
+    return v;
+  };
+  CHECK(dword(dfx2.for_code(120)) == 0xAFEF269Fu && dword(dfx2.for_code(121)) == 0x7C3D2A04u &&
+            dword(dfx2.for_code(122)) == 0xDCDB352Eu && dword(dfx2.for_code(123)) == 0xBA7EBD21u &&
+            dword(dfx2.for_code(40)) == 0x16A4B38Fu,
+        "dfx2.exe's cheat CRCs");
+  CHECK(dword(jo.for_code(120)) == 0x520BEC55u && dword(jo.for_code(123)) == 0xFF623840u,
+        "Jointops.exe's cheat CRCs");
+  changed.insert(dfx2.for_code(120)->token);
+  // Every other row with a token both carry is the same row.
+  for (std::size_t i = 0; i < jo.count; ++i) {
+    const ActionDef &a = jo.rows[i];
+    if (a.cls == ActionClass::Cheat || changed.count(a.token) != 0) continue;
+    const ActionDef *b = dfx2.for_token(a.token);
+    if (b == nullptr) continue;
+    CHECK(b->code == a.code && b->flags == a.flags && b->modes == a.modes && b->cls == a.cls &&
+              b->help == a.help && b->default_key == a.default_key &&
+              b->default_key2 == a.default_key2 && b->default_mod == a.default_mod &&
+              b->default_mouse == a.default_mouse && b->default_joy == a.default_joy &&
+              b->default_mouse_mod == a.default_mouse_mod &&
+              b->default_joy_mod == a.default_joy_mod && std::string(b->name) == a.name,
+          a.token);
+  }
+  // The key scan over dfx2.exe's records: '0' fires Powerup0 (200), Backspace Detonator (210),
+  // F1 the toggle (412), Ctrl+F1 1st Person View (400), 'O' Objectives (58).
+  BindingSet set(dfx2);
+  std::set<int> down;
+  const auto key_down = [&](int vk) { return down.count(vk) != 0; };
+  const auto fired = [&](int vk) {
+    const int row = set.event_row(vk, key_down);
+    return row >= 0 ? set.catalog().rows[row].code : -1;
+  };
+  CHECK(fired('0') == 200 && fired(0x08) == 210 && fired('O') == 58 && fired('5') == 205,
+        "'0' Powerup0, Backspace Detonator, 'O' Objectives, '5' Accessory");
+  CHECK(fired(0x70) == 412, "a bare F1 fires the 1st Person Toggle");
+  down = {0x11};
+  CHECK(fired(0x70) == 400, "Ctrl+F1 fires 1st Person View");
   return true;
 }
 
@@ -1058,8 +1168,8 @@ bool test_action_codes() {
 //  head gate @0x49AD9C..0x49AE23; KeyBinding_SortBySequentialId @0x498260]
 bool test_head_gate_by_code() {
   const uint32_t head_gate_bits = 0x1u | 0x40u | 0x400u | 0x8000000u | 0x10u;
-  const ActionDef *quit = action_for_code(3);
-  const ActionDef *global_talk = action_for_code(101);
+  const ActionDef *quit = opennova::controls::default_catalog().for_code(3);
+  const ActionDef *global_talk = opennova::controls::default_catalog().for_code(101);
   CHECK(quit != nullptr && std::string(quit->token) == "exit" && quit->flags == 0x04000000u,
         "record 3 is the exit row, flags 0x04000000");
   CHECK(global_talk != nullptr && std::string(global_talk->token) == "gtalk" &&
@@ -1067,11 +1177,9 @@ bool test_head_gate_by_code() {
         "record 101 is the Global talk row (gtalk), flags 0x05000800");
   CHECK((quit->flags & head_gate_bits) == 0 && (global_talk->flags & head_gate_bits) == 0,
         "neither carries a head-gate bit, so a Serve Only host runs both");
-  std::size_t count = 0;
-  const ActionDef *rows = catalog(&count);
-  CHECK(count > 101 && action_code(3) == 151 && action_code(101) == 33,
+  CHECK(row_code(3) == 151 && row_code(101) == 33,
         "the static rows 3 (move_back) and 101 (AudioEmote) dispatch other codes");
-  CHECK((rows[3].flags & 0x1u) != 0 && (rows[101].flags & 0x1u) != 0,
+  CHECK((find_action("move_back")->flags & 0x1u) != 0 && (find_action("AudioEmote")->flags & 0x1u) != 0,
         "and carry 0x1, which the dispatcher never reads for 3 or 101");
   return true;
 }
@@ -1079,7 +1187,7 @@ bool test_head_gate_by_code() {
 // The records' revision moves on every write and never on a read, so the
 // HUDLS key-label cache rebuilds only on a binding change.
 bool test_binding_revision() {
-  BindingSet set;
+  BindingSet set(opennova::controls::default_catalog());
   uint32_t r = set.revision();
   set.record(0);
   set.control_text(0, Device::Keyboard);
@@ -1109,12 +1217,12 @@ bool test_binding_revision() {
 // [orig: KeyBinding_DumpAllToFile @0x54C0A0 - the version line @0x54c0f9, the header
 //  @0x54c127, the row format @0x54c252; KeyBinding_BuildFilteredTable @0x54C2B0]
 bool test_keylist_text() {
-  BindingSet set;
+  BindingSet set(opennova::controls::default_catalog());
   const std::string text = keylist_text(set);
   int filtered = 0;
   int forward_index = -1;
   for (int code = 0; code < 768; ++code) {
-    const ActionDef *def = action_for_code(code);
+    const ActionDef *def = opennova::controls::default_catalog().for_code(code);
     if (def == nullptr || (def->flags & 0x4000000u) == 0u) continue;
     if (code == 152) forward_index = filtered;
     ++filtered;
@@ -1182,6 +1290,7 @@ int main() {
   RUN_TEST(test_fire_sign);
   RUN_TEST(test_action_codes);
   RUN_TEST(test_head_gate_by_code);
+  RUN_TEST(test_dfx2_catalog);
   RUN_TEST(test_binding_revision);
   RUN_TEST(test_keylist_text);
 

@@ -144,11 +144,12 @@ public:
 	// (the game's root, the editor's project files), the engine's loader
 	// (runtime/menu/menu_frame_assets.h) keeping what it loaded by (file, stamp)
 	// across configures. The document, the screen, the file source and the
-	// override table are borrowed until the next configure.
+	// override table are borrowed until the next configure. `p_font_scale` is the
+	// title's menu font scale its fonts draw at (engine MenuFrameCompiler::set_font_scale).
 	bool configure_screen(const opennova::mnu::Document *p_document,
 			const opennova::mnu::Screen *p_screen, const opennova::FileSource &p_files,
 			const std::map<std::string, std::string> &p_vars,
-			const opennova::rtxt::File *p_override_text);
+			const opennova::rtxt::File *p_override_text, float p_font_scale);
 	// Let everything go (configure over nothing).
 	void clear_screen();
 	bool is_configured() const;
@@ -163,7 +164,8 @@ public:
 	const opennova::menu::MenuFrameState &native_state() const { return state_; }
 	const opennova::menu::MenuFrameAssets &native_assets() const { return assets_; }
 	// The editor viewport's frame state (it never pumps): what its options hold on the
-	// configured screen (editor/preview apply_menu_options), set after each configure.
+	// configured screen (editor/preview apply_menu_options), set after each configure, or the
+	// menu Try's, whose run-time images load here as set_widget_image loads them.
 	void set_native_state(const opennova::menu::MenuFrameState &p_state);
 
 	// Typed per-widget per-frame state, keyed by the widget's pre-order index
@@ -190,6 +192,9 @@ public:
 	void set_widget_text_bytes(int p_index, const std::string &p_text, int p_hotkey_pos = -1);
 	// CWnd_SetRect: the widget's own rect (parent-relative design units).
 	void set_widget_rect(int p_index, const Rect2i &p_rect);
+	// A widget's appearance texture set at run time (engine MenuRuntime::set_widget_image): the
+	// state's, and the texture loaded at once through the screen's file source (C++ only).
+	void set_widget_image(int p_index, uint32_t p_states, const std::string &p_file);
 	void set_widget_selection(int p_index, int p_selected_item, int p_hover_item,
 			int p_scroll_row);
 	// Standalone type=scroll range/page/value. Page is the original inclusive
@@ -216,6 +221,9 @@ public:
 	// leaves it (column 0's value 0, state 0, no flags).
 	void set_widget_table_cells(int p_index, const Array &p_rows);
 	void set_table_cell_painter(int p_index, opennova::menu::MenuTableCellPainter p_painter);
+	// Whether a painter's HUD labels draw: each draw then holds the HUD label face the session's
+	// title loads for this frame's width (engine MenuFrameAssets::set_hud_label_face), C++ only.
+	void set_hud_label_face(bool p_on);
 	// CWnd_SetClipRect (absolute design units); `p_enabled` false removes it.
 	void set_widget_clip_rect(int p_index, bool p_enabled, const Rect2i &p_rect);
 	// The runtime's installed table columns and a marquee's credits (C++ only: the
@@ -399,6 +407,9 @@ private:
 	// The uploaded pages of the font a compiler slot draws with (null: none).
 	const std::vector<Ref<Texture2D>> *font_pages_(int32_t p_slot);
 	void adopt_slots_();
+	// A run-time image's texture interned and loaded through the screen's file source, the slots
+	// adopted when one was added (set_widget_image, set_native_state).
+	void load_runtime_image_(const std::string &p_file);
 	Vector2 design_scale_() const;
 
 	Ref<MnuDocument> document_;
@@ -462,6 +473,7 @@ private:
 	RID slot_canvas_item_;
 	RID overlay_upper_canvas_item_;
 	bool custom_slot_drawn_ = false;
+	bool hud_label_face_ = false; // set_hud_label_face
 	// The material this Control's item and both overlay items draw under: a
 	// glyph run's font page runs its MODULATE2X stage (glyph_shader_code),
 	// through the one process-wide glyph program (hud/font_page_glyphs

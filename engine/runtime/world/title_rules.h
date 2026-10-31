@@ -19,8 +19,13 @@
 // - DFX2-7/8's game.cfg rows, defaults and ceilings stay in formats/gamecfg (config_var_rows, the
 //   Config_SetDefaults and post-load clamps), keyed by the Title's config_table: formats/ cannot
 //   see runtime/ either.
+// - §7.12's zoom-out cap and §5.3's friendly-tags toasts and death-screen step are the Title's
+//   (base/title/title.h map_zoom_max_q16, friendly_tag_toast_literals,
+//   friendly_tags_skip_mode_1_on_death_screen): read on the local player's input alone, they are
+//   the executable's own HUD and input, as its HUD variants are, and change no peer's world.
 // - The wire dialect (DFX2-1, 2, 10..14, 18) is the Protocol's (net/protocol/protocol.h
-//   ProtocolInMatch). DFX2-1's 0x0A fifth u32 stays there; DFX2-9's checkpoint RULES are here.
+//   ProtocolInMatch, by message). DFX2-1's 0x0A fifth u32 stays there; DFX2-9's checkpoint RULES
+//   are here.
 //
 // A knob marked "joiner-side" is read on a joiner's world or its replica, not only on the
 // authority: a change to one changes what a joiner does, so it bumps the game's protocol version
@@ -77,6 +82,22 @@ enum class EmplacedTurretUpdate : uint8_t {
 using ScoreValuesTable = ScoreValues (*)(uint32_t game_type);
 // A title's person hit-zone -> bullet damage scale (hit_zone_damage_multiplier).
 using HitZoneScaleTable = double (*)(int32_t hit_zone);
+
+// DFX2-23: the rotor machines' rates (world/vehicle_part_anim.h): the three spin-up rates a part
+// seeds (the full one a player-control item's, an EngineRunning spawn's and a flying aircraft's
+// bone init's too; the other two a non-player-control item's 34..66 and 67..99 rolls) and the two
+// machines' spin-down per tick. Jointops.exe's below; dfx2.exe's are each about twice as large.
+// [orig: Entity_UpdatePartSpinAccumulator @0x4928B0 - 186413 @0x4928F3 / @0x492915, 163110 and
+//  139809 @0x49290E..0x492935, the decay 186413 @0x492954; Entity_UpdateHeloRotorSpin @0x48FA70 -
+//  186413 @0x48FB0C / @0x48FB2E, the decay 46603 @0x48FB67; Entity_SpawnFromBMSRecord @0x40EE80;
+//  Entity_InitAircraftWeaponBones @0x4902ED]
+struct PartSpinRates {
+	int32_t full = 186413; // 0x2D82D
+	int32_t mid = 163110; // 0x27D26
+	int32_t low = 139809; // 0x22221
+	int32_t ground_decay = 186413;
+	int32_t helo_decay = 46603; // 0xB60B
+};
 
 struct TitleRules {
 	// --- DFX2-9: the co-op checkpoint (§7.1). --------------------------------------------------
@@ -183,6 +204,55 @@ struct TitleRules {
 	//  GameEvent_PlayerDeath `mov [edi+170h], ebx` @0x51419b, the 0x54 gate @0x5145cb (dfx2.exe)]
 	bool revive_window = true;
 
+	// --- DFX2-23: the vehicle part spin. ---------------------------------------------------------
+	// joiner-side: every peer spins the rotors and the spinning parts of the vehicles it does not
+	// drive (world/vehicle_part_anim.h). The defaults are Jointops.exe's; dfx2.exe doubles them
+	// (§5.4).
+	PartSpinRates part_spin;
+
+	// --- DFX2-24: the BMS load's table warnings. -------------------------------------------------
+	// A mission whose header counts more items, decorations, markers or organics than their pool
+	// holds warns at its start's header checks and its load's (mission::warn_tables_past_pools,
+	// from MissionKernel::boot and mission::promote_mission). Jointops.exe jumps over every test;
+	// dfx2.exe shows "Too many <table> %i (max is %i)" in its warning box (OK carries on, Cancel
+	// ends the process), which ours logs and asks the embedder's box
+	// (KernelBootOptions::load_warning).
+	// [orig: Mission_LoadBMSFile @0x40F4E0 - `cmp eax, 4B0h; jmp` @0x40F5B5 / @0x40F5BA and the
+	//  same unconditional jumps for the other three; BMS_LoadAndValidateHeader @0x40E250 -
+	//  @0x40E31A, @0x40E34D, @0x40E380, @0x40E3B3]
+	// [orig: Mission_LoadBMSFile @0x40F330 - `jle` @0x40F40A, Game_ShowWarningDialog @0x40F431,
+	//  @0x40F46A, @0x40F4A3, @0x40F4DC; BMS_LoadAndValidateHeader @0x40E0A0 - `jle` @0x40E16A,
+	//  @0x40E19D, @0x40E1D0, @0x40E203; Game_ShowWarningDialog @0x4A5D60 - MessageBoxA(.., 0x31)
+	//  @0x4A5D8B (the push 31h @0x4A5D81), Game_ShutdownAndExit on Cancel @0x4A5D96 (dfx2.exe)]
+	bool bms_table_warnings = false;
+
+	// --- DFX2-27: the BMS loadout chunk's repair. ------------------------------------------------
+	// Out of a session the mission load walks its loadout chunk four strings at a time
+	// (mission::stash_mission_loadout_rules). Jointops.exe first repairs every record that wrote
+	// three strings (bms.h WeaponLoadoutRecord::has_flags), so each stride is one record; dfx2.exe
+	// measures the chunk with strlen and walks it as the file holds it, so a three-string record
+	// takes the next record's name as its fourth string and every later stride runs one string off.
+	// [orig: Mission_LoadBMSFile @0x40F4E0 - AIProfile_SanitizeConfigData @0x40CFE0 from @0x40F739,
+	//  the length @0x40F741, the stride @0x40F7B4..0x40F809]
+	// [orig: Mission_LoadBMSFile @0x40F330 - strlen @0x40F590..0x40F599, the length @0x40F59B, the
+	//  stride @0x40F610..0x40F65D (dfx2.exe)]
+	bool bms_loadout_sanitized = true;
+
+	// --- DFX2-28: the single player's mission-start difficulty. ----------------------------------
+	// Out of a session Jointops.exe's mission start sets the difficulty word (SessionRules::
+	// difficulty) to 0, and under the objective Co-op game type to -1 with the single-player
+	// respawn attribute (0x40) and the local player's health at its doubled ceiling
+	// (world::mission_start_difficulty). dfx2.exe has no such block: the word stays the one the
+	// fresh start's session settings copied from the profile (+0x564), on a restart too, and an
+	// objective Co-op mission takes neither the 0x40 nor the health.
+	// [orig: Game_StartMission @0x524360 - @0x525CC2..0x525D12, the 0 @0x525CDD, the -1
+	//  @0x525CFA, the 0x40 OR @0x525CF2]
+	// [orig: Game_StartMission @0x521530 - Environment_MissionStartInit @0x522EA4, then the
+	//  terrain call @0x522EA9 and Game_SpawnAllEntityGlowEffects @0x522EAE, nothing between; the
+	//  word's other writers Game_ApplySessionSettingsToGlobals @0x54F158 / @0x54F1C5 and the net
+	//  handlers (dfx2.exe)]
+	bool mission_start_sets_difficulty = true;
+
 	// --- DFX2-25: the emplaced gun's counter-rotation. -------------------------------------------
 	// joiner-side: the World's gun channel and the joiner's replica gun channel
 	// (inmatch client_replica_emplaced.cpp) both run it.
@@ -228,6 +298,72 @@ struct TitleRules {
 	// [orig: Buffer_CopyUntilDoubleNull(restrictionData, 0x833BF8, 2048) @ 0x5246be / @ 0x5519e4]
 	// [orig: the page at 0x832368 @0x52188f / @0x54ec2a (dfx2.exe)]
 	const char *const *spawn_kit = nullptr;
+
+	// --- DFX2-37: a lone gunner holds fire. ------------------------------------------------------
+	// joiner-side: the fire row's release leg, and its press leg from a seat other than the
+	// Driver's and the Controller's, request nothing while the local player rides (+0x16C) an
+	// IsTurret gun whose +0x28 carrier counts one occupied seat at most
+	// (emplaced_carrier_occupied_seats), the gunner's own included
+	// (world::local_solo_turret_holds_fire). Its own input legs, so every peer's local player
+	// alike.
+	// [orig: Input_HandleActionBinding_0 @0x4E0420 (no such test)] [orig: the twin @0x4DD4C0
+	//  (dfx2.exe) - the release leg's @0x4DD8FE..0x4DD92C, the press leg's @0x4DDABB..0x4DDADB,
+	//  each `cmp eax, ebx; jle` with ebx 1 @0x4DD4E6]
+	bool emplaced_solo_holds_fire = false;
+
+	// --- DFX2-111: the parachute's open. -------------------------------------------------------
+	// joiner-side: every peer's player body pass runs the canopy tail (world::parachute_tick).
+	// The authority opens a falling body's canopy (vz <= -0x3800) on its carried-parachute bit
+	// (+0x2C & 0x10), which every peer's open canopy then clears, under Jointops.exe; on its
+	// MoveOrder jump bit (+0x12C & 0x20) under dfx2.exe, which carries and clears nothing, so a
+	// jump opens it, with no parachute held, as often as it falls.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - the test @0x4B7AE5..0x4B7AFA, the clear
+	//  @0x4B7BC9] [orig: Entity_UpdateInfantryPlayerBody's twin @0x4B4140 - `test byte ptr
+	//  [esi+12Ch], 20h` @0x4B7BCD, the open @0x4B7BD6..0x4B7BD9, no clear in the open canopy's
+	//  arm @0x4B7C57..0x4B7CA4 (dfx2.exe)]
+	bool parachute_opens_on_jump = false;
+
+	// --- DFX2-112: the airborne steer's glide. -------------------------------------------------
+	// joiner-side: every peer's player body pass steers an airborne body (the authority's
+	// AiSystem body tick and a joiner's replica rows alike). While the moving bit is held both
+	// push the slide pair 64 along the look and pad angle A; dfx2.exe also adds ftol(cos A * Q)
+	// and ftol(sin A * Q), Q = (-vz) >> 7, and turns savedLivePitch (+0x90) and Roll (+0x18) by
+	// ftol(cos / sin of the pad angle * 2^22).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4B40E0 - @0x4B78B7..0x4B793D] [orig: the twin
+	//  @0x4B4140 - Q @0x4B794B..0x4B7956, the pair @0x4B7962..0x4B79BA, +0x90 @0x4B79D3, Roll
+	//  @0x4B79E2, the canopy's double @0x4B79E5..0x4B7A13; dbl_7C8A28, dbl_7C8A38, flt_7C8A54
+	//  (-64), flt_7C8A50 (4194304) (dfx2.exe)]
+	bool airborne_steer_glide = false;
+
+	// --- DFX2-113: the tracked hull's impact speed. --------------------------------------------
+	// joiner-side: every peer's tracked ground solve gates its scrape sound and momentum share on
+	// it. Its |velocity| at a severity-3 contact sums the squares as Jointops.exe's x87 order,
+	// vx^2 + (vy^2 + vz^2), or dfx2.exe's, (vx^2 + vz^2) + vy^2 (world::tracked_impact_speed).
+	// [orig: Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - @0x47CCAD..0x47CCD5] [orig:
+	//  Entity_ProcessTrackedVehiclePhysics @0x47C1C0 - @0x47CCAD..0x47CCD3 (dfx2.exe)]
+	bool tracked_impact_speed_xz_first = false;
+
+	// --- DFX2-42: the scripted voice's gain. -----------------------------------------------------
+	// joiner-side: the gain byte a script's voice wave (wave, SSNwave, SSNradio) starts at, which the
+	// channel plays as (gain * the dialogue volume + 128) >> 8 through the distance curve
+	// (world::ScriptVoiceChannel); a joiner's world plays its host's SSNwave remote command with it.
+	// [orig: Wac_PlayScriptedVoiceWave @0x4ED688, WacCmd_SsnWave @0x4F7989, WacCmd_SsnRadio @0x4F7A63 -
+	//  `imul 0D2h`]
+	// [orig: WacCmd_SsnWave @0x4F49B0 (imul @0x4F4A40); WacCmd_SsnRadio @0x4F4A90 (imul @0x4F4B20);
+	//  Wac_PlayScriptedVoiceWave @0x4EA6F0 (imul @0x4EA745) - `imul 0F0h` (dfx2.exe)]
+	int32_t script_voice_volume = 210;
+
+	// --- DFX2-46: a vehicle trail's alternate effect on snow. ------------------------------------
+	// joiner-side: a trail lane with an alternate effect (particlefxw1 / particlefxw2's third token)
+	// runs in the surface type under the vehicle, spawns its points with the alternate on snow (3)
+	// and restarts them when the type changes (world vehicle_update_trail_lane); Jointops.exe's lane
+	// runs in state 1 and spawns the effect alone. A joiner's own vehicle mover samples the trails.
+	// [orig: Entity_UpdateBoneTrailEffects @0x4589C0 - the state 1 @0x458A2D / @0x458A5A, the test
+	//  @0x458ACE, the store @0x458DA8 / @0x458DC2]
+	// [orig: Entity_UpdateBoneTrailEffects @0x4589A0 - Terrain_GetSurfaceTypeAtPosition @0x458AAA,
+	//  `cmp ax, 3` @0x458AAE taking +0x300 @0x458AB3, the test @0x458AD2, the store
+	//  @0x458DB9 / @0x458DD2 (dfx2.exe)]
+	bool trail_surface_alternate = false;
 };
 
 // One registry row: a title's code and the rules it runs.

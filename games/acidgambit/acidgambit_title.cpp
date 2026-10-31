@@ -2,14 +2,16 @@
 
 #include <games/jo/jo.h>
 
-#include <formats/gamecfg/game_cfg.h>
-
 namespace opennova::games {
 
 namespace {
 
 Title make() {
-	Title t;
+	// Joint Operations' row, as its code is Joint Operations' (its rules and its protocol are JO's
+	// very objects: acidgambit_rules.cpp, acidgambit_protocol.cpp): every field past its identity
+	// is jo_title()'s, as dfx2_protocol.cpp's sheet starts from jo_protocol(), so a value JO's row
+	// sets is its value too (games_test compares every field past the identity).
+	Title t = jo_title();
 	t.code = "acidgambit";
 	t.display_name = "OP: Acid Gambit";
 	t.title_text = "OP: Acid Gambit";
@@ -20,14 +22,6 @@ Title make() {
 	t.command_file = "ACIDGAMBIT.CMD";
 	// The login its wizard names, the service's product for it (products.updater_login).
 	t.updater_login = "ACIDGAMBIT";
-	t.config_table = gamecfg::ConfigTable::Jo;
-	// Its player caps are Joint Operations', as its rules are (acidgambit_rules.cpp).
-	t.max_players = jo_title().max_players;
-	t.max_players_host_screen = jo_title().max_players_host_screen;
-	t.host_screen = jo_title().host_screen;
-	// Its expansions and the .def names it opens are Joint Operations', as its code is.
-	t.expansions = jo_title().expansions;
-	t.read_defs = jo_title().read_defs;
 	return t;
 }
 

@@ -46,6 +46,8 @@ var _class_selection_enabled := false
 # on-show stage's sources: the profile store whose current weapon.sav record the
 # pages come from (null: an empty record) and the spawn buffer (the sim's kit).
 var _loadout := ArmoryLoadout.new()
+# The DEATH screen's weapon icons (populate_screen / pick_screen), mounted over its own frame.
+var _screen_icon_mounts: Dictionary = {}
 var _profiles: PlayerProfiles = null
 var _spawn_kit: Array[WeaponKitEntry] = []
 # Availability lookup (name -> value); banned (0) weapons drop from the lists
@@ -122,6 +124,12 @@ func on_menu_released() -> void:
 	_clear_icon_mounts()
 
 
+## The DEATH screen's icon mounts freed and forgotten: they ride that screen's frame, which its
+## presenter frees at each mission's teardown, while this companion lives on with its presenter.
+func release_screen_icon_mounts() -> void:
+	_free_icon_mounts(_screen_icon_mounts)
+
+
 func on_menu_built(driver: MenuDriver, file: String, screen: String, root: ResourceRoot) -> void:
 	# The base wires _driver/_root, the by-name handler table (dispatched
 	# with the stale-document guard) and the widget_activated relay.
@@ -135,6 +143,8 @@ func on_menu_built(driver: MenuDriver, file: String, screen: String, root: Resou
 	if frame != null and not frame.resized.is_connected(_reposition_icon_mounts):
 		frame.resized.connect(_reposition_icon_mounts)
 	_ensure_weapons("ArmoryMenuCompanion", "armory lists stay empty")
+	# The title the serializer runs as (engine menu::ArmoryLoadout::title).
+	_loadout.set_title_root(root)
 	# The on-show order: the class resolve and the spin, the stage under its team
 	# gate, then the populate (engine menu::ArmoryLoadoutBuffers::stage_on_show).
 	_populate_classes()
@@ -250,12 +260,74 @@ func _populate_slots() -> void:
 	_populating = false
 
 
+## The DEATH screen's three category lists over its driver (the title's death_screen_loadout,
+## DFX2-41): the class resolve, then this screen's populate over that one, its class pages,
+## counts and grenade positions the shared ones, then its weight line and icons as the populate
+## leaves them (engine world::deploy_loadout_shown and menu::ArmoryLoadout::populate carry the
+## witness). `root` is the screen's resource root, the icons' source.
+func populate_screen(driver: MenuDriver, root: ResourceRoot) -> void:
+	if driver == null or _weapons == null:
+		return
+	_selected_class_value = _resolve_selected_class()
+	_populating = true
+	_loadout.populate(driver, _weapons, _entity_team, _selected_class_value,
+			_availability_lookup, Strings.menu_text("NONE", "None"),
+			Strings.get_table(Strings.TABLE_GAMETEXT))
+	_populating = false
+	refresh_screen(driver, root)
+
+
+## A pick in that screen's PRIMARY / SECONDARY / ACCESSORY: the slot's pick over its driver, as
+## this screen's handlers take one, then its weight line and icons (engine
+## menu::ArmoryLoadout::pick_weapon carries the witness).
+func pick_screen(driver: MenuDriver, control: String, root: ResourceRoot) -> void:
+	if _populating or driver == null or _weapons == null:
+		return
+	_populating = true
+	_loadout.pick_weapon(driver, _weapons, control, Strings.get_table(Strings.TABLE_GAMETEXT))
+	_populating = false
+	refresh_screen(driver, root)
+
+
+## That screen's weight line (where it authors one) and its weapon icons, mounted over its own
+## frame and hidden while their windows do not draw.
+func refresh_screen(driver: MenuDriver, root: ResourceRoot) -> void:
+	if driver == null:
+		return
+	var label := driver.widget_id("STATIC_TOTAL_WEIGHT")
+	if label >= 0 and _weapons != null:
+		driver.set_widget_text(label, WeaponDatabase.loadout_weight_line(
+				_loadout.weight(driver, _weapons), Strings.get_table(Strings.TABLE_MENUTXT),
+				Strings.get_table(Strings.TABLE_GAMEUI)))
+	var selected_for := func(control: String) -> WeaponDef:
+		return _selected_weapon_on(driver, control)
+	_mount_weapon_icons(driver, root, _screen_icon_mounts, "DeathIcon", selected_for, true)
+
+
+## That screen's picks serialized into the class's page: the kit its close applies (engine
+## menu::ArmoryLoadout::accept).
+func accept_screen(driver: MenuDriver) -> Array[WeaponKitEntry]:
+	var kit: Array[WeaponKitEntry] = []
+	if driver != null and _weapons != null:
+		kit = _loadout.accept(driver, _weapons, _entity_team, _selected_class_value)
+	return kit
+
+
+## The class the last populate resolved (the selected-class mirror).
+func get_selected_class() -> int:
+	return _selected_class_value
+
+
 # The slot's selected weapon.def row (null = NONE). Public read seam (ADR
 # 0018): tests and diagnostics read the selection here.
 func selected_weapon(control: String) -> WeaponDef:
-	if _weapons == null or _driver == null:
+	return _selected_weapon_on(_driver, control)
+
+
+func _selected_weapon_on(driver: MenuDriver, control: String) -> WeaponDef:
+	if _weapons == null or driver == null:
 		return null
-	return _weapons.get_weapon(_loadout.selected_weapon(_driver, control))
+	return _weapons.get_weapon(_loadout.selected_weapon(driver, control))
 
 
 func _on_slot_selected(control: String) -> void:

@@ -15,6 +15,7 @@
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
 #include <runtime/world/local_player.h>
+#include <runtime/world/present_drains.h>
 #include <runtime/terrain_query/height_field.h>
 
 #include <formats/def/def.h>
@@ -2187,6 +2188,57 @@ void test_trails_sample_only_in_contact_arms() {
 	}
 }
 
+// DFX2-46: a trail lane with an alternate effect runs, under dfx2.exe's rules, in the surface
+// type under the vehicle: on snow (3) its points spawn with the alternate, and a change of type
+// restarts them. Jointops.exe's lane runs in state 1 and spawns the effect alone.
+// [orig: Entity_UpdateBoneTrailEffects @0x4589C0 - @0x458A2D, @0x458ACE, @0x458DA8]
+// [orig: Entity_UpdateBoneTrailEffects @0x4589A0 - @0x458AAA..0x458AB3, @0x458AD2, @0x458DB9
+//  (dfx2.exe)]
+void test_trail_alternate_follows_the_ground_under_dfx2() {
+	static const uint8_t snow[16] = { 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3 };
+	static const int grid[256] = { 1 }; // cell (0, 0) slot 1
+	for (const char *code : { "jo", "dfx2" }) {
+		const bool dfx2 = std::string(code) == "dfx2";
+		Rig r;
+		r.w.rules.title_rules = &title_rules(code);
+		auto t = buggy_traits();
+		t.trails[0].effect = "dust";
+		t.trails[0].secondary_effect = "snowdust";
+		t.trails[0].mask = 1;
+		t.trail_point_count = 1;
+		t.trail_points[0] = { { 65536, 0, 0 }, { 0, 0, 65536 } };
+		r.w.vehicles.traits.set(r.veh().item_id, t);
+		r.veh().position.x.q16 = 10 << 16;
+		r.veh().position.y.q16 = -(10 << 16);
+		r.w.out.fire_sounds.set_listener(r.veh().position);
+		r.w.tables.surface_map.data = snow;
+		r.w.tables.surface_map.width = 4;
+		r.w.tables.surface_map.height = 4;
+		r.w.tables.surface_map.sector_grid = grid;
+		auto &trails = r.veh().veh.trails;
+		const auto effect = [&] {
+			std::vector<VehicleTrailVisualRow> rows;
+			fill_vehicle_trail_visual_rows(r.w, rows);
+			return rows.size() == 1 ? rows[0].effect : std::string("?");
+		};
+		detail::vehicle_update_trail_lane(r.w, r.veh(), t, 1, 16384);
+		CHECK(trails.points[0].definition == 1 && trails.points[0].alternate == dfx2);
+		CHECK(trails.effect_state[0] == (dfx2 ? 3 : 1));
+		CHECK(effect() == (dfx2 ? "snowdust" : "dust"));
+		// Off the charmap: surface 1, so a DFX2 lane restarts with the effect.
+		r.w.tables.surface_map.data = nullptr;
+		detail::vehicle_update_trail_lane(r.w, r.veh(), t, 1, 16384);
+		CHECK(trails.points[0].definition == 1 && !trails.points[0].alternate);
+		CHECK(trails.effect_state[0] == 1 && effect() == "dust");
+		// A lane with no alternate reads no ground.
+		r.w.tables.surface_map.data = snow;
+		t.trails[0].secondary_effect.clear();
+		r.w.vehicles.traits.set(r.veh().item_id, t);
+		detail::vehicle_update_trail_lane(r.w, r.veh(), t, 1, 16384);
+		CHECK(!trails.points[0].alternate && trails.effect_state[0] == 1 && effect() == "dust");
+	}
+}
+
 // The slope factor samples the runtime table at (pitch + 0x200000) >> 22 rather
 // than a continuous cosine. A boxless row reads its placement pitch in the
 // spawn form: at -16 degrees that samples entry 979 where -16 x 11930464
@@ -3463,6 +3515,7 @@ static void test_bam_of_atan2_due_minus_x_is_the_ftol_word() {
 }
 
 int main() {
+    test_trail_alternate_follows_the_ground_under_dfx2();
     test_watercraft_entry_reads_the_hull();
     test_a_dead_hull_bails_to_its_tail();
     test_a_brainless_hull_bails_at_its_head();

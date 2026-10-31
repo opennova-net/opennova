@@ -915,7 +915,7 @@ void test_text_placement_and_truncation(const fnt_font_t *font) {
 // A menu font measures and draws at its texels whatever its design width: the menu font
 // cache writes 1.0 over the loader's 800 / design_width, where the HUD's fonts keep it
 // [orig: CFontCache_LoadOrGetFont @ 0x6530e7, CFontCache_EnsureFontLoaded @ 0x653ea0 -
-// flt_84C10C into the font's +0x12EC] (D-FNT-7). A 1600-designed font (the HUD's
+// g_MenuFontScale into the font's +0x12EC] (D-FNT-7). A 1600-designed font (the HUD's
 // scale 0.5) centres OK's "OK" where the 800-designed one does: 17 wide, x = 52.
 void test_menu_font_draws_at_its_texels() {
 	fnt_font_t wide = test_font::uniform_test_font();
@@ -933,11 +933,78 @@ void test_menu_font_draws_at_its_texels() {
 	int h = 0;
 	hud.measure("OK", 1.0f, 1.0f, &w, &h);
 	CHECK(w < 17 && hud.design_scale() == 0.5f, "the HUD keeps the design scale");
+	const int hud_w = w;
+	const int hud_h = h;
 	opennova::hud::GameFont menu;
-	menu.set_font(&wide, true);
+	menu.set_font(&wide, 1.0f);
 	menu.measure("OK", 1.0f, 1.0f, &w, &h);
 	CHECK(w == 17 && h == 16 && menu.design_scale() == 1.0f, "a menu font's scale is 1.0");
+	CHECK(c.font_scale() == 1.0f, "a compiler's menu fonts default to Jointops.exe's 1.0");
+	// dfx2.exe's cache writes 0.5 into every menu font (Title::menu_font_scale): its glyphs
+	// measure as the HUD's do over a 1600-designed font, and OK's narrower "OK" centres further
+	// right at half the height [orig: Menu_InitShellResources @0x54f750 (@0x54f759);
+	// CFontCache_LoadOrGetFont @0x6d8490 (@0x6d8607..0x6d8611) (dfx2.exe)].
+	opennova::hud::GameFont halved;
+	halved.set_font(&wide, 0.5f);
+	halved.measure("OK", 1.0f, 1.0f, &w, &h);
+	CHECK(w == hud_w && h == hud_h && halved.design_scale() == 0.5f,
+			"a 0.5 menu font measures at half its texels");
+	MenuFrameCompiler half;
+	half.set_font_scale(0.5f);
+	configure_with(half, doc.first_screen(), &wide);
+	const MenuDrawList &dl_half = half.compile(state, 1.0f, 1.0f);
+	CHECK(!dl_half.glyphs.empty() && dl_half.glyphs[0].x_top_left > 51.5f,
+			"a 0.5 menu font centres its narrower run further right");
+	CHECK(!dl_half.glyphs.empty() &&
+					dl_half.glyphs[0].y_bottom - dl_half.glyphs[0].y_top ==
+							(dl.glyphs[0].y_bottom - dl.glyphs[0].y_top) * 0.5f,
+			"a 0.5 menu font's glyph is half as tall");
 	fnt_free(&wide);
+}
+
+// A static's appearance texture set at run time (MenuWidgetState::image): its default state takes
+// the IMAGE type and the texture, interned past the configure's slots, drawn over the rect once
+// its size is known; another state, or no image, draws as authored (nothing for an empty
+// APPEARANCE) [orig: CWnd_SetAppearanceTexture @0x646450 - the channel's IMAGE bit @0x64647c, the
+// load @0x646497; its twin CWnd_SetAppearanceTexture @0x6d3760, CAMPAIGN_IMAGE's @0x560464
+// (dfx2.exe)].
+void test_runtime_image_appearance() {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>SP</NAME>
+  <WINDOW type="window" name="MAIN">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <WINDOW type="static" name="CAMPAIGN_IMAGE">
+      <APPEARANCE state="default"></APPEARANCE>
+      <POSITION><LEFT>325</LEFT><RIGHT>776</RIGHT><TOP>14</TOP><BOTTOM>260</BOTTOM></POSITION>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.configure(doc.first_screen());
+	MenuFrameState state;
+	CHECK(c.compile(state, 1.0f, 1.0f).quads.empty(), "an empty appearance draws nothing");
+	const size_t configured = c.texture_names().size();
+	MenuWidgetState image;
+	image.index = 1;
+	image.has_image = true;
+	image.image_states = 1u;
+	image.image = "camp.tga";
+	state.widgets.push_back(image);
+	CHECK(c.compile(state, 1.0f, 1.0f).quads.empty(), "an unloaded run-time image draws nothing");
+	CHECK(c.texture_names().size() == configured + 1 && c.texture_names().back() == "camp.tga",
+			"the run-time image is interned past the configure's slots");
+	const int32_t slot = c.add_runtime_texture("camp.tga");
+	CHECK(slot == static_cast<int32_t>(configured), "the same name keeps its slot");
+	c.set_texture_size(slot, 256, 128);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	CHECK(dl.quads.size() == 1 && dl.quads[0].texture == slot, "the default state draws the image");
+	CHECK(!dl.quads.empty() && dl.quads[0].x0 == 325.0f && dl.quads[0].y0 == 14.0f &&
+					dl.quads[0].x1 == 776.0f && dl.quads[0].y1 == 260.0f,
+			"stretched over the static's rect");
+	state.widgets[0].image_states = 2u; // the disabled state's alone
+	CHECK(c.compile(state, 1.0f, 1.0f).quads.empty(), "another state's image leaves the default");
 }
 
 // Menu text honours the inline tags: a colour tag draws its own RGB under the
@@ -3351,6 +3418,7 @@ int main() {
 	test_table_rows_draw_row_state_not_widget_hover(&font);
 	test_text_placement_and_truncation(&font);
 	test_menu_font_draws_at_its_texels();
+	test_runtime_image_appearance();
 	test_list_rows_lay_out_by_the_items_justification(&font);
 	test_text_inline_colour_tags(&font);
 	test_scale_truncation(&font);

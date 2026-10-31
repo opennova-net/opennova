@@ -140,8 +140,10 @@ bool host_restriction_radio_pressed(menu::MenuRuntime& screen, menu::HostDialog&
                                     const hud::GameTextLookup& menu_ui);
 // The live player-slot limit the session apply makes of a cap: the cap, plus
 // the host's own slot when dedicated (GameConfig::player_slot_limit), under the
-// title's ceiling (TitlePlayerCaps::session).
-uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play, const Title& title);
+// title's ceiling (TitlePlayerCaps::session) when the cfg block's network connect
+// type is 1 (GameConfig::network_connect_type).
+uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play,
+                                int32_t network_connect_type, const Title& title);
 // The session create's cap: in session the cap goes into 1..65 (dfx2.exe:
 // 1..251) before the apply (host_player_slot_limit), so a blank cap is 1 (a
 // slot limit of 2 dedicated) and a dedicated 65 makes the ceiling's 66. It is

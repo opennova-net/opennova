@@ -773,7 +773,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 			ControlsBindings.model())
 	# The HUDLS key labels by weapon category: the live binding of the row the
 	# start-up re-lay puts at record 200 + category (engine controls
-	# action_for_code carries the witness), formatted again only when a
+	# Catalog::for_code carries the witness), formatted again only when a
 	# binding changed or the HUD was rebuilt.
 	_apply_slot_bar_key_labels()
 	# The breath bar, the MP session lines, the HUDLS scan, the open menus and the
@@ -1168,9 +1168,10 @@ func cycle_friendly_tags() -> void:
 
 
 # The key-toggled windows: the F1 help page's text from the live help pages,
-# the F12 legend's gametext Hud labels (resolved once per mission), and the I
-# briefing panel, which draws only out of a session (a session's window draws
-# the MP end-game screen instead).
+# the F12 legend's gametext Hud labels (resolved once per mission), the I
+# window (the end-game screen in a session, out of one the briefing panel or
+# the how-to) and the briefing panel's own window (engine hud_briefing_window
+# and HudFrameCompiler::compile_gameplay_overlay_windows carry the gates).
 func _update_overlay_windows(sim: Simulation) -> void:
 	var legend_open := _toggles.is_map_legend_open()
 	if _toggles.is_help_open() and not legend_open:
@@ -1182,7 +1183,8 @@ func _update_overlay_windows(sim: Simulation) -> void:
 	if legend_open and _map_legend_labels.is_empty():
 		_map_legend_labels = _resolve_map_legend_labels()
 	_game_hud.set_map_legend(legend_open, _map_legend_title, _map_legend_labels)
-	_game_hud.set_briefing(_toggles.get_briefing_mode() != 0 and not sim.is_mp_session(), sim)
+	_game_hud.set_briefing(_toggles.get_briefing_mode(), _toggles.is_briefing_panel_open(), sim,
+			Strings.get_table(Strings.TABLE_GAMETEXT))
 
 
 func _resolve_map_legend_labels() -> PackedStringArray:
@@ -1281,7 +1283,8 @@ func _poll_toggle_rows(sim: Simulation, gameplay_input_active: bool) -> int:
 			(sim.get_session_game_type() & NetProtocol.GAME_TYPE_OBJECTIVE_BIT) != 0,
 			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim),
 			ControlsBindings.model().is_token_fire_signed(
-					HudToggles.row_token(HudToggles.ROW_MOUSE_SCALE)))
+					HudToggles.row_token(HudToggles.ROW_MOUSE_SCALE)),
+			0, HudToggles.sim_death_screen(sim), HudToggles.sim_friendly_tags_skip_mode_1(sim))
 
 
 static func _authority(sim: Simulation) -> bool:
@@ -1362,7 +1365,12 @@ func _apply_toggle_events(events: int) -> void:
 	if events & HudToggles.EVENT_FRIENDLY_TAGS_CYCLED:
 		if _game_hud != null:
 			_game_hud.set_friendly_tag_mode(_toggles.get_friendly_tag_mode())
-		_post_misc_toast(_toggles.friendly_tag_toast_key())
+		# The new mode's line under the session's title: a Misc key's text, or the title's
+		# own literal line (engine hud::friendly_tag_toast).
+		var tags_line := _toggles.friendly_tag_toast(Strings.get_table(Strings.TABLE_GAMETEXT),
+				_world.get_resource_root() if _world != null else null)
+		if _game_hud != null and not tags_line.is_empty():
+			_game_hud.push_message(tags_line)
 	if events & HudToggles.EVENT_VERBOSE_TOGGLED:
 		_post_misc_toast(_toggles.verbose_toast_key())
 	# The look rows act on the session's live words (the profile record keeps

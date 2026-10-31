@@ -32,6 +32,10 @@ struct VehicleSeatOccupancy {
     // its pool/slot before drawing the rider's marker.
     bool rider_resolved = false;
     bool player = false; // retail Flags & 0x100; numbered-seat request eligibility
+    // The rider as this client holds it: the occupant's world handle, or a joiner's decoded
+    // row's (its source's); invalid while unresolved. The vehicle panel's rider lines name it
+    // (vehicle_panel_feed.h vehicle_panel_riders).
+    EntityHandle rider;
 };
 
 // A joiner's remote organics live in its decoded state, outside World pool 0.

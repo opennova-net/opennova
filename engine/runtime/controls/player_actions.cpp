@@ -8,68 +8,59 @@
 namespace opennova::controls {
 namespace {
 
-enum class Gate { Captured, Active };
 enum RowFlags {
 	CaptureLatch = 1, // trigger latch sees the gated state, unlike event rows
 	Reset = 2,
 	NeedsSimulation = 4, // scope-zero latches freeze while no sim exists
 };
 
-struct ActionRow {
-	const char *token;
-	PlayerActionRequest request;
-	Gate gate;
-	int flags = 0;
-};
+using ActionRow = PlayerActionRow;
+constexpr bool kCaptured = true; // the captured gate (gameplay input captured)
+constexpr bool kActive = false;  // the active gate alone
 
 using Action = PlayerAction;
-const ActionRow kRows[] = {
-	{"scope", {Action::ToggleScope}, Gate::Captured, CaptureLatch | Reset},
+// The rows ahead of the weapon rows, then the rows after them (action_rows).
+const ActionRow kRowsHead[] = {
+	{"scope", {Action::ToggleScope}, kCaptured, CaptureLatch | Reset},
 	// Ctrl+1..Ctrl+0 and bare weapon digits are already separated by the
 	// binding sampler's two passes. Mount admission stays in the simulation.
 	// [orig: Input_HandleActionBinding_0 cases 0xB6..0xBF @0x4E0B81..0x4E0C22;
 	//  Player_SwitchToWeaponByHandle parentSlot gate @0x4e0192]
-	{"seat1", {Action::SelectSeat, 0}, Gate::Captured},
-	{"seat2", {Action::SelectSeat, 1}, Gate::Captured},
-	{"seat3", {Action::SelectSeat, 2}, Gate::Captured},
-	{"seat4", {Action::SelectSeat, 3}, Gate::Captured},
-	{"seat5", {Action::SelectSeat, 4}, Gate::Captured},
-	{"seat6", {Action::SelectSeat, 5}, Gate::Captured},
-	{"seat7", {Action::SelectSeat, 6}, Gate::Captured},
-	{"seat8", {Action::SelectSeat, 7}, Gate::Captured},
-	{"seat9", {Action::SelectSeat, 8}, Gate::Captured},
-	{"seat10", {Action::SelectSeat, 9}, Gate::Captured},
-	// Catalog rows 28..36: Knife '1', Secondary '2', Primary '3', Flashbang
-	// '4', FragGrenade '5', SmokeGrenade '6', Accessory '7', Detonator '8',
-	// medpack '9' request categories 1..9; rows 39/40 cycle '[' / ']'.
-	// [orig: input cases 200-210 @ 0x4e1144 ->
-	//  Player_SwitchToWeaponByHandle((action-200)*65); cases 212/214 ->
-	//  Player_CycleWeaponSlot @ 0x4dfe70; engine/runtime/controls k_catalog rows]
-	{weapon_category_token(0), {Action::WeaponCategory, 1}, Gate::Captured},
-	{weapon_category_token(1), {Action::WeaponCategory, 2}, Gate::Captured},
-	{weapon_category_token(2), {Action::WeaponCategory, 3}, Gate::Captured},
-	{weapon_category_token(3), {Action::WeaponCategory, 4}, Gate::Captured},
-	{weapon_category_token(4), {Action::WeaponCategory, 5}, Gate::Captured},
-	{weapon_category_token(5), {Action::WeaponCategory, 6}, Gate::Captured},
-	{weapon_category_token(6), {Action::WeaponCategory, 7}, Gate::Captured},
-	{weapon_category_token(7), {Action::WeaponCategory, 8}, Gate::Captured},
-	{weapon_category_token(8), {Action::WeaponCategory, 9}, Gate::Captured},
+	{"seat1", {Action::SelectSeat, 0}, kCaptured},
+	{"seat2", {Action::SelectSeat, 1}, kCaptured},
+	{"seat3", {Action::SelectSeat, 2}, kCaptured},
+	{"seat4", {Action::SelectSeat, 3}, kCaptured},
+	{"seat5", {Action::SelectSeat, 4}, kCaptured},
+	{"seat6", {Action::SelectSeat, 5}, kCaptured},
+	{"seat7", {Action::SelectSeat, 6}, kCaptured},
+	{"seat8", {Action::SelectSeat, 7}, kCaptured},
+	{"seat9", {Action::SelectSeat, 8}, kCaptured},
+	{"seat10", {Action::SelectSeat, 9}, kCaptured},
+};
+// The catalog's weapon rows go here, each requesting its category, the code - 200 (Jointops.exe's
+// Knife '1' .. medpack '9' categories 1..9; dfx2.exe's Powerup0 '0' 0 .. Detonator Backspace
+// 10); rows 39/40 cycle '[' / ']'.
+// [orig: input cases 200-210 @ 0x4e1144 ->
+//  Player_SwitchToWeaponByHandle((action-200)*65); cases 212/214 ->
+//  Player_CycleWeaponSlot @ 0x4dfe70] [orig: Input_HandleActionBinding_0 - cases 200-210
+//  @0x4de239..0x4de24d (dfx2.exe)]
+const ActionRow kRowsTail[] = {
 	// P is retail action 212 (+1: the next-higher weapon slot, or a +2 step of
 	// a variable optic), N is 214 (-1 / -2), although the catalog names P
 	// "Cycle Weapon Prev". The sign drives both infantry cycling and optical
 	// magnification. [orig: Input_HandleActionBinding_0 @ 0x4E0420, calls
 	// @ 0x4E1341 / @ 0x4E13A4; Player_CycleWeaponSlot `add edi,ebp` @ 0x4DFEF6]
 	// docs/world/tank-parity-re.md (D-CTRL-5).
-	{"cycleweaponP", {Action::WeaponCycle, 1}, Gate::Captured},
-	{"cycleweaponN", {Action::WeaponCycle, -1}, Gate::Captured},
+	{"cycleweaponP", {Action::WeaponCycle, 1}, kCaptured},
+	{"cycleweaponN", {Action::WeaponCycle, -1}, kCaptured},
 	// Three-key SELECT: the sim owns mutual exclusion and ForceCrouch refusal.
 	// [orig: input cases 170/169/172 @0x4e0df3/@0x4e0d77/@0x4e0e3e ->
 	//  NapiNPServerMsg_HandleStanceChange @0x501c60]
-	{"Stand", {Action::Stance, 0}, Gate::Active, Reset},
-	{"Crouch", {Action::Stance, 1}, Gate::Active, Reset},
-	{"Prone", {Action::Stance, 2}, Gate::Active, Reset},
-	{"ScopeZeroDec", {Action::ScopeZero, -1}, Gate::Active, Reset | NeedsSimulation},
-	{"ScopeZeroInc", {Action::ScopeZero, 1}, Gate::Active, Reset | NeedsSimulation},
+	{"Stand", {Action::Stance, 0}, kActive, Reset},
+	{"Crouch", {Action::Stance, 1}, kActive, Reset},
+	{"Prone", {Action::Stance, 2}, kActive, Reset},
+	{"ScopeZeroDec", {Action::ScopeZero, -1}, kActive, Reset | NeedsSimulation},
+	{"ScopeZeroInc", {Action::ScopeZero, 1}, kActive, Reset | NeedsSimulation},
 	// Radarout grows the world extent (x1.15 toward 0x100000), radarin shrinks
 	// it (x0.85 toward 4096). The simulation owns those steps. The HUD's code
 	// 19 declutter row stays in its separate poll (D-CTRL-4).
@@ -77,49 +68,68 @@ const ActionRow kRows[] = {
 	//  @0x49beaf, radarin row 49 = case 360 @0x49bcb0; code 19 ->
 	//  Input_HandleActionBinding_0 @0x4e060b..0x4e0624 ->
 	//  CRenderState_SetLayerVisibility @0x59B0F0]
-	{"radarout", {Action::RadarZoom, 1}, Gate::Active},
-	{"radarin", {Action::RadarZoom, -1}, Gate::Active},
+	{"radarout", {Action::RadarZoom, 1}, kActive},
+	{"radarin", {Action::RadarZoom, -1}, kActive},
 	// Off -> north-up window -> fullscreen -> off, in the in-game dispatcher.
 	// [orig: row 98 code 28 -> the @0x4e0662 arm -> HUD_CycleMapMode
 	//  @0x520bc0 (0->2->3->0)]
-	{"map_toggle", {Action::MapCycle}, Gate::Active},
+	{"map_toggle", {Action::MapCycle}, kActive},
 	// B / N / Ctrl+= / Ctrl+-: the sim owns the witnessed refusals (fire
 	// charge, the scoped seat-3 view) and the gain clamp 0..4.
 	// [orig: rows 103/104/45/46 = dispatch 26 / 41 / 56 / 57 ->
 	//  Input_HandleActionBinding_0 cases 0x1A, 0x29, 0x38, 0x39 @0x4e0420]
-	{"binoculars", {Action::Binoculars}, Gate::Active},
-	{"NVG", {Action::NightVision}, Gate::Active},
-	{"nvggainup", {Action::NvgGain, 1}, Gate::Active},
-	{"nvggaindown", {Action::NvgGain, -1}, Gate::Active},
+	{"binoculars", {Action::Binoculars}, kActive},
+	{"NVG", {Action::NightVision}, kActive},
+	{"nvggainup", {Action::NvgGain, 1}, kActive},
+	{"nvggaindown", {Action::NvgGain, -1}, kActive},
 	// F7; the value is replaced by the fire's sign (fire_signed) when the row fires.
 	// [orig: row 51 = dispatch 23 @0x49b3de]
-	{"NextWaypoint", {Action::WaypointCycle, 1}, Gate::Active},
+	{"NextWaypoint", {Action::WaypointCycle, 1}, kActive},
+	// dfx2.exe's 1st Person Toggle, F1 (code 412, flags 0x0C000801: the head drops it for a dead
+	// player, under the pause word and the round-over gate). Jointops.exe carries no such row.
+	// [orig: row 108 @0x817630; Input_HandleActionBinding @0x49AD50 case 412 @0x49c107 (dfx2.exe)]
+	{"viewtoggle", {Action::ViewToggle}, kActive},
 };
 
-// A catalog row's mode word by its config token (alive bit 1, death-screen
-// bit 2); a token no row carries reads 0 [orig: the row's +8 word,
-// Input_IsBindingActiveForMode @0x497ea0].
-uint32_t row_modes(const char *token) {
-	std::size_t count = 0;
-	const ActionDef *rows = catalog(&count);
-	for (std::size_t i = 0; i < count; ++i)
-		if (std::string_view(rows[i].token) == token) return rows[i].modes;
-	return 0;
+// The weapon row a catalog row is, if any: a code 200..210 requests its category.
+bool weapon_row(const ActionDef &def, ActionRow &out) {
+	if (def.code < kWeaponCategoryCodeFirst || def.code > kWeaponCategoryCodeLast) return false;
+	out = ActionRow{def.token, {Action::WeaponCategory, def.code - kWeaponCategoryCodeFirst}, kCaptured};
+	return true;
 }
 
-// A catalog row's dispatch code by its config token; a token no row carries
-// reads -1 [orig: word_8159A8 + 108 * row].
-int row_code(const char *token) {
-	std::size_t count = 0;
-	const ActionDef *rows = catalog(&count);
-	for (std::size_t i = 0; i < count; ++i)
-		if (std::string_view(rows[i].token) == token) return action_code(rows[i].id);
-	return -1;
+// The action table over `catalog`: the head rows, the catalog's weapon rows in its order, the
+// tail rows.
+std::vector<ActionRow> action_rows(const Catalog &catalog) {
+	std::vector<ActionRow> rows(std::begin(kRowsHead), std::end(kRowsHead));
+	for (std::size_t i = 0; i < catalog.count; ++i) {
+		ActionRow row;
+		if (weapon_row(catalog.rows[i], row)) rows.push_back(row);
+	}
+	rows.insert(rows.end(), std::begin(kRowsTail), std::end(kRowsTail));
+	return rows;
+}
+
+// A catalog row's dispatch code by its config token; a token no row carries reads -1
+// [orig: g_BindingRows + 108 * row].
+int code_of(const Catalog &catalog, const char *token) {
+	const ActionDef *def = catalog.for_token(token);
+	return def != nullptr ? def->code : -1;
 }
 
 } // namespace
 
-PlayerActions::PlayerActions() : rows_(std::size(kRows)) {}
+PlayerActions::PlayerActions(const Catalog &catalog)
+		: catalog_(&catalog), table_(action_rows(catalog)), rows_(table_.size()) {}
+
+int PlayerActions::row_code(const char *token) const { return code_of(*catalog_, token); }
+
+// A catalog row's mode word by its config token (alive bit 1, death-screen bit 2); a token no
+// row carries reads 0 [orig: the row's +8 word, Input_IsBindingActiveForMode @0x497ea0].
+uint32_t PlayerActions::row_modes(const char *token) const {
+	const ActionDef *def = catalog_->for_token(token);
+	return def != nullptr ? def->modes : 0;
+}
 
 // USE ages before the action rows: LAST frame's hold governs the digit row swallow,
 // including a digit arriving on the release frame, as it governs the special-key
@@ -205,7 +215,7 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	// [orig: the binding dispatch cases 0x95 fire / 0xD3 reload / 6 scope,
 	//  Input_HandleActionBinding_0 @0x4e0420 -- ported in engine/runtime/world
 	//  weapon_fsm + Simulation]
-	const auto admitted = [&gate](const char *token) {
+	const auto admitted = [this, &gate](const char *token) {
 		return !gate.death_screen || (row_modes(token) & 2u) != 0;
 	};
 	frame.fire_held = captured && admitted("attack_1") && source.binding_active("attack_1");
@@ -300,7 +310,7 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	const bool to_special_off_release =
 			!to_special_off && to_special_off_down_ && !gate.keyboard_captured;
 	to_special_off_down_ = to_special_off;
-	const auto request_of = [&source](const ActionRow &row, bool sign_known, bool sign) {
+	const auto request_of = [this, &source](const ActionRow &row, bool sign_known, bool sign) {
 		PlayerActionRequest request = row.request;
 		// The row's key event reaches its arm through the dispatcher's head.
 		request.code = row_code(row.token);
@@ -355,10 +365,10 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 			continue;
 		}
 		bool owned = false;
-		for (const ActionRow &row : kRows) {
+		for (const ActionRow &row : table_) {
 			if (row_code(row.token) != event.code) continue;
 			owned = true;
-			const bool active = row.gate == Gate::Captured ? captured : gate.active;
+			const bool active = row.captured ? captured : gate.active;
 			if (active && admitted(row.token) && gate.simulation_available)
 				frame.requests.push_back(request_of(row, true, event.sign));
 			break;
@@ -384,10 +394,10 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 		frame.requests.push_back({Action::ToSpecial, 0, to_special_code});
 	if (medic_off) frame.requests.push_back({Action::MedicRequest, 0, medic_code});
 	if (respawn_off) frame.requests.push_back({Action::Respawn, 0, respawn_code});
-	for (std::size_t i = 0; i < std::size(kRows); ++i) {
-		const auto &row = kRows[i];
+	for (std::size_t i = 0; i < table_.size(); ++i) {
+		const auto &row = table_[i];
 		if ((row.flags & NeedsSimulation) && !gate.simulation_available) continue;
-		const bool active = row.gate == Gate::Captured ? captured : gate.active;
+		const bool active = row.captured ? captured : gate.active;
 		const bool capture_latch = (row.flags & CaptureLatch) != 0;
 		const bool down = (!capture_latch || active) && admitted(row.token) &&
 				source.held_off_keyboard(row.token);
@@ -463,8 +473,8 @@ ChainDigitTake PlayerActions::chain_digit_key(int vk, bool emotes_menu_open,
 void PlayerActions::reset() {
 	fire_off_down_ = false;
 	reload_was_down_ = false;
-	for (std::size_t i = 0; i < std::size(kRows); ++i)
-		if (kRows[i].flags & Reset) rows_[i].down = false;
+	for (std::size_t i = 0; i < table_.size(); ++i)
+		if (table_[i].flags & Reset) rows_[i].down = false;
 }
 
 void PlayerActions::consume_use_hold() {
@@ -480,19 +490,20 @@ int WheelRemainder::feed(int32_t delta) {
 	return notches;
 }
 
-bool player_actions_own_code(int code) {
-	if (code == row_code("attack_1") || code == row_code("ToSpecial") ||
-			code == row_code("magazine") || code == row_code("MedicReq") ||
-			code == row_code("respawn") || (code >= 500 && code <= 502))
+bool player_actions_own_code(const Catalog &catalog, int code) {
+	const auto is = [&catalog, code](const char *token) { return code_of(catalog, token) == code; };
+	if (is("attack_1") || is("ToSpecial") || is("magazine") || is("MedicReq") || is("respawn") ||
+			(code >= 500 && code <= 502))
 		return true;
-	for (const auto &row : kRows)
-		if (row_code(row.token) == code) return true;
+	for (const ActionRow &row : action_rows(catalog))
+		if (code_of(catalog, row.token) == code) return true;
 	return false;
 }
 
-std::optional<PlayerActionRequest> player_action_request(const InputEventRecord &record) {
-	for (const auto &row : kRows) {
-		if (row_code(row.token) != record.code) continue;
+std::optional<PlayerActionRequest> player_action_request(const Catalog &catalog,
+		const InputEventRecord &record) {
+	for (const ActionRow &row : action_rows(catalog)) {
+		if (code_of(catalog, row.token) != record.code) continue;
 		PlayerActionRequest request = row.request;
 		request.code = record.code;
 		request.sign = record.sign;

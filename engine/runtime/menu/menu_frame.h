@@ -142,7 +142,10 @@ struct MenuQuad {
 // (rounded up to a power of two, clamped to the device's maximum texture side, the
 // image split into tiles past that); each tile created with its FLAGS word | 1, CLAMP
 // @ 0x67aa30]. No menu image reaches the maximum on any device this runs on, so the
-// split is not ported.
+// split is not ported. dfx2.exe's builder is the same code, so the rule serves every title
+// [orig: GImage_CreateTiledTextures_0 @0x6b73f0 - the image's sides into the fit
+// GImage_FitTextureSizeToCaps @0x6b742f..0x6b7479, the zeroed tile @0x6b752d, the tile created at
+// the fitted sides @0x6b75e5..0x6b7603 (dfx2.exe)].
 inline int menu_image_texture_side(int side) {
 	int pot = 1;
 	while (pot < side) pot *= 2;
@@ -276,6 +279,11 @@ struct MenuWidgetState {
 	// the parent's origin.
 	bool has_rect = false;
 	mnu::RectEdges rect;
+	// An appearance texture set at run time (MenuRuntime::set_widget_image): each state of
+	// `image_states` (bit n the state n) draws `image` as its IMAGE, its own height.
+	bool has_image = false;
+	uint32_t image_states = 0;
+	std::string image;
 	// TABLE data rows (menu_table_row.h: the texts, cell values, row state,
 	// flags and colour of the 40-byte row records) [orig: CUITable_Render
 	// @ 0x6411d0]. scroll_row above is the first visible row.
@@ -377,7 +385,24 @@ public:
 	virtual void draw_cell(int row, int column, int flags) = 0;
 	virtual void clear_rect(uint32_t argb, float left, float top, float right, float bottom) = 0;
 	virtual void line(uint32_t argb, float x0, float y0, float x1, float y1) = 0;
+	// HUD_DrawTextCentered_HalfBright(g_HUDLabelFont, x, foot - the font's 'W' height, text,
+	// argb): the HUD label face, centred on `center_x`, its top the 'W' extent above `foot`, at
+	// half brightness. The menu frame's canvas draws it with the font registered under
+	// kMenuHudLabelFontName (MenuFrameAssets::set_hud_label_face), nothing without one.
+	// [orig: CGameFont_GetCharExtent @0x6b1980 (g_HUDLabelFont, 'W'), HUD_DrawTextCentered_HalfBright
+	//  @0x57eb00 (dfx2.exe)]
+	virtual void hud_label(const std::string &text, float center_x, float foot, uint32_t argb) {
+		(void)text;
+		(void)center_x;
+		(void)foot;
+		(void)argb;
+	}
 };
+
+// The name the HUD label face registers under in a menu compiler (MenuFrameAssets::
+// set_hud_label_face): the HUD's g_HUDLabelFont, which a table painter draws with through
+// MenuTableCellCanvas::hud_label. No .mnu FONT NAME can spell it (an XML text holds no raw '<').
+inline constexpr const char *kMenuHudLabelFontName = "<hud label>";
 
 // A table's registered custom-draw handler (the control callback bound on the
 // 0x08 event class) [orig: CUIScene_RegisterControlCallback @0x63c060].
@@ -508,6 +533,12 @@ public:
 	// Borrowed; set before configure().
 	void set_text_tables(const MenuTextTables *tables);
 
+	// The scale the menu font cache writes into every menu font it loads, which each draws and
+	// measures its glyphs at: the title's (Title::menu_font_scale; Jointops.exe's 1.0, the
+	// texels) (D-FNT-7). Set before configure() (MenuFrameAssets::configure sets it).
+	void set_font_scale(float scale) { font_scale_ = scale > 0.0f ? scale : 1.0f; }
+	float font_scale() const { return font_scale_; }
+
 	// Per-name font registration (case-insensitive, the FONT NAME as authored
 	// after %VAR%): only a font that loaded is registered; an unregistered name
 	// is one that did not load. Set before configure() (a marquee's node fonts
@@ -539,6 +570,10 @@ public:
 	// @ 0x648120; CTextureManager_LoadOrFindTexture @ 0x654980 zeroes the
 	// handle of a load that fails].
 	void set_texture_size(int32_t slot, int width, int height);
+	// A texture a widget takes at run time (MenuWidgetState::image), interned after configure: its
+	// slot, which a compile draws once the embedder reported its size (MenuFrameAssets::
+	// load_added_textures loads every slot past the configure's).
+	int32_t add_runtime_texture(const std::string &name) { return intern_texture(name); }
 
 	const MenuDrawList &compile(const MenuFrameState &state, float scale_x,
 			float scale_y);
@@ -678,6 +713,11 @@ public:
 	// Bind (or clear, with an empty function) the custom-draw handler of the
 	// table at `index`; kept across configure() while the index stays a table.
 	void set_table_cell_painter(int index, MenuTableCellPainter painter);
+	// The HUD label face's slot scale, the float pair HUD_LoadFontIntoSlot stores
+	// ((width << 16) / divisor, hud::hud_label_font_choice), which a painter's
+	// hud_label draws at; the face is the font registered under kMenuHudLabelFontName.
+	// [orig: HUD_LoadFontIntoSlot @0x57e880 - fontSlot +4 / +8 @0x57e8e5 (dfx2.exe)]
+	void set_hud_label_scale(float scale) { hud_label_scale_ = scale; }
 	// The editor's pick: the front-most shown window under the point by its rect
 	// alone, a disabled one or GLB_TABLE included, a spin arrow its list's, a
 	// scrollbar its owner's (hit_walk with `pump` false; no state written).
@@ -1142,7 +1182,7 @@ private:
 	void emit_outline(const mnu::RectEdges &design, const WalkScale &s,
 			uint32_t color);
 	void emit_appearance(const WidgetNode &node, const mnu::RectEdges &rect,
-			const WalkScale &s, int appearance_slot);
+			const WalkScale &s, int appearance_slot, const MenuWidgetState *ws = nullptr);
 	void emit_frame(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s);
 	void emit_glyph_run(const WidgetNode &node, const std::string &text,
@@ -1153,6 +1193,8 @@ private:
 			int caret);
 	void emit_caret(hud::GameFont &gf, const std::string &text, int design_x,
 			int design_y, const WalkScale &s, uint32_t color, int caret);
+	// A table painter's HUD label (MenuTableCellCanvas::hud_label), in device pixels.
+	void emit_hud_label_(const std::string &text, float center_x, float foot, uint32_t argb);
 	// A label's draw, its {hot} marker's offset the cursor.
 	void emit_widget_text(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, int color_state, const MenuWidgetState *ws,
@@ -1277,6 +1319,7 @@ private:
 	const mnu::Screen *screen_ = nullptr;
 	std::map<std::string, std::string> style_vars_;
 	const MenuTextTables *text_tables_ = nullptr;
+	float font_scale_ = 1.0f;
 	std::map<std::string, const opennova::fnt::fnt_font_t *> registered_fonts_;
 	// The first-load HEIGHT per texture key (name + FLAGS, lowercased); -1 is a
 	// load with no HEIGHT (the texture's own height).
@@ -1292,6 +1335,7 @@ private:
 	std::map<int, EditScroll> edit_scroll_;
 	std::map<int, MarqueeScroll> marquee_scroll_;
 	std::map<int, MenuTableCellPainter> table_painters_;
+	float hud_label_scale_ = 1.0f;
 	MenuDrawList draw_list_;
 	// The node configure() is building (the owner of a note_), and what it noted: the
 	// log is the one thing the const note hooks write.

@@ -145,6 +145,11 @@ bool Simulation::is_round_over() const {
 	return kernel_ != nullptr && kernel_->world.match.outcome().ended;
 }
 
+int Simulation::get_end_round_winner_team() const {
+	if (runtime_ == nullptr || !runtime_->state().end_round.header_known) return 0;
+	return static_cast<int>(runtime_->state().end_round.header.winner_team);
+}
+
 int Simulation::get_charattr_disabled_word() const {
 	return kernel_ != nullptr ? static_cast<int>(kernel_->world.tables.charattr_disabled_word) : 0;
 }

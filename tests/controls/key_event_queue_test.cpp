@@ -85,7 +85,7 @@ bool test_keypad_enter_scans_as_269() {
 //  modifier pass's fire @0x49d42f, the fallback's sign @0x49d452..0x49d470 and fire
 //  @0x49d488; Input_QueueKeyEvent's repeat bit @0x760c7b]
 bool test_each_event_fires_its_row() {
-	BindingSet set;
+	BindingSet set(opennova::controls::default_catalog());
 	std::set<int> down;
 	const auto key_down = [&](int vk) { return down.count(vk) != 0; };
 	const int huddetail = set.index_of_token("huddetail");
@@ -132,7 +132,7 @@ bool test_each_event_fires_its_row() {
 //  word @0x49d29f, the queue @0x49d2b1, the clear @0x49d2b9, no row @0x49d281);
 //  Input_ResetAllState @0x497ED0 - the memset @0x497F08]
 bool test_release_pass_follows_the_press_latch() {
-	BindingSet set;
+	BindingSet set(opennova::controls::default_catalog());
 	KeyPressLatch latch;
 	std::set<int> down;
 	const auto key_state = [&](int vk) { return down.count(vk) != 0; };
@@ -178,7 +178,7 @@ bool test_release_pass_follows_the_press_latch() {
 	// (D-CTRL-9): attack_1 (149) on ToSpecial's G takes the release alone, and on NextWaypoint's
 	// F7 (23, which the press scan fires) attack_1 still takes the key's release.
 	// [orig: @0x49d252..0x49d27f, the 0x80800000 test @0x49d26f, no press-scan gate read]
-	BindingSet shared;
+	BindingSet shared(opennova::controls::default_catalog());
 	const int attack = shared.index_of_token("attack_1");
 	const int next_waypoint = shared.index_of_token("NextWaypoint");
 	const int special = shared.index_of_token("ToSpecial");

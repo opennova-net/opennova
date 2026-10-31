@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
 #include <godot_cpp/variant/rect2i.hpp>
@@ -76,6 +77,8 @@ public:
 		// session block rides composite_loading_session_text, the bar the
 		// loading_bar_* statics.
 		LOADING_PRESENT_INTERVAL_MS = 100,
+		// The round-over RESTART key's recomposite stage (hud/loading_screen.h).
+		LOADING_RESTART_STAGE = 16,
 		// The first-person view effects (hud/view_effects.h; same pinning):
 		// the rangefinder digit advance and the 16px digit-strip cell.
 		BINOCULAR_DIGIT_STEP = 10,
@@ -136,8 +139,15 @@ public:
 	// Not bound: HudOverlay's weapon feed is its one caller.
 	static String weapon_display_name(const Ref<RtxtStringFile> &p_gametext,
 			const String &p_weapon_id);
-	static String loading_font_small();
-	static String loading_font_large();
+	// The running title's loading-screen fonts over a background `p_image_width` wide, "" for a
+	// title with none; its progress lines (hud/loading_screen.h loading_fonts,
+	// loading_progress_line_count / _key / _fallback, loading_screen_stage).
+	static String loading_font_small(int p_image_width);
+	static String loading_font_large(int p_image_width);
+	static int loading_progress_line_count(int p_stage);
+	static String loading_progress_line_key(int p_line);
+	static String loading_progress_line_fallback(int p_line);
+	static int loading_screen_stage(int p_percent);
 	static String loading_msg_label_key();
 	static String loading_msg_label_fallback();
 	static bool loading_present_due(int p_elapsed_ms, bool p_reported_changed);
@@ -145,11 +155,16 @@ public:
 	// game blends it into the image before the stretch (hud::composite_loading_session_text): the
 	// title, the mission and the game type in the large font, the server message's label
 	// (`p_label` and its colon) and body in the small one where `p_custom_text` is not empty, the
-	// band ending at `p_band_right`. A missing font draws nothing; no background, no image.
+	// band ending at the running title's edge over a custom or the stock background. A missing
+	// font draws nothing; no background, no image.
 	static Ref<Image> composite_loading_session_text(const Ref<Image> &p_background,
 			const Ref<FntResource> &p_large, const Ref<FntResource> &p_small, const String &p_title,
 			const String &p_mission, const String &p_game_type, const String &p_label,
-			const String &p_custom_text, int p_band_right);
+			const String &p_custom_text, bool p_custom_background);
+	// The progress lines `p_lines` composited into a copy of `p_background` in the small font
+	// (hud::composite_loading_progress_lines); no background, no image.
+	static Ref<Image> composite_loading_progress_lines(const Ref<Image> &p_background,
+			const Ref<FntResource> &p_small, const PackedStringArray &p_lines);
 	// The bar's [outer, gray, track, fill] rects on a surface of `p_surface`
 	// px at `p_displayed` percent (engine hud/loading_screen.h loading_bar_rects).
 	static TypedArray<Rect2i> loading_bar_rects(const Vector2 &p_surface, int p_displayed);
@@ -171,14 +186,19 @@ public:
 	// each run as drawn ({page, uvs, colors}); none where the font holds no glyphs.
 	static Array draw_splash_continue(CanvasItem *p_item, const Ref<FntResource> &p_font, const Array &p_pages,
 			const String &p_text, const Vector2i &p_size, bool p_phase_on);
-	// The epilog cine's text node through the large label slot's glyph runs (engine
-	// hud/cine_text.h cine_event_text_run carries the witness): a TextFade's lines over
-	// `p_text`, an EpilogCounter's row with `p_text` its label, over a `p_size` screen, a
-	// triangle array per page run into `p_item` (none for a null item) over `p_pages`. Returns
-	// each run as drawn ({page, uvs, colors}).
+	// The epilog cine's text node through its label slot's glyph runs (engine hud/cine_text.h
+	// cine_event_text_run carries the witness): a TextFade's line by its source over
+	// `p_game_text` (the gametext string its section and key name) and `p_banner` (the stored
+	// banner), an EpilogCounter's row with `p_game_text` its label, over a `p_size` screen at the
+	// slot's scale (`p_font` the slot's, cine_font_file), a triangle array per page run into
+	// `p_item` (none for a null item) over `p_pages`. Returns each run as drawn ({page, uvs,
+	// colors}).
 	static Array draw_cine_text(CanvasItem *p_item, const Ref<FntResource> &p_font,
-			const Array &p_pages, const Ref<CineEventRecord> &p_event, const String &p_text,
-			const Vector2i &p_size);
+			const Array &p_pages, const Ref<CineEventRecord> &p_event, const String &p_game_text,
+			const String &p_banner, const Vector2i &p_size);
+	// The label slot's font file a cine node draws in over a `p_width` screen, the session's
+	// title's (hud::cine_event_font / cine_font_file); "" for none.
+	static String cine_font_file(const Ref<CineEventRecord> &p_event, int p_width);
 	// A font's pages as the textures its glyph runs draw from (font_page_glyphs), by page.
 	static Array font_page_textures(const Ref<FntResource> &p_font);
 	// The canvas_item shader an item whose glyph runs draw through their page's material carries,
@@ -188,10 +208,11 @@ public:
 
 	// The first-person view-effect spec (hud/view_effects.h carries the
 	// values and witnesses): binocular/NVG overlay rects in the 1024x768
-	// design space, the NVG scale modulate, and the rangefinder easing step.
+	// design space (the NVG scale rect the session's title's, DFX2-44), the NVG
+	// scale modulate, and the rangefinder easing step.
 	static Rect2 binocular_crosshair_rect();
 	static Vector2 binocular_digit_pos();
-	static Rect2 nvg_scale_rect();
+	static Rect2 nvg_scale_rect(const Ref<ResourceRoot> &p_root);
 	static Color nvg_scale_modulate();
 	static int binocular_range_step(int p_current, int p_target);
 	// The view effects' texture names, by VIEW_TEXTURE_* (hud/hud_texture_names.h carries

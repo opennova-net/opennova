@@ -1551,6 +1551,7 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	if (runtime->get_sim().is_null()) {
 		const int setup_error = runtime->get_setup_error();
 		const bool process_exit = runtime->is_process_exit();
+		const int32_t process_exit_code = runtime->process_exit_code();
 		const bool lan_bind_failure = opts->get_net_transport() == "lan";
 		const int bind_port = opts->get_bind_port();
 		// Free before emitting: a load_failed handler may synchronously tear
@@ -1562,9 +1563,10 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 		runtime_id_ = ObjectID();
 		memdelete(runtime);
 		if (process_exit) {
-			// The session create ended the process (exit code 0): no load
-			// failure to show, the shell exits.
-			emit_signal(kSignalProcessExitRequested, 0);
+			// The load ended the process (the session create's mpreset, exit
+			// code 0, or a load warning box's Cancel, -1): no load failure to
+			// show, the shell exits.
+			emit_signal(kSignalProcessExitRequested, process_exit_code);
 		} else if (lan_bind_failure) {
 			emit_signal(kSignalLoadFailed, vformat("host start: could not bind LAN UDP port %d", bind_port));
 		} else {

@@ -142,6 +142,12 @@ void draw_route_lines(MapCompile &c);              // bit15
 void draw_zone_waypoint_labels(MapCompile &c);     // bit14
 void draw_zone_letters(MapCompile &c);             // bit3
 void draw_pool3_walk(MapCompile &c);               // mask & 0x810
+// The 6027 / 6028 capture-zone rings alone, in the pool-3 walk's order: dfx2.exe's walk ahead of
+// the marker layers (DFX2-49), and its DEATH map's (DFX2-50).
+void draw_capture_zone_rings(MapCompile &c);
+// dfx2.exe's DEATH map walk past its labels: the 6006 KOTH ring and the 2044 location labels,
+// no mask test (DFX2-50).
+void draw_death_map_zone_markers(MapCompile &c);
 void draw_player_waypoints(MapCompile &c);         // bit17
 void draw_entity_labels_and_markers(MapCompile &c); // bit5 (+bit13)
 void draw_tracked_callout(MapCompile &c);          // bit19

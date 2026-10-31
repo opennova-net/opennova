@@ -6,6 +6,7 @@
 
 #include <runtime/hud/scope_circle_mask.h>
 #include <runtime/hud/sight_overlay.h>
+#include <runtime/hud/view_effects.h>
 
 #include <cstdio>
 #include <cmath>
@@ -39,6 +40,19 @@ hud::SightRowSpec box(int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
 } // namespace
 
 int main() {
+    // DFX2-44: the NVG gain scale's design rect is the title's: Jointops.exe's 48 x 32 at
+    // (960, 32), dfx2.exe's 64 x 20 at (480, 682) [orig: NVG_DrawMaskAndGain
+    // @0x5d0005..0x5d001d; @0x5cef75..0x5cef8d (dfx2.exe)].
+    {
+        const auto jo = hud::nvg_scale_rect(*opennova::title_by_code("jo"));
+        const auto dfx2 = hud::nvg_scale_rect(*opennova::title_by_code("dfx2"));
+        const auto ag = hud::nvg_scale_rect(*opennova::title_by_code("acidgambit"));
+        expect(jo.x == 960 && jo.y == 32 && jo.w == 48 && jo.h == 32, "JO's NVG gain rect");
+        expect(dfx2.x == 480 && dfx2.y == 682 && dfx2.w == 64 && dfx2.h == 20,
+                "DFX2's NVG gain rect");
+        expect(ag.x == jo.x && ag.y == jo.y && ag.w == jo.w && ag.h == jo.h,
+                "OP: Acid Gambit's is JO's");
+    }
     const hud::SightRect card{384, 256, 640, 512};
     const auto four_three = hud::sight_rect_to_viewport(card, 1920, 1080, 0);
     const auto wide = hud::sight_rect_to_viewport(card, 1920, 1080, 2);

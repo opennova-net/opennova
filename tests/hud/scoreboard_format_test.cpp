@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include <base/title/title.h>
 #include <runtime/hud/hud_scoreboard.h>
 
 using namespace opennova::hud;
@@ -176,6 +177,34 @@ void test_class_suffix_and_leak() {
 	orphan.local_team = -1;
 	ScoreboardRowComposer orphan_composer(orphan, class_names());
 	CHECK(orphan_composer.compose(medic) == "Doc<ch><co> [01] []");
+}
+
+// dfx2.exe's board carries no class suffix and stashes none (Title::hud_kill_list_no_class,
+// DFX2-83): the same rows read bare [orig: HUD_DrawKillList @0x423890 - the team arm's format
+// @0x423BB1 (dfx2.exe)] [orig: HUD_DrawKillList @0x423A30 - the stash @0x423DC3].
+void test_dfx2_board_has_no_class_suffix() {
+	const opennova::Title *jo = opennova::title_by_code("jo");
+	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+	CHECK(jo != nullptr && !jo->hud_kill_list_no_class);
+	CHECK(dfx2 != nullptr && dfx2->hud_kill_list_no_class);
+	ScoreboardRowContext ctx;
+	ctx.non_team = false;
+	ctx.status_suffix = true;
+	ctx.local_team = 1;
+	ctx.class_suffix = false;
+	ScoreboardRowComposer composer(ctx, class_names());
+	ScoreboardEntry medic = player("Doc", 1, 0, 1);
+	medic.has_entity = true;
+	medic.player_class = 5;
+	CHECK(composer.compose(medic) == "Doc<ch><co> [01] []");
+	ScoreboardEntry spec = player("Watch", 4, 0, 1);
+	spec.spectator = true;
+	spec.has_entity = true;
+	spec.player_class = 9;
+	CHECK(composer.compose(spec) == "Watch<ch><co> [04] []");
+	ScoreboardEntry enemy = player("Foe", 2, 0, 2);
+	enemy.has_entity = true;
+	CHECK(composer.compose(enemy) == "Foe<ch><co> [02] []");
 }
 
 // The page fold: pages = max(1, ceil(rows / ((490 - base) * 1/18f))); the
@@ -436,6 +465,7 @@ int main() {
 	test_row_formats();
 	test_koth_countdown_rows();
 	test_class_suffix_and_leak();
+	test_dfx2_board_has_no_class_suffix();
 	test_page_fold();
 	test_column_counts();
 	test_team_score_lines();

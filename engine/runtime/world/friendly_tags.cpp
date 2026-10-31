@@ -57,6 +57,7 @@ void push_tag(World &world, const Entity &e, const PlayerSlotFacts *slot,
         src.medic_request = slot->medic_request;
         src.name = slot->label; // [orig: @0x5a3f29..0x5a3f86]
         src.squad_color_index = slot->squad_color;
+        src.account_id = slot->account_id;
     }
     out.push_back(src);
 }

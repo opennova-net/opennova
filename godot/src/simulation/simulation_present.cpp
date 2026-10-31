@@ -193,6 +193,7 @@ Ref<HudMapOverlays> Simulation::get_hud_minimap_overlays(
 	in.authority_location_names =
 			view.host != nullptr ? &view.host->mission_location_names : nullptr;
 	in.gametext = game_text_lookup(p_gametext);
+	in.title = view.title;
 	if (runtime_ && runtime_->has_self_handle()) in.self_handle = runtime_->self_handle();
 	if (player_.profile_record_set) in.own_auto_medic_off = player_.profile_record.auto_medic_off;
 	opennova::hud::HudMinimapOverlays value;
@@ -766,7 +767,8 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 	if (runtime_ && kernel_) {
 		const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner(),
 				host_ctx(), joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr,
-				profiling_.runtime_profiling_enabled ? &present_.last_snapshot_body_us : nullptr};
+				profiling_.runtime_profiling_enabled ? &present_.last_snapshot_body_us : nullptr,
+				&session_title(net_, assets_.root), &assets_.character_registry};
 		if (is_joiner()) {
 			opennova::inmatch::build_client_replica_present_rows(
 					context, present_.pool_lifecycle, frame.rows, frame.door_phases);

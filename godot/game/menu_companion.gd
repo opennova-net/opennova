@@ -123,47 +123,69 @@ func _edit_text(name: String, default_value := "") -> String:
 # name to its selected WeaponDef (null when the slot is empty); `name_suffix`
 # names the mounted node ("<SLOT><suffix>").
 func _update_weapon_icons(name_suffix: String, selected_for: Callable) -> void:
-	var frame := _driver.get_frame() if _driver != null else null
+	_mount_weapon_icons(_driver, _root, _icon_mounts, name_suffix, selected_for, false)
+
+
+# The same over any driver's frame, its mounts in `mounts` (the armory companion fills the DEATH
+# screen's too); with `follow_shown` a mount also hides while its holder does not draw (a holder
+# under a hidden window).
+func _mount_weapon_icons(driver: MenuDriver, root: ResourceRoot, mounts: Dictionary,
+		name_suffix: String, selected_for: Callable, follow_shown: bool) -> void:
+	var frame := driver.get_frame() if driver != null else null
 	if frame == null:
 		return
 	for control in WEAPON_ICON_SLOTS:
-		var holder := _id(control + "_ICON")
+		var holder := driver.widget_id(control + "_ICON")
 		if holder < 0:
 			continue
-		var icon_rect: TextureRect = _icon_mounts.get(control)
-		if icon_rect == null or not is_instance_valid(icon_rect):
+		# Read untyped: a mount its frame freed first (the DEATH frame's teardown) is a freed
+		# instance, which a typed read refuses; typed only once it is live.
+		var held: Variant = mounts.get(control)
+		var icon_rect: TextureRect = null
+		if is_instance_valid(held):
+			icon_rect = held
+		if icon_rect == null:
 			icon_rect = TextureRect.new()
 			icon_rect.name = control + name_suffix
 			icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 			icon_rect.stretch_mode = TextureRect.STRETCH_SCALE
 			icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			frame.add_child(icon_rect)
-			_icon_mounts[control] = icon_rect
-		_place_mount(icon_rect, holder)
+			mounts[control] = icon_rect
+		_place_mount_on(driver, icon_rect, holder)
+		if follow_shown:
+			var index := driver.frame_index(holder)
+			icon_rect.visible = icon_rect.visible and index >= 0 and frame.is_widget_shown(index)
 		var selected: WeaponDef = selected_for.call(control)
 		var icon_name := selected.icon if selected != null else ""
-		if icon_name.is_empty() or _root == null:
+		if icon_name.is_empty() or root == null:
 			icon_rect.texture = null
 		else:
-			icon_rect.texture = _root.load_texture(icon_name,
+			icon_rect.texture = root.load_texture(icon_name,
 					ResourceRoot.TEXTURE_LOADER_MENU, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)
 
 
 func _clear_icon_mounts() -> void:
-	for control in _icon_mounts:
-		var mount: TextureRect = _icon_mounts[control]
-		if mount != null and is_instance_valid(mount):
+	_free_icon_mounts(_icon_mounts)
+
+
+# Free every mount in `mounts` and forget them, each read untyped (a freed one is skipped).
+static func _free_icon_mounts(mounts: Dictionary) -> void:
+	for control in mounts:
+		var mount: Variant = mounts[control]
+		if is_instance_valid(mount):
 			mount.queue_free()
-	_icon_mounts.clear()
+	mounts.clear()
 
 
 func _reposition_icon_mounts() -> void:
 	if _driver == null:
 		return
 	for control in _icon_mounts:
-		var mount: TextureRect = _icon_mounts[control]
-		if mount == null or not is_instance_valid(mount):
+		var held: Variant = _icon_mounts[control]
+		if not is_instance_valid(held):
 			continue
+		var mount: TextureRect = held
 		var holder := _id(String(control) + "_ICON")
 		if holder >= 0:
 			_place_mount(mount, holder)
@@ -173,7 +195,11 @@ func _reposition_icon_mounts() -> void:
 # the frame's current size, and a zero rect means the widget is not on the
 # configured screen, so the mount hides with it.
 func _place_mount(mount: Control, id: int) -> void:
-	var rect := _driver.widget_frame_rect(id)
+	_place_mount_on(_driver, mount, id)
+
+
+func _place_mount_on(driver: MenuDriver, mount: Control, id: int) -> void:
+	var rect := driver.widget_frame_rect(id)
 	mount.position = rect.position
 	mount.size = rect.size
 	mount.visible = rect.size.x > 0.0 and rect.size.y > 0.0

@@ -413,7 +413,12 @@ bool MissionKernel::load_mission_into_world(const KernelBootOptions &options) {
 	// Authored display names from the embedder's [PeopleNames] table (D-HUD-20);
 	// promote applies the retail 15-char copy at its cited port site.
 	opts.people_name_resolver = people_name_resolver_;
+	opts.load_warning = options.load_warning;
 	promo = promote_mission(mission, world, opts);
+	if (promo.quit) {
+		load_warning_quit_ = true;
+		return false;
+	}
 	// DEF initialization precedes PreMission actions in retail. Marker/health
 	// predicates and dynamically spawned helpers must see those traits now.
 	// [orig: Entity_SpawnFromBMSRecord @0x40E9F0 -> Entity_InitFromModel]
@@ -618,7 +623,7 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	// [orig: @ 0x4e15f0; the default kit literal @ 0x5246be].
 	std::vector<std::pair<std::string, int32_t>> availability_rows;
 	std::vector<w::WeaponKitEntry> kit_rows;
-	stash_mission_loadout_rules(mission, availability_rows, kit_rows);
+	stash_mission_loadout_rules(mission, world.rules.title(), availability_rows, kit_rows);
 	if (w::local_loadout_promote_mission_rules(world, local.loadout, availability_rows, std::move(kit_rows)))
 		w::local_player_view_reset(&world, local.weapon, local.view, local.view_tracker);
 	w::local_loadout_rebuild(world, local.loadout, local.weapon, local.inventory, local.inventory_valid,
@@ -684,6 +689,25 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// Game_StartMission @0x524360 and Mission_LoadBMSFile @0x40f4e0]
 	world.rules.mp_session = options.mp_session || options.joiner;
 	world.rules.projectile_authority = !options.joiner;
+	// DFX2-24: the start's header checks ahead of its terrain and the load's own (promote): once
+	// on a single player's start, fresh or restarted, twice on a session's authority (the
+	// in-session check, then the start's), none on a joiner, whose start reads no mission file.
+	// A Quit fails the boot; the embedder ends the process.
+	// [orig: Game_StartMission @0x521530 - BMS_LoadAndValidateHeader called @0x521945 (in a
+	//  session, on the authority), @0x521CAC (the restart), @0x522137 (the authority's start,
+	//  a single player's too), each ahead of Game_LoadTerrainDuringConnect; LABEL_40's abort
+	//  @0x521951 on its failure (dfx2.exe)] (TitleRules::bms_table_warnings)
+	load_warning_quit_ = false;
+	if (world.rules.title().bms_table_warnings && !options.joiner) {
+		const int checks = options.mp_session ? 2 : 1;
+		for (int i = 0; i < checks; ++i) {
+			if (!warn_tables_past_pools(mission.header, w::pool_capacities(), options.load_warning)) {
+				load_warning_quit_ = true;
+				error = "mission boot ended at a load warning (Cancel)";
+				return false;
+			}
+		}
+	}
 	world.facials.set_shadow_quality(options.shadow_quality);
 	// The shared model source, wired before the seat step runs (S16).
 	collision_pose.set_assets(&assets());
@@ -763,7 +787,8 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// boot — the load reset cleared it; an order-free scalar, not a boot step.)
 	step("load_mission");
 	if (!load_mission_into_world(options)) {
-		error = "mission boot aborted (load failed)";
+		error = load_warning_quit_ ? "mission boot ended at a load warning (Cancel)"
+		                           : "mission boot aborted (load failed)";
 		return false;
 	}
 	// Ground the AI on the terrain field.
@@ -1015,7 +1040,13 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	//  Server_CountActivePlayers @0x4FD900 (the store @0x4FD94B), each periodic second:
 	//  the next mission reads the last count until its first recount]
 	world.server_num_players = previous.world.server_num_players;
-	// [orig: dword_26970F4, whose only live writer is the cine render pass
+	// [orig: g_EnvIsNightPhase @0x26C645C, zero-initialized data whose writers are
+	//  Environment_ComputeTimeOfDayColors @0x57DEAE..0x57E061 (a keyframed mission's every
+	//  weather tick) and the WAC set alone: no mission start resets it, so the next mission's
+	//  eager WAC pass (Game_StartMission @0x525CB3) reads the last mission's phase, and a mission
+	//  with no TOD keyframes keeps it throughout] [orig: g_EnvIsNightPhase @0x26C77D4 (dfx2.exe)]
+	world.weather.night_phase = previous.world.weather.night_phase;
+	// [orig: g_CineFrameDrawn, whose only live writer is the cine render pass
 	//  Cine_RenderOverlays @0x570C66]
 	world.epilog.frame_drawn = previous.world.epilog.frame_drawn;
 	// [orig: dword_2C05A14 (the mode) and dword_2C05A18..20 (the camera),
@@ -1073,13 +1104,15 @@ bool MissionKernel::complete_mission_start() {
 	// attribute, the word -1 and the local player's health at its ceiling, a
 	// 16-bit store (twice its def hp). The word a fresh start's bring-up copied
 	// from the profile (+0x564) does not survive this; the player's spawn raise
-	// read it first (D-PWR-6).
+	// read it first (D-PWR-6). dfx2.exe runs none of it, and the profile's word
+	// stands (TitleRules::mission_start_sets_difficulty, DFX2-28).
 	// [orig: Game_StartMission @0x525CC2..0x525D12, after the WacScript_InitAndLoad
 	//  and Environment_MissionStartInit calls @0x525CB3 / @0x525CB8 and ahead of
 	//  Score_CountMissionSubgoalsAndUnits @0x525D5D; the 0x40 OR @0x525CF2, the
 	//  Entity_GetMaxHealthWithDifficulty call @0x525D04, the store @0x525D12;
 	//  Game_ApplySessionSettingsToGlobals @0x551F6F..0x551F75]
-	if (!world.rules.mp_session) {
+	// [orig: Game_StartMission @0x521530 - nothing between @0x522EA9 and @0x522EAE (dfx2.exe)]
+	if (!world.rules.mp_session && world.rules.title().mission_start_sets_difficulty) {
 		world.rules.difficulty = w::mission_start_difficulty(world.match.rules().game_type);
 		if (world.rules.difficulty == -1) {
 			world.tables.mission_attrib_flags |= w::MissionTables::kMissionAttribSinglePlayerRespawn;

@@ -157,6 +157,8 @@ struct MissionShotPerson {
 
 struct MissionShotsSetup {
 	std::shared_ptr<const FileSource> files;
+	// The project's target game (a title code), whose rules the run's world runs (MissionFiles::game).
+	std::string game;
 	uint64_t key = 0;
 	std::shared_ptr<const bms::File> mission;
 	const MissionGround *ground = nullptr;

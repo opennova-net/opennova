@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <base/resource_index/resource_index.h>
@@ -23,9 +24,10 @@ class MissionGround;
 
 // The project's files as a mission's load reads them: mounted (each read noted with its stamp), the asset store over
 // them (each model read once), items.def read as the load reads it (none: no traits are resolved and no collision
-// model is attached). Kept while the files stand, for every world loaded over them.
+// model is attached); and the project's target game, whose rules every world loaded over them runs. Kept while the
+// files stand, for every world loaded over them.
 struct MissionFiles {
-	explicit MissionFiles(const std::shared_ptr<const FileSource> &files);
+	MissionFiles(const std::shared_ptr<const FileSource> &files, std::string target_game);
 	~MissionFiles();
 	MissionFiles(const MissionFiles &) = delete;
 	MissionFiles &operator=(const MissionFiles &) = delete;
@@ -35,6 +37,9 @@ struct MissionFiles {
 	std::unique_ptr<assets::AssetStore> store;
 	def::DefItemsFile items{};
 	bool items_read = false;
+	// The project's target game (ProjectDocument::target_game, a title code): the worlds loaded over these files run
+	// its rules (world::TitleRules), as the game's World runs its title's.
+	std::string game;
 };
 
 // A mission's records in the engine's own world as the game's load spawns them, for what the mission view runs of the

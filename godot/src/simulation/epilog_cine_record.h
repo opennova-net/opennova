@@ -32,6 +32,7 @@ public:
 		KIND_IMAGE_FADE = static_cast<int>(opennova::world::CineEventKind::ImageFade),
 		KIND_TEXT_FADE = static_cast<int>(opennova::world::CineEventKind::TextFade),
 		KIND_EPILOG_COUNTER = static_cast<int>(opennova::world::CineEventKind::EpilogCounter),
+		KIND_EPILOG_COUNTER_FONT = static_cast<int>(opennova::world::CineEventKind::EpilogCounterFont),
 	};
 	enum FadeSource {
 		FADE_SOURCE_IMAGE = static_cast<int>(opennova::world::CineFadeSource::Image),
@@ -40,6 +41,8 @@ public:
 	enum TextSource {
 		TEXT_SOURCE_GAME_TEXT = static_cast<int>(opennova::world::CineTextSource::GameText),
 		TEXT_SOURCE_BANNER = static_cast<int>(opennova::world::CineTextSource::Banner),
+		TEXT_SOURCE_GAME_TEXT_FORMAT = static_cast<int>(opennova::world::CineTextSource::GameTextFormat),
+		TEXT_SOURCE_TEXT = static_cast<int>(opennova::world::CineTextSource::Text),
 	};
 
 	void assign(const opennova::world::CineEvent &p_value) { value_ = p_value; }

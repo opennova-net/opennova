@@ -12,6 +12,7 @@
 
 #include <net/novacrypto/epask.h>
 #include <net/novaworld/http_login.h>
+#include <net/protocol/protocol.h> // title_protocol (DFX2's CD key)
 
 #include <cstdio>
 #include <map>
@@ -358,6 +359,63 @@ int main() {
 		long_name.set("CHAR", std::string(31, 'y') + "zz");
 		check(novaworld_character_name(long_name) == std::string(31, 'y'),
 		      "a longer value keeps the 31 bytes the copy takes");
+	}
+
+	// consume_activation: the NovaWorld screen's update over the jar's NWACT, written as this
+	// machine's activation (the section 9.7 NWACT and fingerprint of docs/titles/dfx2-vs-jo-re.md)
+	// and cleared from the jar, a refused write's included; a protocol with no CD key runs none.
+	// [orig: UI_ProcessLANSessionStateMachine @0x556ff0 (dfx2.exe) - the read @0x55753e, the empty
+	//  test @0x557547, CDKey_WriteActivationFromNWACT called @0x557569, the clear @0x55757e]
+	{
+		const opennova::cdkey::KeyChains &chains = *opennova::title_protocol("dfx2")->cd_key;
+		const char *machine = "ABCDEFGHIJKLMNOPQRSTUVW";
+		const std::string nwact =
+				"IQOZVFQWOFFZNCGBSFXHDBUINYCJHJYHFZTXETTKNWOQVKOAWPJDHDJBNJCEOBKATKFYPDGTZNO"
+				"HMKWZCWZKEMCKHQQAZRLPTHVMZRXYZAWUSEPVLZMNOXCSZFMTWVIMAVAYWV";
+		const std::string wire = "BMCCDKDKDLFFNGFDJHMFMMALJCLEFPADLPHHDHEEDHOGCIDLKC";
+		std::string stored;
+		bool refuse = false;
+		int writes = 0;
+		opennova::cdkey::KeyStore store;
+		store.read = [&stored](std::string &out) {
+			out = stored;
+			return !stored.empty();
+		};
+		store.write = [&](const std::string &text) {
+			++writes;
+			if (refuse)
+				return false;
+			stored = text;
+			return true;
+		};
+		opennova::cdkey::KeyInfo info;
+		CookieJar jar;
+		check(!consume_activation(jar, info, &chains, machine, store) && writes == 0,
+				"no NWACT, no activation");
+		jar.set("NWACT", nwact);
+		check(!consume_activation(jar, info, nullptr, machine, store) &&
+						*jar.find("NWACT") == nwact,
+				"a protocol with no CD key leaves the jar's NWACT");
+		check(consume_activation(jar, info, &chains, machine, store), "the NWACT is consumed");
+		check(stored == nwact && info.status == 1 && info.keys.cdkiid == wire,
+				"it is stored and read back to the wire key");
+		check(info.keys.exp1.empty(), "no CDKIIDEXP1: dfx2.exe never writes one");
+		check(jar.find("NWACT") != nullptr && jar.find("NWACT")->empty(),
+				"the jar's NWACT is cleared");
+		check(!consume_activation(jar, info, &chains, machine, store), "a cleared NWACT is none");
+		CookieJar lower;
+		lower.set("nwact", nwact);
+		check(consume_activation(lower, info, &chains, machine, store),
+				"the NWACT is found case-insensitively");
+		// A store that takes neither write (the machine key and its VirtualStore copy both refuse
+		// it; a user whose token is not elevated has the copy take it, tests/novacrypto): -1, the
+		// record's key as it was, the jar cleared.
+		refuse = true;
+		writes = 0;
+		jar.set("NWACT", nwact);
+		check(consume_activation(jar, info, &chains, machine, store) && info.status == -1 &&
+						writes == 2 && info.keys.cdkiid == wire && jar.find("NWACT")->empty(),
+				"a refused write leaves the key and still clears the jar");
 	}
 
 	if (g_failures == 0) {

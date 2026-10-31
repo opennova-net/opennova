@@ -305,6 +305,13 @@ struct HudMinimapOverlays {
 	std::vector<std::string> zone_wp_names;
 	std::string objective_point_format; // STROVER_OBJECTIVEPOINT_SHORT
 	std::string defensive_position_format; // STROVER_DEFENSIVEPOSITION
+	// The session's title walks the capture-zone rings under the marker layers too
+	// (Title::map_capture_rings_under_layers, DFX2-49).
+	bool capture_rings_under_layers = false;
+	// ... and its DEATH map pass walks the zone markers (Title::death_map_zone_markers, DFX2-50).
+	bool death_map_zone_markers = false;
+	// ... and its DEATH map pass names no one (Title::death_map_no_names, DFX2-115).
+	bool death_map_no_names = false;
 };
 
 // The HUD_BuildMapOverlayView parameter block's mask bytes (the M cycle
@@ -437,6 +444,14 @@ struct HudMinimapInput {
 	HudBigMapParams big_map_params;
 	// The non-bank legs' feed (borrowed; null = none of them draw).
 	const HudMinimapOverlays *overlays = nullptr;
+	// The bit5 names' second walk, the transient bank's same-team persons, draws (Jointops.exe's);
+	// dfx2.exe's walk finds each one's position and name and draws nothing
+	// (Title::hud_map_no_bank_names, DFX2-81).
+	// [orig: HUD_DrawEntityLabelsAndMarkers @0x5A49E0 - the draw @0x5A4F95]
+	// [orig: HUD_DrawEntityLabelsAndMarkers @0x5A3850 - @0x5A3D53..0x5A3DD4, no draw (dfx2.exe)]
+	bool bank_names = true;
+	// The pass is MapOverlay_DrawView's (the DEATH map, DeathMapCompiler), not HUD_DrawMapOverlay's.
+	bool death_map_pass = false;
 	// The ring-edge distance label draws while this is ZERO — the retail
 	// global is BSS (uninitialized .data -> 0 = LIVE by default) and an
 	// authored NONZERO SPINMAPWPDISTOFF suppresses it (re-adjudicated
@@ -644,13 +659,15 @@ struct HudMapPass {
 };
 
 // One radar-zoom input step over the active zoom value. direction > 0 zooms
-// OUT (x1.15 toward 0x100000), direction < 0 zooms IN (x0.85 toward 4096).
-// The value is a world-extent multiplier: bigger shows more world.
+// OUT (x1.15 toward `zoom_max`, the title's cap: Title::map_zoom_max_q16,
+// Jointops.exe's kSpinmapZoomMax), direction < 0 zooms IN
+// (x0.85 toward 4096). The value is a world-extent multiplier: bigger shows
+// more world.
 // [orig: Input_HandleActionBinding @0x49AD40 — radarout row 48 = case 361
 //  (dbl_7C7AA8 = 1.15 @0x49beaf), radarin row 49 = case 360
 //  (dbl_7C7AB0 = 0.85 @0x49bcb0)]
 // direction == 0 restores the spawn value (Player_InitPlayer semantics).
-int32_t spinmap_zoom_step(int32_t zoom_q16, int direction);
+int32_t spinmap_zoom_step(int32_t zoom_q16, int direction, int32_t zoom_max);
 
 // One TSDicon strip cell's UV rect (30 square cells, half-texel insets from
 // the loaded strip's physical size) -- shared by the map blips and the
@@ -768,24 +785,32 @@ struct HudMapControl {
 		else if (command < 0 && mode == 2)
 			mode = 0;
 	}
-	// [orig: HUD_CycleMapMode @0x520bc0]
-	int cycle() {
-		mode = mode == 0 ? 2 : (mode == 2 ? 3 : 0);
+	// The map key's step, the title's (Title::hud_map_cycle_skips_window, DFX2-90): Jointops.exe's
+	// 0 -> 2 -> 3 -> 0, any other mode to 0; dfx2.exe's 0 -> 3, any other mode to 0.
+	// [orig: HUD_CycleMapMode @0x520BC0 - 0 -> 2 @0x520BC5..0x520BC9, `cmp eax, 2; setnz;
+	//  sub 1; and 3` @0x520BD4..0x520BE2] [orig: HUD_CycleMapMode @0x51DB80 (dfx2.exe) - `neg; sbb;
+	//  and 0FFFFFFFDh; add 3` @0x51DB85..0x51DB8F]
+	int cycle(bool skips_window) {
+		if (skips_window)
+			mode = mode == 0 ? 3 : 0;
+		else
+			mode = mode == 0 ? 2 : (mode == 2 ? 3 : 0);
 		return mode;
 	}
 	// The radar keys step the big-map zoom while a mode is up, the corner
-	// spinmap's otherwise. [orig: the mode-gated zoom-case reads
+	// spinmap's otherwise, a zoom-out to the title's `zoom_max`
+	// (Title::map_zoom_max_q16). [orig: the mode-gated zoom-case reads
 	//  @0x49bc98/@0x49be97]
-	int32_t zoom_step(int direction) {
+	int32_t zoom_step(int direction, int32_t zoom_max) {
 		if (mode != 0) {
 			big_zoom_q16 = direction == 0
 					? spawn_big_zoom_q16
-					: spinmap_zoom_step(big_zoom_q16, direction);
+					: spinmap_zoom_step(big_zoom_q16, direction, zoom_max);
 			return big_zoom_q16;
 		}
 		zoom_q16 = direction == 0
 				? spawn_zoom_q16
-				: spinmap_zoom_step(zoom_q16, direction);
+				: spinmap_zoom_step(zoom_q16, direction, zoom_max);
 		return zoom_q16;
 	}
 	// Spawn/respawn: the mission-scaled zoom defaults return and the mode

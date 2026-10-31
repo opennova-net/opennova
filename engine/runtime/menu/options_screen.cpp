@@ -1,6 +1,7 @@
 #include "options_screen.h"
 #include "options_policy.h"
 #include <base/io/strutil.h>
+#include <base/title/title.h>
 #include <runtime/profile/profile_controls.h>
 
 #include <cstdlib>
@@ -128,9 +129,11 @@ int OptionsScreen::control_table(const MenuRuntime &menu) const {
 // Presence gates keep same-named controls on SP/session screens out of the
 // options handlers. The in-game dialog is the document authoring OPT_ACCEPT.
 // [orig: UI_PopulateControlMappingList @0x55c0c0; UI_OptionsScreenInit @0x554800]
-void OptionsScreen::prepare(MenuRuntime &menu, const playersav::ProfileRecord *record) {
+void OptionsScreen::prepare(MenuRuntime &menu, const playersav::ProfileRecord *record,
+		const controls::Catalog &catalog) {
 	end_remap(menu, false);
-	bindings_ = record != nullptr ? profile::options_bindings(*record) : controls::BindingSet();
+	bindings_ = record != nullptr ? profile::options_bindings(*record, catalog)
+	                              : controls::BindingSet(catalog);
 	const int table = control_table(menu);
 	has_table_ = table >= 0;
 	is_surface_ = has_table_;
@@ -194,6 +197,16 @@ void OptionsScreen::apply_policy(MenuRuntime &menu) const {
 	for (const char *name : kOptionsUnsupportedControls) {
 		const int id = menu.widget_id(name);
 		if (id >= 0) menu.set_widget_disabled(id, true);
+	}
+}
+
+// [orig: sub_55AB20 @0x55ab20 (dfx2.exe) - UI_FindScreenControl("OPTIONS", "ADVANCED_OUTLINE")
+//  @0x55b833 and CWnd_SetShown(0) @0x55b840; "ADVANCED_TAB" @0x55b855, CWnd_SetShown(0) @0x55b862]
+void OptionsScreen::apply_title(MenuRuntime &menu, const Title &title) const {
+	if (!is_surface_ || !title.options_hides_advanced) return;
+	for (const char *name : { "ADVANCED_OUTLINE", "ADVANCED_TAB" }) {
+		const int id = menu.widget_id(name);
+		if (id >= 0) menu.set_widget_shown(id, false);
 	}
 }
 
@@ -314,7 +327,7 @@ int OptionsScreen::activate(MenuRuntime &menu, playersav::ProfileRecord *record,
 	if (upper == "OPT_CANCEL") {
 		// Cancel re-runs the screen's init over the record, which the dialog
 		// left untouched [orig: @0x5553a7 -> UI_OptionsScreenInit @0x554800].
-		prepare(menu, record);
+		prepare(menu, record, bindings_.catalog());
 		seed_profile(menu, record);
 		return RestorePreview;
 	}

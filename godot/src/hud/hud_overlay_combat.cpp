@@ -57,6 +57,11 @@ void HudOverlay::configure_combat_(const opennova::hud::HudLayoutAssets &assets)
 	combat_texture_(kHudTexLogoHelo, hud_fixed_texture_name(kHudTexLogoHelo), colour, l.logo_helo);
 	combat_texture_(kHudTexLogoHumm, hud_fixed_texture_name(kHudTexLogoHumm), colour, l.logo_humm);
 	combat_texture_(kHudTexLogoBoat, hud_fixed_texture_name(kHudTexLogoBoat), colour, l.logo_boat);
+	// The scope crosshair in its alpha-mode role (renderer fixed_texture_names), the quad a
+	// title's Inset reticle draws (HudCombatState::inset_reticle_quad).
+	combat_texture_(kHudTexScopeCrosshair, kHudScopeCrosshairTexture,
+			ResourceRoot::loader_of(opennova::renderer::TextureRoleId::HudAlphaOnly),
+			l.scope_crosshair);
 }
 void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transform3D &camera,
 		const Projection &projection, bool has_camera, const Ref<RtxtStringFile> &gametext,
@@ -69,6 +74,7 @@ void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transf
 	auto &s = state_.combat;
 	// The inset's friendly name is the role's lookup (set_role_facts).
 	s.target_name = inset_target_name_;
+	s.inset_reticle_quad = inset_reticle_quad_;
 	auto &l = layout_.combat;
 	// The weapon def's crosshair, commandersX and hudicon art and the item
 	// defs' HUD images load in alpha mode; the cargo's stock flag and document

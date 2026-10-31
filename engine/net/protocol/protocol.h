@@ -52,35 +52,132 @@ struct Generation {
 
 // The in-match code's per-protocol branches: the host and joiner code the JO-family executables
 // share, edited at a few constants and tests (docs/titles/dfx2-vs-jo-re.md §7, the §8 catalog).
-// Each field names its catalog row. The defaults are JO's, the row every other title is read
-// against.
+// A protocol's sheet: each knob sits in the group of the message it shapes (s2c_0a is S2C 0x0A,
+// c2s_2f C2S 0x2F, net/npwire/ingame_message_id.h), a knob that shapes several messages in a
+// group named for what they share (slot_state, person_index), each group naming its message and
+// its catalog row. kProtocolDialect below indexes every knob by every message it shapes. The
+// defaults are JO's, the row every other protocol copies and overrides (games/jo/jo_protocol.cpp,
+// games/dfx2/dfx2_protocol.cpp). A new knob joins its message's group, or opens the group of a
+// message that has none in id order, with its rows in kProtocolDialect; games_test's sheet binds
+// every group whole, so it fails to build until the sheet names the knob.
 struct ProtocolInMatch {
-	// DFX2-1: S2C 0x0A's objective sub-block (g_GameType & 0x20000) carries a fifth u32 after the
-	// four objective values, the co-op checkpoint, which the joiner reads.
-	bool objective_checkpoint = false;
-	// DFX2-2: S2C 0x0F's flags bit 0 is set whether or not the mission has spawn zones.
-	bool spawn_zone_flag_always = false;
-	// DFX2-10: the weapon availability value that means "armory only" (JO 2, DFX2 3); the other of
-	// 2 and 3 is the mission's default. S2C 0x66 carries the 0 entries and this value's.
-	int32_t armory_only_availability = 2;
-	// The mission's own word: the other of 2 and 3 (JO 3, DFX2 2), whose weapons take the mission's
-	// item availability.
-	int32_t mission_availability() const { return armory_only_availability == 2 ? 3 : 2; }
-	// DFX2-11: the join writes the slot state byte 0x13 (undeployed, with the pre-round loadout
-	// latch) whatever the mission and the pre-round timer, and every deploy writes 3 (the latch).
-	bool join_state_fixed = false;
-	// DFX2-12: the joiner's C2S 0x2F class byte is 8 (rifleman), or 7 (gunner) in a mission of
-	// type 2, whatever the profile's class.
-	bool loadout_class_fixed = false;
-	// DFX2-14: the relayed chat wraps the sender's squad tag in <ch> and <co>.
-	bool chat_squad_tag_wrapped = false;
-	// DFX2-18: the bits the mission-data block's rules word (+44) is ORed with.
-	uint32_t rules_word_bits = 0;
-	// D-SIM-52: the people the S2C person records can name, pool 0's cap however a mount scales
-	// it (world::wire_pool_capacities). Each names a person by the one-byte pool-0 index
-	// (pool0_index_byte, runtime/world/entity.h): the 0x1E, 0x2D, 0x6D and 0x33 records, and
-	// 0x46's entity byte. 256 in JO's and DFX2's.
-	uint32_t pool0_wire_capacity = 256;
+	// S2C 0x0A PER_FRAME_UPDATE (DFX2-1).
+	struct {
+		// The objective sub-block (g_GameType & 0x20000) carries a fifth u32 after the four
+		// objective values, the co-op checkpoint, which the joiner reads.
+		bool objective_checkpoint = false;
+	} s2c_0a;
+	// S2C 0x0F WORLD_STATE_LOAD (DFX2-2, DFX2-34).
+	struct {
+		// The flags byte's bit 0 is set whether or not the mission has spawn zones.
+		bool spawn_zone_flag_always = false;
+		// The joiner raises its deploy screen on every 0x0F, the death screen up or not and
+		// whatever the flags byte, where JO's raises it only for bit 0 with no death screen.
+		bool deploy_screen_always = false;
+	} s2c_0f;
+	// S2C 0x14 CHAT_BROADCAST (DFX2-14).
+	struct {
+		// The relayed chat wraps the sender's squad tag in <ch> and <co>.
+		bool chat_squad_tag_wrapped = false;
+	} s2c_14;
+	// S2C 0x25 GAME_RESET, a joiner's reaction (DFX2-17).
+	struct {
+		// The end-round linger the reset leaves a joiner, in ticks, which its client frame counts
+		// down to mission exit 4: JO's 0 ends the board at the next frame, DFX2's 1240 keeps it
+		// up about 20 s more.
+		int32_t end_round_linger_ticks = 0;
+	} s2c_25;
+	// S2C 0x5A WEAPON_LOADOUT_SYNC, a joiner's apply (DFX2-35).
+	struct {
+		// The apply's closing select takes the grant's last primary row (weapon_class 1),
+		// where JO's takes the weapon the body holds.
+		bool select_last_primary_row = false;
+	} s2c_5a;
+	// S2C 0x64 MISSION_DATA_CHUNK, the mission-data block it carries (DFX2-18).
+	struct {
+		// The bits the block's rules word (+44) is ORed with; the authority's own rules word
+		// takes them too, in a session or out.
+		uint32_t rules_word_bits = 0;
+	} s2c_64;
+	// S2C 0x66 WEAPON_RESTRICTIONS and the availability words its table holds (DFX2-10), which
+	// the host's C2S 0x2F grant and the remote admin's WEAPON command read too.
+	struct {
+		// The weapon availability value that means "armory only" (JO 2, DFX2 3); the other of 2
+		// and 3 is the mission's default. S2C 0x66 carries the 0 entries and this value's.
+		int32_t armory_only_availability = 2;
+		// The mission's own word: the other of 2 and 3 (JO 3, DFX2 2), whose weapons take the
+		// mission's item availability.
+		int32_t mission_availability() const { return armory_only_availability == 2 ? 3 : 2; }
+	} s2c_66;
+	// C2S 0x2F LOADOUT_SUBMIT (DFX2-12).
+	struct {
+		// The joiner's class byte is 8 (rifleman), or 7 (gunner) in a mission of type 2, whatever
+		// the profile's class.
+		bool loadout_class_fixed = false;
+	} c2s_2f;
+	// The slot's state byte the join and every deploy write (DFX2-11): its undeployed bit is
+	// S2C 0x0A's flags1 bit 1, and its pre-round loadout latch opens the host's C2S 0x2F accept.
+	struct {
+		// The join writes 0x13 (undeployed, with the latch) whatever the mission and the
+		// pre-round timer, and every deploy writes 3 (the latch).
+		bool join_state_fixed = false;
+	} slot_state;
+	// The person index byte (D-SIM-52): the S2C records that name a person by its one-byte pool-0
+	// index (pool0_index_byte, runtime/world/entity.h): the 0x1E, 0x2D, 0x33 and 0x6D records,
+	// and 0x46's entity byte.
+	struct {
+		// The people those records can name, pool 0's cap however a mount scales it
+		// (world::wire_pool_capacities). 256 in JO's and DFX2's.
+		uint32_t pool0_wire_capacity = 256;
+	} person_index;
+};
+
+// One row of the in-match dialect's index: a knob of ProtocolInMatch (or the Protocol's cd_key)
+// and a message it shapes, by direction and id (net/npwire/ingame_message_id.h), with its row of
+// docs/titles/dfx2-vs-jo-re.md §8 (or the ledger's).
+struct ProtocolDialectRow {
+	char dir; // 'S' server -> client, 'C' client -> server
+	uint8_t tag; // the message id
+	const char *knob; // "s2c_0a.objective_checkpoint"
+	const char *row; // "DFX2-1"
+};
+
+// Every knob by every message it shapes, S2C then C2S, each by id: where a reader of one message
+// finds the protocols' differences in it (opennova-wire --dialect lists them), the rows games_test
+// pins each protocol's sheet by.
+inline constexpr ProtocolDialectRow kProtocolDialect[] = {
+	{ 'S', 0x0A, "s2c_0a.objective_checkpoint", "DFX2-1" },
+	{ 'S', 0x0A, "slot_state.join_state_fixed", "DFX2-11" },
+	{ 'S', 0x0F, "s2c_0f.spawn_zone_flag_always", "DFX2-2" },
+	{ 'S', 0x0F, "s2c_0f.deploy_screen_always", "DFX2-34" },
+	{ 'S', 0x14, "s2c_14.chat_squad_tag_wrapped", "DFX2-14" },
+	{ 'S', 0x1E, "person_index.pool0_wire_capacity", "D-SIM-52" },
+	{ 'S', 0x25, "s2c_25.end_round_linger_ticks", "DFX2-17" },
+	{ 'S', 0x2D, "person_index.pool0_wire_capacity", "D-SIM-52" },
+	{ 'S', 0x33, "person_index.pool0_wire_capacity", "D-SIM-52" },
+	{ 'S', 0x46, "person_index.pool0_wire_capacity", "D-SIM-52" },
+	{ 'S', 0x5A, "s2c_5a.select_last_primary_row", "DFX2-35" },
+	{ 'S', 0x64, "s2c_64.rules_word_bits", "DFX2-18" },
+	{ 'S', 0x66, "s2c_66.armory_only_availability", "DFX2-10" },
+	{ 'S', 0x6D, "person_index.pool0_wire_capacity", "D-SIM-52" },
+	// The JOIN's CD-key leg is the Protocol's own (Protocol::cd_key), which the service's
+	// activation reads too.
+	{ 'C', 0x00, "cd_key", "DFX2-13" },
+	{ 'C', 0x2F, "c2s_2f.loadout_class_fixed", "DFX2-12" },
+	{ 'C', 0x2F, "s2c_66.armory_only_availability", "DFX2-10" },
+	{ 'C', 0x2F, "slot_state.join_state_fixed", "DFX2-11" },
+};
+
+// The volume serial's term the machine fingerprint XORs into its fourth dword: NWPSSK, the token
+// the NovaWorld verify Cookie carries and the key a CD-key activation's hardware mix runs under
+// (make_retail_machine_tokens). Each executable compiles its own: Jointops.exe's
+// (serial ^ word) >> 3, dfx2.exe's (serial >> 3) ^ word.
+struct FingerprintSerialMix {
+	uint32_t word = 0;
+	bool shift_first = false; // (serial >> 3) ^ word; else (serial ^ word) >> 3
+	uint32_t apply(uint32_t serial) const {
+		return shift_first ? (serial >> 3) ^ word : (serial ^ word) >> 3;
+	}
 };
 
 struct Protocol {
@@ -125,6 +222,8 @@ struct Protocol {
 	// witnessed difference rather than an unwitnessed value: absent from JO's lists, present in
 	// DFX2's (docs/titles/dfx2-vs-jo-re.md DFX2-7).
 	bool host_category_var = false;
+	// The machine fingerprint's serial term (FingerprintSerialMix): the executable's NWPSSK.
+	std::optional<FingerprintSerialMix> nwpssk_mix;
 	// The sign-in page's submit control (its template's form-post button): the one the
 	// executable's LOGIN callbacks and its login validation name when it is "LOGIN"
 	// (LobbyHttpFlow::sign_in_submit_enabled, D-NET-1335).

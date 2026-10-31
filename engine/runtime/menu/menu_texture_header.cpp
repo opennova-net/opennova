@@ -39,6 +39,11 @@ bool menu_texture_header_size(MenuTextureFormat format, const std::vector<uint8_
 	return true;
 }
 
+bool menu_image_readback_size(MenuTextureFormat format, const std::vector<uint8_t> &bytes, int *width,
+                              int *height) {
+	return format == MenuTextureFormat::Dds && menu_texture_header_size(format, bytes, width, height);
+}
+
 bool MenuTextureHeaderProbe::decode(const std::string &, MenuTextureFormat format, const std::vector<uint8_t> &bytes,
                                     int &width, int &height) {
 	return menu_texture_header_size(format, bytes, &width, &height);

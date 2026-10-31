@@ -36,7 +36,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/maxplayers <n>] [/e
 | `--resource-dir <dir>` | The install to serve from (its `.pff` set), as `opennova.exe` takes it. Required. |
 | `/HOST <file>` | The host file (below). Required. |
 | `--rotation-first` | Start at the first `Mission` entry. Hosted servers use this to play their saved rotation in order; without it, retail's last-entry starting behavior applies. |
-| `/maxplayers <n>` | A nonzero cap that replaces the host file's `MaxPlayers` value, as retail's switch does (a host file with no `MaxPlayers` line leaves it unread). |
+| `/maxplayers <n>` | A nonzero cap that replaces the host file's `MaxPlayers` value, as Joint Operations' switch does (a host file with no `MaxPlayers` line leaves it unread). `dfx2.exe` has no such switch, so a `/game dfx2` server reads none. |
 | `/exp <name>`, `/mod <name>` | Mount that expansion (for example `revx02`); `/mod` is the same switch, as in the game (the last one given wins). |
 | `/d` | Prefer loose files over the archives, as the game's `/d`. |
 | `/game <code>` | The data's game code, as the game's `/game`: the title the server runs as (below). Default: the game the folder's `UPDATE.WIZ` names, else `acidgambit`. |
@@ -287,6 +287,7 @@ empty, `admin.cfg`, read once at the start, and the ban lists `banned.txt` and
 | `admin_log.txt` | never | emptied at every launch, then one line per admin event |
 | `banned.txt` | when the session starts | at the exit, when an in-game ban added an entry |
 | `banlist.txt` | when a NovaWorld session starts (a missing one is created) | by every ban or unban on a NovaWorld session (`PLAYER BAN`, `CMD BAN`, `CMD UNBAN`) |
+| `cdkiid.dat` (`/game dfx2`, off Windows) | at the start: the machine's CD-key activation, which Windows keeps in the registry value DFX2 keeps it in. Its key is the server's own, which its LAN join check refuses a joiner sending and its NovaWorld verify carries | never |
 
 ## Remote admin
 

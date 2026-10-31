@@ -8,6 +8,7 @@
 #include "render/rd_uniforms.h"
 #include "render/target_projection_xr_interface.h"
 #include "render/world_environment_lookup.h"
+#include "resource_index/resource_root.h" // session_title (the work targets' side)
 #include "util/string_convert.h"
 
 #include <base/crt/crt_rng.h>
@@ -71,10 +72,6 @@ using opennova::renderer::FrameFxStep;
 using opennova::renderer::FrameFxStepKind;
 using opennova::renderer::FrameFxTaps;
 
-// FrameFX's 256-square work targets. Focused Q3 is rendered at beauty
-// resolution into the compositor's color attachment with resolved beauty
-// depth attached; this size applies from the capture's downsample on.
-constexpr std::int32_t kWorkSide = opennova::renderer::kFrameFxWorkSide;
 constexpr std::uint32_t kPushConstantBytes = 64u;
 
 // The fragment stage a draw evaluates (pc.mode_taps.x).
@@ -103,6 +100,7 @@ enum class TapGeometry : std::int32_t {
 	Tiled = 4,
 	NvgDiagonal = 5,
 	NvgAxial = 6,
+	Ring = 7,
 };
 
 enum class BlendMode : std::uint8_t {
@@ -167,6 +165,8 @@ const vec3 NVG_GLOW_LUMA = @NVG_GLOW_LUMA@;
 const float NVG_GLOW_THRESHOLD = @NVG_GLOW_THRESHOLD@;
 const vec3 NVG_GLOW_SCALE = @NVG_GLOW_SCALE@;
 const float NVG_GLOW_ALPHA = @NVG_GLOW_ALPHA@;
+const float RING_INNER_MIN = @RING_INNER_MIN@;
+const float RING_INNER_MAX = @RING_INNER_MAX@;
 
 @GAMMA_TO_LINEAR@
 
@@ -195,6 +195,23 @@ void taps4(out vec2 uv[4], out float fan_alpha) {
 	}
 	vec2 origin = st + pc.base_direction.xy;
 	vec2 direction = pc.base_direction.zw * reduced;
+	vec2 perpendicular = vec2(pc.base_direction.w, -pc.base_direction.z) * reduced;
+	if (taps == 7) {
+		// FrameFX_BuildScarDecalVertices: the strip's inner corners carry no offset, its outer
+		// ones the Rotated taps, the weight linear across each band (the bands split on the
+		// corner diagonals, so the largest of the four is this pixel's); the inner rect is the
+		// strip's hole (fan_alpha <= 0: main discards it).
+		fan_alpha = max(max((RING_INNER_MIN - st.x) / RING_INNER_MIN,
+								(st.x - RING_INNER_MAX) / (1.0 - RING_INNER_MAX)),
+				max((RING_INNER_MIN - st.y) / RING_INNER_MIN,
+						(st.y - RING_INNER_MAX) / (1.0 - RING_INNER_MAX)));
+		float w = clamp(fan_alpha, 0.0, 1.0);
+		uv[0] = origin + direction * w;
+		uv[1] = origin + perpendicular * w;
+		uv[2] = origin - direction * w;
+		uv[3] = origin - perpendicular * w;
+		return;
+	}
 	if (taps == 2) {
 		for (int k = 0; k < 4; ++k)
 			uv[k] = origin + direction * WEIGHT_STEPS[k];
@@ -217,7 +234,6 @@ void taps4(out vec2 uv[4], out float fan_alpha) {
 		return;
 	}
 	// FrameFX_BuildRotatedTapQuad: (+s,+c), (+c,-s), (-s,-c), (-c,+s).
-	vec2 perpendicular = vec2(pc.base_direction.w, -pc.base_direction.z) * reduced;
 	uv[0] = origin + direction;
 	uv[1] = origin + perpendicular;
 	uv[2] = origin - direction;
@@ -275,6 +291,8 @@ void main() {
 	vec2 uv[4];
 	float fan_alpha;
 	taps4(uv, fan_alpha);
+	if (pc.mode_taps.y == 7 && fan_alpha <= 0.0)
+		discard;
 	if (mode == 2) {
 		vec4 sum = texture(source_color, uv[0]) * WEIGHTS[0]
 				+ texture(source_color, uv[1]) * WEIGHTS[1]
@@ -377,6 +395,8 @@ std::string frame_fragment_shader_source() {
 	splice_token(source, "@NVG_GLOW_THRESHOLD@", glsl_float(r::kNvgGlowThreshold));
 	splice_token(source, "@NVG_GLOW_SCALE@", glsl_vec3(r::kNvgGlowScale));
 	splice_token(source, "@NVG_GLOW_ALPHA@", glsl_float(r::kNvgGlowAlpha));
+	splice_token(source, "@RING_INNER_MIN@", glsl_float(r::kFrameFxRingInnerMin));
+	splice_token(source, "@RING_INNER_MAX@", glsl_float(r::kFrameFxRingInnerMax));
 	return source;
 }
 
@@ -429,6 +449,8 @@ TapGeometry taps_for(FrameFxTaps p_taps) {
 			return TapGeometry::RadialFan;
 		case FrameFxTaps::Tiled:
 			return TapGeometry::Tiled;
+		case FrameFxTaps::Ring:
+			return TapGeometry::Ring;
 	}
 	return TapGeometry::Rotated;
 }
@@ -461,6 +483,11 @@ Ref<Compositor> godot::compositor_with_terminal(const Ref<Compositor> &previous,
 
 class FrameFxCompositorEffect::Impl {
 public:
+	// FrameFX's square work targets, the session's title's side (256, dfx2.exe's 512: DFX2-47).
+	// Focused Q3 is rendered at beauty resolution into the compositor's color attachment with
+	// resolved beauty depth attached; this size applies from the capture's downsample on.
+	const std::int32_t work_side = opennova::renderer::frame_fx_work_side(
+			ResourceRoot::session_title(Ref<ResourceRoot>()));
 	struct PipelineKey {
 		int64_t framebuffer_format = -1;
 		BlendMode blend = BlendMode::Replace;
@@ -959,7 +986,7 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 				"render_targets_invalid");
 		return false;
 	}
-	const Vector2i work(kWorkSide, kWorkSide);
+	const Vector2i work(work_side, work_side);
 	const Vector2i nvg_scene(opennova::renderer::kNvgSceneSide,
 			opennova::renderer::kNvgSceneSide);
 	const Vector2i nvg_glow(opennova::renderer::kNvgGlowSide,
@@ -1276,11 +1303,11 @@ bool FrameFxCompositorEffect::Impl::run_pass(ViewTarget &target,
 			break;
 		case FrameFxBuffer::WorkA:
 			framebuffer = target.low_a_framebuffer;
-			target_size = Vector2i(kWorkSide, kWorkSide);
+			target_size = Vector2i(work_side, work_side);
 			break;
 		case FrameFxBuffer::WorkB:
 			framebuffer = target.low_b_framebuffer;
-			target_size = Vector2i(kWorkSide, kWorkSide);
+			target_size = Vector2i(work_side, work_side);
 			break;
 		case FrameFxBuffer::Scanlines:
 			set_failure("A FrameFX pass cannot target the scanline texture");
@@ -1299,11 +1326,11 @@ bool FrameFxCompositorEffect::Impl::run_pass(ViewTarget &target,
 			break;
 		case FrameFxBuffer::WorkA:
 			uniform = target.low_a_uniform;
-			source_size = Vector2i(kWorkSide, kWorkSide);
+			source_size = Vector2i(work_side, work_side);
 			break;
 		case FrameFxBuffer::WorkB:
 			uniform = target.low_b_uniform;
-			source_size = Vector2i(kWorkSide, kWorkSide);
+			source_size = Vector2i(work_side, work_side);
 			break;
 		case FrameFxBuffer::Scanlines:
 			if (!ensure_scanlines())
@@ -1314,7 +1341,7 @@ bool FrameFxCompositorEffect::Impl::run_pass(ViewTarget &target,
 			break;
 	}
 	// The viewport rect (CD3DDevice_GetViewportRect), else the 256 square.
-	const Vector2i rect = pass.viewport_rect ? target_size : Vector2i(kWorkSide, kWorkSide);
+	const Vector2i rect = pass.viewport_rect ? target_size : Vector2i(work_side, work_side);
 	const float base = pass.base_from_capture ?
 			0.5f / static_cast<float>(std::min(target.capture_size.x, target.capture_size.y)) :
 			pass.base;
@@ -1726,7 +1753,7 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["q3_isolated_target"] = true;
 	result["capture_filter"] = "linear_rgba8_highest_quality";
 	result["capture_power_of_two_floor"] = true;
-	result["blur_target_size"] = static_cast<int64_t>(kWorkSide);
+	result["blur_target_size"] = static_cast<int64_t>(work_side);
 	result["framebuffer_blend_domain"] = "gamma";
 	result["terminal_transfer"] = "srgb_inverse_then_display_encode";
 	// How the last frame's views ran that transfer: in Godot's tonemap through

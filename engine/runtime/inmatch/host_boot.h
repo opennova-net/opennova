@@ -347,6 +347,16 @@ struct HostStartDevice {
 // stages: it opens with the render arm's pumps still owed and the mission start's head.
 bool start_host_mission(HostBoot &boot, const HostStartDevice &device, std::string &error);
 
+// The clock the mission start sets over the BMS header's (time-of-day continuity): the one the
+// authority's last map change kept (HostMapChange::kept_clock), when the session is in session
+// and its config's continuity word is set; null otherwise, a joiner's boot (no host) always, so
+// it starts on the header's clock. [orig: Game_StartMission @0x524360 - `cmp is_in_session`
+// @0x525399, dword_24D5A00 @0x5253A1 (the authority's word, Game_ApplySessionSettingsToGlobals
+// @0x551E1F, 0 on every other peer @0x551DF6), the latch dword_24D5A0C @0x5253A9]
+// [orig: Game_StartMission @0x521530 - @0x52256A..0x52257A; Game_ApplySessionSettingsToGlobals
+// @0x54E750 - @0x54F046 / @0x54F06F (dfx2.exe)]
+const world::TodClock *kept_mission_clock(const HostBoot &boot);
+
 // The load end phase B left (HostBootRequest::render_arm_deferred): the render arm's pumps
 // still owed, then the S2C 0x7B to every slot and the spawn gate's clear
 // (HostRole::finish_mission_load). A no-op when nothing is owed.

@@ -148,18 +148,36 @@ void local_loadout_rebuild_after_start(World &world, LocalPlayerLoadout &loadout
                                        LocalPlayerWeapon &weapon, WeaponInventory &inventory,
                                        bool &inventory_valid);
 
+// The weapon whose combo a loadout apply writes into the current slot word ahead of its
+// select. A protocol's S2C 0x5A apply picks one (inmatch::grant_apply_select); the armory
+// ACCEPT's is always the held weapon.
+enum class LoadoutApplySelect : uint8_t {
+    // The body's held weapon (its AdmDef index); a body holding none, or no body, leaves the
+    // word. [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0 - AdmDef_GetEntryByIndex
+    //  (+0x2B0) @0x4296B4..0x4296BC; WeaponLoadout_ApplyFromBuffer @0x565CD0 (@0x566250..0x566276)]
+    HeldWeapon,
+    // The kit's last row whose def is a primary (weapon_class 1), else AdmDef 0, the "null"
+    // def; a def the lookup misses leaves the word.
+    // [orig: NapiNPClientMsg_HandleWeaponLoadoutSync @0x42AF10 (dfx2.exe) - the index's 0
+    //  @0x42AF40, `cmp dword ptr [edi+3A4h], 1` @0x42B0AB and the row's index stored @0x42B0BD
+    //  in the name-list walk, AdmDef_GetEntryByIndex of it @0x42B4F3, the store @0x42B50B]
+    LastPrimaryRow,
+};
+
 // The armory ACCEPT apply [orig: WeaponLoadout_ApplyFromBuffer @ 0x565cd0
 // offline leg: parse the tuples, expand sub-weapons, reset + refill the slot
 // table, apply the REQUESTED ammo over the default seed, re-select the
 // equipped slot]. validate_banned runs the per-entry availability validation
-// [orig: the server 0x2F gate @ 0x515a3f — 0 drops the entry]. The embedder
-// routes its wire submissions after a true return.
+// [orig: the server 0x2F gate @ 0x515a3f — 0 drops the entry]. `select` names the
+// weapon the closing select's slot word comes from. The embedder routes its wire
+// submissions after a true return.
 bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
                                 LocalPlayerWeapon &weapon,
                                 WeaponInventory &inventory,
                                 bool &inventory_valid,
                                 const std::vector<WeaponKitEntry> &kit,
-                                int32_t player_class, bool validate_banned);
+                                int32_t player_class, bool validate_banned,
+                                LoadoutApplySelect select);
 
 // The armory PLAYER_CLASS spin catalog: the five soldier classes in the
 // authored spin order, each pairing its wire class value with the "Menu"

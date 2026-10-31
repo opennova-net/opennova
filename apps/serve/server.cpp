@@ -20,6 +20,7 @@
 #include <formats/avatars/avatars.h>
 #include <formats/mission/bms.h>
 #include <formats/rtxt/rtxt.h>
+#include <net/novacrypto/cdkey.h>
 #include <net/novaworld/lobby_identity.h> // the NWHWI device reads
 #include <net/protocol/gate_tag.h>
 #include <net/protocol/protocol.h>
@@ -33,6 +34,7 @@
 #include <runtime/inmatch/server_info.h> // read_session_listing_columns (the start's update)
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
+#include <runtime/controls/controls.h> // title_catalog (the role's binding catalog)
 #include <runtime/world/entity.h> // set_pool_capacities (the mount's pools)
 #include <runtime/world/present_drains.h> // discard_entity_presentation (no presenter)
 #include <runtime/world/tick_count_clock.h> // frame_tick_count_ms (the NovaWorld session's clock)
@@ -68,7 +70,8 @@ const char kUsage[] =
 		"                   (GameName, MaxPlayers, KillLimit, ...) and one `Mission <file.bms>`\n"
 		"                   line per rotation entry; the last Mission line is the starting map\n"
 		"  --rotation-first start at the first Mission entry instead (hosted play order)\n"
-		"  /maxplayers <n>  the cap a host file's MaxPlayers line yields to (retail's switch)\n"
+		"  /maxplayers <n>  the cap a host file's MaxPlayers line yields to (JO's switch;\n"
+		"                   dfx2.exe has none)\n"
 		"  /exp, /d, /game  mount the expansion (/mod is /exp), prefer loose files, pick the\n"
 		"                   data's game code: its keying and the title the server speaks\n"
 		"                   (default: the game the folder's UPDATE.WIZ names, else acidgambit)\n"
@@ -425,6 +428,16 @@ bool Server::begin(std::string &error, const std::atomic<bool> *cancel) {
 		stop();
 		return false;
 	}
+	// The boot's CD-key read, for a protocol that keeps one: the record whose ids the LAN join
+	// check refuses as the host's own (code 12) and the verify Cookie carries. The value is the
+	// machine's registry's; where the platform has none, the stand-in is the working directory's,
+	// where the server keeps every file the game keeps beside itself (ADR 0051). Retail reads it in
+	// its command-line parse, ahead of game.cfg; nothing between reads the record.
+	// [orig: Game_ParseCommandLineAndInit @0x4a7e62 (dfx2.exe), CDKey_ReadRegistry called]
+	if (protocol_->cd_key != nullptr && protocol_->nwpssk_mix)
+		(void)cdkey::read_registry(cdkey::process_key_info(), *protocol_->cd_key,
+				machine_tokens(*protocol_->nwpssk_mix).nwpssk,
+				cdkey::machine_key_store(*protocol_->cd_key, "."));
 	// The renderer's start and its device creation, after that game.cfg read: the device facts
 	// NWHWI prints (sample_device_identity), read once.
 	device_identity_ = sample_device_identity(config_.cfg(), options_);
@@ -595,8 +608,9 @@ bool Server::mount(std::string &error) {
 	// The mount's pools, before any mission loads (world/entity.h pool_capacities_for_expansion),
 	// each capped at what the title's protocol can name (resolve_title resolved it with its
 	// in-match branches) [orig: Game_Run @0x4a7fb0 -> EntityPool_Allocate @0x4a7fc5].
-	world::set_pool_capacities(world::pool_capacities_for_expansion(index_.mounted_expansion(),
-			world::wire_pool_capacities(protocol_in_match(protocol_).pool0_wire_capacity)));
+	const uint32_t pool0_cap = protocol_in_match(protocol_).person_index.pool0_wire_capacity;
+	world::set_pool_capacities(world::pool_capacities_for_expansion(
+			index_.mounted_expansion(), world::wire_pool_capacities(pool0_cap)));
 	// The boot's gt.ssc over the gate manager's default tag, read once the archives mount
 	// [orig: Game_InitSubsystems @0x4a7149..0x4a714e -> Mission_LoadEncryptedConfig @0x4cdcd0].
 	gate_tag_ = protocol_gate_tag(*protocol_, &index_);
@@ -614,7 +628,9 @@ bool Server::mount(std::string &error) {
 			rtxt::parse(text_override_table_.data(), text_override_table_.size(), text_override_,
 					override_error);
 	assets_ = std::make_unique<assets::AssetStore>(&index_);
-	catalog_ = mission_catalog::build(index_, have_text_override_ ? &text_override_ : nullptr);
+	// In the title's order (Title::mission_list_order carries the witness).
+	catalog_ = mission_catalog::build(index_, have_text_override_ ? &text_override_ : nullptr,
+			title_by_code(game_code_)->mission_list_order);
 	// The avatar registry, which the admin console's PETERRABBIT SEXCHANGE walks; an install
 	// without Avatars.def leaves it empty [orig: CAvatarDefs_Init @0x57B180 opens
 	// "Avatars.def"].
@@ -654,6 +670,10 @@ bool Server::read_config_over_weapons(std::string &error) {
 	return true;
 }
 
+int32_t host_file_max_player_arg(const Title &title, int32_t max_player_arg) {
+	return title.max_players_switch ? max_player_arg : 0;
+}
+
 // The dead /HOST path [orig: Game_HostMultiplayerSession @0x4A65A0]: the host
 // file over the cfg block (a file that does not open ends the attempt,
 // @0x4A65AA..0x4A65C0), the directory lock (@0x4A65C1..0x4A65F1), Serve Only
@@ -675,7 +695,7 @@ bool Server::read_host_file(std::string &error) {
 		return false;
 	}
 	report_ = inmatch::read_host_file(text.data(), text.size(), config_.cfg(), rotation_, catalog_,
-			options_.max_player_arg);
+			host_file_max_player_arg(*title_by_code(game_code_), options_.max_player_arg));
 	if (options_.rotation_first && rotation_.list.count > 0) {
 		// The service writes rotations in play order, including duplicates. Retail's
 		// host-file selection finds the last named map's first occurrence instead.
@@ -776,8 +796,8 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	//  @0x54F4D0 - GetUserNameA @0x54F535, File_CheckExists @0x54F586 / @0x54F6C7;
 	//  Game_ApplySessionSettingsToGlobals @0x551680..0x551695; Player_InitPlayer
 	//  @0x4E184F..0x4E186A; CNapiGameSession_CreateSession @0x4C97C0 - @0x4C9CCE].
-	const serve::ServeProfile row_profile = serve::read_serve_profile(config_.cfg().player_index,
-			serve::process_account_name(), config.expansion, characters_);
+	const serve::ServeProfile row_profile = serve::read_serve_profile(*title_by_code(game_code_),
+			config_.cfg().player_index, serve::process_account_name(), config.expansion, characters_);
 	config.player_name = row_profile.name;
 	// The session config the next map change stages from.
 	session_config_ = config;
@@ -788,6 +808,8 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// keeps them, and the socket with them.
 	if (!next_mission) {
 		role_ = std::make_unique<inmatch::HostRole>(inmatch::RoleKind::DedicatedHost);
+		// The game's binding catalog, whose rows the dispatcher's head and the console's walks read.
+		role_->set_controls(controls::title_catalog(*title_by_code(game_code_)));
 		role_->set_socket(&demux_->game());
 		role_->set_rotation(&rotation_);
 		session_ = std::make_unique<inmatch::Session>(*role_);
@@ -817,6 +839,10 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	request.role = role_.get();
 	request.host = role_.get();
 	request.host_cfg.protocol = protocol_;
+	// The host's own CD-key ids, the boot read's record: a DFX2 LAN host refuses a joiner sending
+	// them (code 12; NapiNPServerCtx::host_cd_keys carries the witness).
+	if (protocol_->cd_key != nullptr)
+		request.host_cfg.host_cd_keys = cdkey::process_key_info().keys;
 	request.host_cfg.config = config;
 	request.host_cfg.socket_mode = inmatch::SocketMode::Lan;
 	// A listed server's session runs on the NovaWorld network type, whose
@@ -1651,6 +1677,7 @@ void Server::bind_admin_console() {
 	// CMD's binding records (a typed `tod 1230`) join the role's input event queue, which every
 	// update's drain dispatches (engine inmatch/admin_console.h Seams::input_events).
 	seams.input_events = &role_->input_events();
+	seams.catalog = &role_->controls();
 	inmatch::RemoteAdminBinding binding;
 	binding.host = &role_->state.host_owner.ctx;
 	admin_consoles_.bind(binding, std::move(seams));

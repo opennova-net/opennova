@@ -323,8 +323,8 @@ gamecfg::ServerSettingsTitle server_settings_title(const Title& title) {
     gamecfg::ServerSettingsTitle out;
     out.table = title.config_table;
     out.max_players = title_player_caps(title).host_screen;
-    out.armory_word = in_match.armory_only_availability;
-    out.mission_word = in_match.mission_availability();
+    out.armory_word = in_match.s2c_66.armory_only_availability;
+    out.mission_word = in_match.s2c_66.mission_availability();
     return out;
 }
 
@@ -504,25 +504,30 @@ TitlePlayerCaps title_player_caps(const Title& title) {
     return caps;
 }
 
-uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play, const Title& title) {
+uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play,
+                                int32_t network_connect_type, const Title& title) {
     // Dedicated hosting reserves the extra host slot in the live slot limit
     // (dword_24D211C); the session's advertised and admitted cap
     // (GameConfig::max_players) never carries it. The 65 ceiling tests the
-    // PRE-increment cap (a dedicated
-    // 65 publishes 66) and applies only for networkConnectType 1 (game.cfg's
-    // `networkconnecttype`, default 1). The apply has no lower clamp: a blank
+    // PRE-increment cap (a dedicated 65 publishes 66) and applies only for
+    // network connect type 1 (game.cfg's `networkconnecttype`, 1 by default and
+    // as the NovaWorld screen writes it; the LAN screen writes 2, under which a
+    // cap past the ceiling stands). The apply has no lower clamp: a blank
     // cap publishes 0 (1 dedicated). In session, though, the session's
     // creation clamps the cap into 1..65 before the apply runs, so the ceiling
     // never cuts and a blank cap publishes 1 (2 dedicated): session_player_cap,
     // which both hosts run first. The same live count gates BMS placements.
     // The ceiling is the title's: 65, or dfx2.exe's 251 (TitlePlayerCaps).
-    // [orig: Game_ApplySessionSettingsToGlobals @0x551b26..0x551b48;
-    // CNapiGameSession_BuildAndCreateSession @0x56955D..0x56956C;
-    // Config_SetDefaults @0x54d1d4 (networkConnectType_480 = 1);
-    // Server_InitNewRoundState @ 0x51c8e0] [orig: @0x54ed93..0x54ed9a (dfx2.exe)]
+    // [orig: Game_ApplySessionSettingsToGlobals @0x551b26..0x551b48 - the type test
+    //  `cmp networkConnectType_480, esi; jnz` @0x551B3B..0x551B41, the cap test
+    //  @0x551B43..0x551B46, the store @0x551B48; CNapiGameSession_BuildAndCreateSession
+    //  @0x56955D..0x56956C; Config_SetDefaults @0x54d1d4 (networkConnectType_480 = 1);
+    //  Server_InitNewRoundState @ 0x51c8e0] [orig: Game_ApplySessionSettingsToGlobals - the
+    //  type test `cmp channelType, esi; jnz` @0x54ED8B..0x54ED91, the cap @0x54ed93..0x54ed9a
+    //  (dfx2.exe)]
     const int32_t ceiling = static_cast<int32_t>(title_player_caps(title).session);
     int64_t total = static_cast<int64_t>(player_limit) + (serve_and_play ? 0 : 1);
-    if (player_limit > ceiling) total = ceiling;
+    if (network_connect_type == 1 && player_limit > ceiling) total = ceiling;
     // The limit is unsigned: a negative total (no session create clamped the
     // cap) reads as 0.
     return static_cast<uint32_t>(std::max<int64_t>(total, 0));
@@ -533,7 +538,8 @@ uint32_t GameConfig::player_slot_limit() const {
     // admission reads) has no title ceiling to apply: its cap plus the dedicated slot.
     if (title == nullptr)
         return static_cast<uint32_t>(max_players) + (dedicated_server ? 1u : 0u);
-    return host_player_slot_limit(static_cast<int32_t>(max_players), !dedicated_server, *title);
+    return host_player_slot_limit(static_cast<int32_t>(max_players), !dedicated_server,
+                                  network_connect_type, *title);
 }
 
 int32_t session_player_cap(int32_t player_limit, const Title& title) {

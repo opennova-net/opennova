@@ -10,6 +10,7 @@
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/orbit_canvas.h>
 #include <editor/preview/sound_preview.h>
+#include <editor/project/project_document.h>
 #include <editor/session/view/session_view.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/anim/anim_event_bits.h>
@@ -149,6 +150,7 @@ void ClipFire::refresh(const SessionView &view, const ClipSoundItem &item, const
 	if (has_clip_ && fire_bits && reads_ && person) {
 		WeaponRangeSetup setup;
 		setup.files = view.findings.assets;
+		setup.game = view.project.document ? view.project.document->target_game : std::string();
 		setup.catalog = "weapon.def";
 		setup.view = WeaponShotView::Soldier;
 		setup.enemy = options.enemy;

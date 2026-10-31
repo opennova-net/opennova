@@ -86,7 +86,6 @@
 
 #include <crow/json.h>
 
-#include "common/cdkey_oracle.h"
 #include "common/file_io.h"
 #include "common/temp_dir.h"
 #include "common/test_database.h"
@@ -2680,7 +2679,7 @@ int test_cd_key_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 201 && activated && !activated["reactivated"].b());
 	const std::string nwact = str(activated["nwact"]);
 	std::string wire;
-	TEST_EXPECT(cdkey_oracle::read_activation(dfx2_chains(), nwact, kMachine, wire) &&
+	TEST_EXPECT(opennova::cdkey::activation_wire_key(dfx2_chains(), nwact, kMachine, wire) &&
 			wire == str(made["keys"][0]["wire_key"]));
 	TEST_EXPECT(activated["key"]["activations"].i() == 1);
 	reply = post(key0 + "/activations", std::string("{\"nwpssk\":\"") + kMachine + "\"}");
@@ -2924,11 +2923,14 @@ int test_dfx2_activation(Harness &h) {
 			!nwact_a.empty() && minted.size() > 5 && minted.substr(minted.size() - 5) == "|auto");
 	const std::string wire_key = minted.substr(0, minted.size() - 5);
 	std::string recovered;
-	TEST_EXPECT(cdkey_oracle::read_activation(dfx2_chains(), nwact_a, kMachineA, recovered) && recovered == wire_key);
+	TEST_EXPECT(
+			opennova::cdkey::activation_wire_key(dfx2_chains(), nwact_a, kMachineA, recovered) &&
+			recovered == wire_key);
 	std::string serial;
 	TEST_EXPECT(cdkey::decode_wire_key(dfx2_chains(), recovered, serial) && serial.compare(0, 5, "DFX2-") == 0);
 	// Only that machine reads it.
-	TEST_EXPECT(!cdkey_oracle::read_activation(dfx2_chains(), nwact_a, kMachineB, recovered));
+	TEST_EXPECT(
+			!opennova::cdkey::activation_wire_key(dfx2_chains(), nwact_a, kMachineB, recovered));
 
 	// The same machine again: the same NWACT, no second key; another machine its own.
 	login = retail_login(
@@ -2942,7 +2944,9 @@ int test_dfx2_activation(Harness &h) {
 	TEST_EXPECT(login.start_page == page("dfx2_0_login.htm"));
 	const std::string nwact_b = set_cookie_value(login.completion, "NWACT");
 	TEST_EXPECT(!nwact_b.empty() && nwact_b != nwact_a);
-	TEST_EXPECT(cdkey_oracle::read_activation(dfx2_chains(), nwact_b, kMachineB, recovered) && recovered == wire_key);
+	TEST_EXPECT(
+			opennova::cdkey::activation_wire_key(dfx2_chains(), nwact_b, kMachineB, recovered) &&
+			recovered == wire_key);
 	TEST_EXPECT(h.pool.acquire()
 						->query("SELECT COUNT(*) FROM cd_key_activations a JOIN cd_keys k ON k.id "
 								"= a.key_id "
@@ -3019,8 +3023,8 @@ int test_dfx2_activation(Harness &h) {
 					.code == 200);
 	login = retail_login(assigned_only.bound_port(), "act_waiting", "pw-act-waiting",
 			unactivated(kMachineB), true);
-	TEST_EXPECT(cdkey_oracle::read_activation(dfx2_chains(), 
-			set_cookie_value(login.completion, "NWACT"), kMachineB, recovered));
+	TEST_EXPECT(opennova::cdkey::activation_wire_key(
+			dfx2_chains(), set_cookie_value(login.completion, "NWACT"), kMachineB, recovered));
 	TEST_EXPECT(recovered == str(key["keys"][0]["wire_key"]));
 
 	assigned_only.stop();

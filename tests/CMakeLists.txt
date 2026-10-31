@@ -88,6 +88,15 @@ target_compile_features(os_random_test PRIVATE cxx_std_17)
 target_include_directories(os_random_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME os_random COMMAND os_random_test)
 
+# The registry seam (base/os_registry): retail's refused key paths, and the stand-in file's round
+# trip where the platform has no registry (on Windows a read of an absent key only: the test never
+# writes the machine's registry).
+add_executable(os_registry_test os_registry/os_registry_test.cpp)
+target_link_libraries(os_registry_test PRIVATE opennova_base)
+target_compile_features(os_registry_test PRIVATE cxx_std_17)
+target_include_directories(os_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME os_registry COMMAND os_registry_test)
+
 # A project revision's manifest (base/project, ADR 0069): the paths a project's file may have
 # (each Windows rule, the machine's own folder, UTF-8), two paths one file once folded, the
 # canonical text read back and every other text of the same files refused.
@@ -583,6 +592,13 @@ add_executable(mission_static_sources_test mission/static_sources_test.cpp)
 target_link_libraries(mission_static_sources_test PRIVATE opennova_runtime)
 target_include_directories(mission_static_sources_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_static_sources COMMAND mission_static_sources_test)
+
+# DFX2-60: dfx2.exe's campaign.def parse and progress walk (runtime/mission/campaign.h).
+add_executable(campaign_test mission/campaign_test.cpp)
+target_link_libraries(campaign_test PRIVATE opennova_runtime)
+target_include_directories(campaign_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(campaign_test PRIVATE cxx_std_17)
+add_test(NAME campaign COMMAND campaign_test)
 
 add_executable(mission_catalog_test mission/mission_catalog_test.cpp)
 target_link_libraries(mission_catalog_test PRIVATE opennova_runtime)
@@ -2033,6 +2049,10 @@ add_test(NAME player_info_character COMMAND player_info_character_test)
 add_executable(role_feeds_test netsim/role_feeds_test.cpp)
 target_link_libraries(role_feeds_test PRIVATE opennova_runtime opennova_net)
 target_compile_features(role_feeds_test PRIVATE cxx_std_17)
+# main's frame holds several MissionKernels and ClientRuntimes (the cases' own block scopes).
+if(MSVC)
+    target_link_options(role_feeds_test PRIVATE "/STACK:4194304")
+endif()
 add_test(NAME role_feeds COMMAND role_feeds_test)
 
 # The server config flag word a joiner reads and the join entry's step
@@ -2100,6 +2120,20 @@ add_executable(hud_element_spans_test hud/hud_element_spans_test.cpp)
 target_link_libraries(hud_element_spans_test PRIVATE opennova_runtime)
 target_include_directories(hud_element_spans_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_element_spans COMMAND hud_element_spans_test)
+
+# DFX2-36: dfx2.exe's EXPPOINTS element (hud/hud_exp_points.h): its fade, its tiers and strings, the
+# title that draws it and the compiled element.
+add_executable(hud_exp_points_test hud/hud_exp_points_test.cpp)
+target_link_libraries(hud_exp_points_test PRIVATE opennova_runtime)
+target_include_directories(hud_exp_points_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_exp_points COMMAND hud_exp_points_test)
+
+# The HUD's per-title variants (DFX2-91..): what dfx2.exe's HUD draws where Jointops.exe's draws
+# otherwise, read off the session's Title.
+add_executable(hud_title_draws_test hud/hud_title_draws_test.cpp)
+target_link_libraries(hud_title_draws_test PRIVATE opennova_runtime)
+target_include_directories(hud_title_draws_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_title_draws COMMAND hud_title_draws_test)
 
 # The spinmap's bit-10 legs: the dmgslice marks and the threat ring.
 add_executable(hud_minimap_radar_test hud/hud_minimap_radar_test.cpp)

@@ -203,9 +203,12 @@ int main() {
 				{ "client/strcli17", "Yellow Team" },
 				{ "client/strcli18", "Violet Team" },
 				{ "client/strcli20", " - Attacking" },
+				{ "Overlays/STROVER64", "Team Deathmatch" },
+				{ "Overlays/STROVER29", "Deathmatch" },
+				{ "Client/STRCLI07", "(of" },
 		});
 		HudSessionText t;
-		hud_session_text(session, t);
+		hud_session_text(session, 0x10000u, t);
 		CHECK(t.timer == "Timer" && t.players_remaining == "Players remaining:" &&
 				t.players == "Number of players:" && t.spectators == "Number of Spectators:" &&
 				t.in_the_zone == "In the Zone");
@@ -213,6 +216,29 @@ int main() {
 				t.team_names[2] == "Rebel Team" && t.team_names[3] == "Yellow Team" &&
 				t.team_names[4] == "Violet Team" && t.team_names[5].empty());
 		CHECK(t.attacking == " - Attacking" && t.defending.empty());
+		// dfx2.exe's GAMEINFO board (DFX2-114): the game type's Overlays label by
+		// HUD_GetGameTypeOverlayLabel's rung, "" for an unlisted type; the "(of" pair
+		// [orig: HUD_DrawGameTimerOverlay @0x59AE0E, @0x59B263, @0x59B467 (dfx2.exe)].
+		CHECK(t.game_type_label == "Team Deathmatch" && t.of_team_a == "(of" && t.of_team_b.empty());
+		hud_session_text(session, 8u, t);
+		CHECK(t.game_type_label == "Deathmatch");
+		hud_session_text(session, 0x12345u, t);
+		CHECK(t.game_type_label.empty());
+	}
+
+	// DFX2-82's rider weapon texts: a key through Overlays ("" on a miss), none without a key
+	// [orig: HUD_DrawVehicleHealthBars @0x5A4786 (dfx2.exe)].
+	{
+		const GameTextLookup overlays = table_of({ { "Overlays/attach_50cal", "50 Cal" } });
+		std::vector<HudVehicleRider> riders(3);
+		riders[0].has_weapon = true;
+		riders[0].weapon_key = "attach_50cal";
+		riders[1].has_weapon = true;
+		riders[1].weapon_key = "attach_none";
+		riders[2].weapon_text = "stale";
+		hud_vehicle_rider_text(overlays, riders);
+		CHECK(riders[0].weapon_text == "50 Cal" && riders[1].weapon_text.empty() &&
+				riders[2].weapon_text.empty());
 	}
 
 	// The subgoal announcements by section; a miss posts nothing.

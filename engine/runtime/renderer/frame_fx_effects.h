@@ -2,9 +2,10 @@
 
 // FrameFX: retail's post-scene frame-effect system, as the portable planner
 // the device executes. After the scene (and before the HUD) the main scene
-// frame dispatches, in this order, the distortion pass (type 0), the death
-// blur (type 4) or the damage blur (type 1), the bloom (type 2), then the
-// thermal (8) and monitor (9) views; the first-person NVG view replaces the
+// frame dispatches, in this order, the distortion pass (type 0), under a title
+// with it the low-health ring (type 5, DFX2-48), the death blur (type 4) or
+// the damage blur (type 1), the bloom (type 2), then the thermal (8) and
+// monitor (9) views; the first-person NVG view replaces the
 // whole chain. Every pass is one DrawPass descriptor (the 52-byte block
 // FrameFX_DrawPass walks): a source texture, a target, a pixel stage
 // with its blend, and one of four tap-geometry builders. The planner turns
@@ -21,6 +22,8 @@
 #include <functional>
 #include <vector>
 
+#include <base/title/title.h>
+
 namespace opennova::renderer {
 
 // The FBEFFECTS level every gate reads (dword_24D2068). The reimpl runs the
@@ -28,9 +31,17 @@ namespace opennova::renderer {
 // [orig: FrameFX_QualityAtLeast3 @0x581f60]
 inline constexpr int kLockedFrameEffectsLevel = 3;
 
-// The two square work targets ([fx+4] / [fx+8], 256 x 256).
-// [orig: FrameFX_CreateRenderTargets @0x583cf7..0x583d04]
-inline constexpr int kFrameFxWorkSide = 256;
+// The side of the two square work targets ([fx+4] / [fx+8]) and of the work
+// rect every pass not on the viewport rect draws into ([fx+9Ch] / [fx+0A0h]):
+// the title's (Title::frame_fx_work_side, DFX2-47), Jointops.exe's 256,
+// dfx2.exe's 512. The passes' UV constants are fractions of the target, so a
+// 512 target draws the same taps at twice the resolution.
+// [orig: FrameFX_CreateRenderTargets @0x583cf7..0x583d04; FrameFX_DrawPass
+//  @0x582b32..0x582b49] [orig: the twin of FrameFX_CreateRenderTargets
+//  @0x5820c0 - @0x582177 (dfx2.exe)]
+inline int frame_fx_work_side(const Title &title) {
+	return title.frame_fx_work_side;
+}
 
 // The capture target [fx+0] per axis: the highest power of two not above
 // (backbuffer - 1), found by clearing the lowest set bit until one remains.
@@ -94,7 +105,23 @@ enum class FrameFxTaps : std::uint8_t {
 	// FrameFX_BuildTiledQuad @0x5819c0: a 256 x 64-pixel tiling of the
 	// source with a per-draw texel offset.
 	Tiled = 4,
+	// FrameFX_BuildScarDecalVertices @0x584630: a ten-vertex strip around the
+	// rect's border, between the rect and its inner rect at 0.3..0.7 of it (the
+	// hole draws nothing): the inner corners carry four taps at their own UV,
+	// the outer ones the Rotated taps, so the offset grows linearly across each
+	// band (the bands split on the corner diagonals) toward the border. DrawPass
+	// draws it with 10 vertices for its 6. Only the low-health ring uses it.
+	// [orig: FrameFX_DrawPass @0x582bb0 (the 10), @0x582cf8..0x582d36 (the
+	//  call: base, sin, cos, radius, the reduced byte, 0, 0.5);
+	//  FrameFX_BuildScarDecalVertices @0x5846bb..0x5846e3 (the 0.3 / 0.7 inner
+	//  rect), @0x584749..0x584888 (the strip)]
+	Ring = 5,
 };
+
+// The ring builder's inner rect, as fractions of the rect (flt_7D4B34 0.3,
+// flt_7D7C08 0.7). [orig: FrameFX_BuildScarDecalVertices @0x5846a0 / @0x5846cd]
+inline constexpr float kFrameFxRingInnerMin = 0.30000001f;
+inline constexpr float kFrameFxRingInnerMax = 0.69999999f;
 
 // One DrawPass descriptor. The offsets are the 52-byte block's.
 // [orig: FrameFX_DrawPass @0x582ab0]
@@ -166,6 +193,13 @@ struct FrameFxViewInputs {
 	// The frame's Sighted selector byte under the same gates.
 	// [orig: @0x5ca2cc..0x5ca2d5, cleared @0x5ca2ff..0x5ca304]
 	bool sighted_selector = false;
+	// The low-health ring's facts (DFX2-48): a local player stands, its health
+	// word (+0x11E, the signed i16) and its ceiling (Entity_GetMaxHealthWithDifficulty,
+	// 1 without a definition or at 0). [orig: the twin of Render_ProcessMainSceneFrame
+	// @0x5c9000 - @0x5c98e2..0x5c98f9, the word @0x5c9909 (dfx2.exe)]
+	bool local_present = false;
+	std::int32_t local_health = 0;
+	std::int32_t local_max_health = 1;
 };
 
 struct FrameFxFrameInputs {
@@ -178,7 +212,18 @@ struct FrameFxFrameInputs {
 	// GetTickCount(), the type-0 jitter's clock (any millisecond clock: only
 	// its low bits reach the angle).
 	std::uint32_t clock_ms = 0;
+	// The title's scene frame dispatches the low-health ring (Title::
+	// low_health_screen_effect, DFX2-48): dfx2.exe's, which Jointops.exe's
+	// dispatcher carries (its type 5) with no caller.
+	bool low_health_ring = false;
 };
+
+// The low-health ring's strength from the local player's health: the health
+// word over its ceiling as a Q16 fraction (the 64-by-32 signed divide), none
+// at or past the ceiling, 0 below 0, then (0x10000 - fraction) / 32768.
+// Negative: no ring. [orig: the twin of Render_ProcessMainSceneFrame @0x5c9000 -
+// @0x5c991d..0x5c9958 (dfx2.exe)]
+float frame_fx_low_health_strength(const FrameFxViewInputs &view);
 
 // The first-person NVG view. `scene` renders the 512-square NVG scene and
 // accumulates its glow; `composite` replaces the frame with the tint + glow

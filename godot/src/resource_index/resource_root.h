@@ -199,8 +199,11 @@ public:
 	// mounted" test answers yes. The source is read as it stands at each call; a mount drops what
 	// this root cached, never the global cache epoch: another root's holders keep theirs (another
 	// editor device's placer, say), and the mounting device makes afresh what read a moved file (its
-	// placer among them).
-	Error mount_files(std::shared_ptr<const opennova::FileSource> files);
+	// placer among them). `game_code` (a project's target game; empty, the default title's,
+	// base/title/title.h) names the title a session over the root runs as (session_title), as
+	// mount_runtime's does: the HUD preview's fonts and HUD variants are its project's title's.
+	Error mount_files(std::shared_ptr<const opennova::FileSource> files,
+			const String &game_code = String());
 	// C++ siblings only (not bound): the decoded textures this root holds dropped (texture_cache_,
 	// texture_registry_), the mount, its index and its parsed assets kept: a mission's teardown,
 	// whose device objects retail destroys while its archives stay open (engine

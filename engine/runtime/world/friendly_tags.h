@@ -66,6 +66,15 @@ struct FriendlyTagSource {
     // speaker): its colour takes the mixer meter's pulse (hud::friendly_tag_speaking_blend)
     // [orig: HUD_DrawEntityLabel `cmp ebx, g_VoicePlaybackEntity` @0x5a3e89].
     bool speaking = false;
+    // dfx2.exe's FULL-mode reach (DFX2-87, hud::HudFriendlyTag::cursor_target / same_account):
+    // the entity is the HUD target cursor's (g_HUDTargetCursorEntity), and a player's slot +0x3C
+    // word (PlayerSlotFacts::account_id) equals the local player's slot's. Both are filled after
+    // the walks (inmatch::collect_friendly_tags).
+    // [orig: HUD_DrawEntityLabel @0x5A27F0 - the slot word compare @0x5A28B9..0x5A28BF, the cursor
+    //  test @0x5A2E47 (dfx2.exe)]
+    uint32_t account_id = 0;
+    bool cursor_target = false;
+    bool same_account = false;
 };
 
 // Whether the groundEntity walk from `first` reaches a def-type-1 (vehicle)
@@ -100,6 +109,9 @@ struct PlayerSlotFacts {
     // The slot's squad colour index (slot+0x33) [orig: HUD_DrawEntityLabel
     // @0x5A3CBB..0x5A3DBC].
     uint8_t squad_color = 0;
+    // The slot's +0x3C word (replication::ClientRosterSlot::account_id, 0 on LAN), which
+    // dfx2.exe's label compares with the local player's slot's (DFX2-87).
+    uint32_t account_id = 0;
 };
 
 // Resolves the connection slot driving a pool-0 player entity. Returns false

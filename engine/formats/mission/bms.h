@@ -944,6 +944,12 @@ struct WeaponLoadoutRecord {
 
 struct WeaponLoadout {
     std::vector<WeaponLoadoutRecord> entries;
+    // The chunk's strings as the parse read them: the whole chunk split at every NUL, empty
+    // strings kept, a damaged chunk's unterminated last bytes one more string; empty for a File
+    // never parsed. dfx2.exe walks these unrepaired, past the empty string where the records stop
+    // (loadout_chunk_strings). The writer writes the records alone (ADR 0003), so neither equal()
+    // nor a write reads them.
+    std::vector<std::string> chunk_strings;
 };
 
 // One {name, status} pair of the item-availability chunk: the per-map weapon rules
@@ -1085,6 +1091,11 @@ bool write(const File& file, std::vector<uint8_t>& out, std::string& error);
 // [orig: AIProfile_SanitizeConfigData @ 0x40cfe0]. False with the first record that does not (or
 // the one the writer refuses) in `first`.
 bool loadout_reads_back(const WeaponLoadout& loadout, size_t& first);
+
+// The loadout chunk's strings in order, empty ones kept, as a walk of the file's chunk meets them:
+// the parse's (chunk_strings) while the records are still the ones the parse made of them, else
+// (a File built or edited in memory) the strings the writer writes for the records.
+std::vector<std::string> loadout_chunk_strings(const WeaponLoadout& loadout);
 
 // Write the canonical 616-byte BMS header used by authored-file output. Chunk
 // lengths are recomputed from the modeled loadout and item-availability data.

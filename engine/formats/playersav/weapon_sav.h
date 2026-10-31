@@ -119,16 +119,18 @@ struct File {
 };
 
 // Parse. Returns false on a short buffer or a bad magic/version. The header is
-// accepted only when magic == "FPBC" and version == "0211"
+// accepted only when its magic is `magic`, the title's (Title::profile_magic:
+// Jointops.exe's "FPBC", dfx2.exe's "2XFD"), and its version "0211"
 // [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0].
 // Tolerates a file with fewer than kProfileSlots records only if it is exactly
 // kHeaderBytes long (empty) — the slots then hold the struct defaults.
-bool read(const uint8_t *data, size_t size, File &out);
+bool read(const uint8_t *data, size_t size, uint32_t magic, File &out);
 
 // Serialize FROM SCRATCH (docs/adr/0003-no-raw-passthrough-create-from-scratch.md):
 // every byte is produced by this writer, never copied through from a parsed
-// input. Always kHeaderBytes + kProfileSlots * kRecordBytes bytes.
-std::vector<uint8_t> write(const File &in);
+// input, the header opening with `magic`. Always kHeaderBytes + kProfileSlots *
+// kRecordBytes bytes.
+std::vector<uint8_t> write(const File &in, uint32_t magic);
 
 // The default kit pages: the program's eleven static double-NUL page blobs,
 // each a whole "<name> -1 -1 -1" kit, which PlayerProfile_InitDefaults copies
@@ -138,7 +140,17 @@ std::vector<uint8_t> write(const File &in);
 // 0x83ABF8)]. The single-player page is also the session start's fallback
 // when neither the mission nor the profile carries one [orig:
 // Game_StartMission @0x5246be; Game_ApplySessionSettingsToGlobals @0x5519e4].
+// Jointops.exe's eleven pages as the names each holds (each null-terminated, every entry
+// "<name> -1 -1 -1"): the single-player page, and the ten class pages, side 0's (blue) classes
+// 5..9 then side 1's (red). Its Title row names them (Title::profile_single_player_kit,
+// profile_class_kits); the two functions here read them.
+inline constexpr size_t kJointOpsClassKitCount = 2 * kKitPagesPerSide;
+extern const char *const *const kJointOpsSinglePlayerKit;
+extern const char *const *const kJointOpsClassKits[kJointOpsClassKitCount];
 KitPage default_single_player_page();
+// A page of `names` (null-terminated), each entry "<name> -1 -1 -1", as the
+// static page blobs hold them; null or an empty list is an empty page.
+KitPage kit_page_of_names(const char *const *names);
 // nullptr-free: a class outside [5,9] returns an empty page.
 KitPage default_kit_page(SideId side, uint8_t player_class);
 

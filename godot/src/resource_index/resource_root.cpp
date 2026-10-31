@@ -379,10 +379,11 @@ Error ResourceRoot::mount_runtime(const String &path, const String &expansion, b
 			: opennova::ExpansionLoadPoint::ArchivesClosed;
 	Error err = mount_runtime_archives_(path, expansion, allow_loose_override, game_code);
 	// The mount's pools, before any mission loads (world/entity.h pool_capacities_for_expansion),
-	// each capped at what the title's protocol can name (ProtocolInMatch::pool0_wire_capacity). A
-	// title whose protocol is unknown or unwitnessed (protocol(): resolve_title_protocol, its
-	// in-match branches among it) runs no game, so its mount fails, named: the runtime's launch
-	// refuses such a `/game` before it mounts (LaunchFlags::product_supported).
+	// each capped at what the title's protocol can name
+	// (ProtocolInMatch::person_index.pool0_wire_capacity). A title whose protocol is unknown or
+	// unwitnessed (protocol(): resolve_title_protocol, its in-match branches among it) runs no
+	// game, so its mount fails, named: the runtime's launch refuses such a `/game` before it
+	// mounts (LaunchFlags::product_supported).
 	if (err == OK) {
 		std::string refusal;
 		const opennova::Protocol *spoken = protocol(refusal);
@@ -395,7 +396,7 @@ Error ResourceRoot::mount_runtime(const String &path, const String &expansion, b
 			opennova::world::set_pool_capacities(opennova::world::pool_capacities_for_expansion(
 					opennova::to_std(expansion_),
 					opennova::world::wire_pool_capacities(
-							opennova::protocol_in_match(spoken).pool0_wire_capacity)));
+							opennova::protocol_in_match(spoken).person_index.pool0_wire_capacity)));
 		}
 	}
 	expansion_override_table_ = PackedByteArray();
@@ -453,8 +454,10 @@ Error ResourceRoot::mount_runtime_archives_(const String &path, const String &ex
 	return OK;
 }
 
-Error ResourceRoot::mount_files(std::shared_ptr<const opennova::FileSource> files) {
+Error ResourceRoot::mount_files(std::shared_ptr<const opennova::FileSource> files,
+		const String &game_code) {
 	expansion_ = String();
+	game_code_ = String();
 	expansion_override_table_ = PackedByteArray();
 	mount_kind_ = MountKind::None;
 	// This root's caches keyed to the old mount dropped; the global epoch stands, so another root's
@@ -470,6 +473,7 @@ Error ResourceRoot::mount_files(std::shared_ptr<const opennova::FileSource> file
 		return ERR_INVALID_PARAMETER;
 	}
 	root_dir_ = String(opennova::ResourceIndex::kSourceRootDir);
+	game_code_ = game_code;
 	last_error_ = String();
 	mount_kind_ = MountKind::Source;
 	return OK;

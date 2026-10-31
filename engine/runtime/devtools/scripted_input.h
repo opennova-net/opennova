@@ -3,7 +3,7 @@
 // throw a grenade at your own feet) is one shared script that OpenNova and
 // retail both play -- retail through the onHook virtual keyboard keyed on
 // retail action codes, OpenNova through this device. The script names the
-// codes the catalog's rows dispatch (controls::action_for_code: forward 152,
+// codes the catalog's rows dispatch (controls::Catalog::for_code: forward 152,
 // fire 149, USE 177, ...), so the device holds the row's config token and
 // the embedder's binding seam reports that token held like any physical key:
 // the binding scan, PlayerActions' edges and gates, the simulation and the
@@ -39,6 +39,7 @@
 // runs backwards (a reloaded mission) cancels.
 #pragma once
 
+#include <runtime/controls/controls.h>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -93,8 +94,10 @@ public:
 	// one. Refused with `error` set, leaving the device as it was: a negative
 	// tick, a code no catalog row dispatches, a non-finite look, a character
 	// no char step types, no end step or a second one, or a step (a press's
-	// release included) after the end.
-	bool load(const std::vector<ScriptStep> &steps, std::string &error);
+	// release included) after the end. A key step's code resolves to its row's token in
+	// `catalog`, the title's (controls::title_catalog).
+	bool load(const controls::Catalog &catalog, const std::vector<ScriptStep> &steps,
+			std::string &error);
 	// Arm a loaded script; the next advance() latches the start. False when
 	// nothing is loaded or the script already started.
 	bool start();

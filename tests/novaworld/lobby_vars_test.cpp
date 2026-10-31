@@ -18,6 +18,12 @@
 
 namespace nw = opennova;
 
+// The executables' NWPSSK serial terms (games/jo/jo_protocol.cpp's and
+// games/dfx2/dfx2_protocol.cpp's Protocol::nwpssk_mix). [orig: CDKey_GenerateHardwareFingerprint
+// @0x4a4a00 (@0x4a4b1f)] [orig: CDKey_GenerateHardwareFingerprint @0x4a4a60 (@0x4a4b89) (dfx2.exe)]
+static const nw::FingerprintSerialMix kJoMix{ 0x0B24B390u, /*shift_first=*/false };
+static const nw::FingerprintSerialMix kDfx2Mix{ 0x32944845u, /*shift_first=*/true };
+
 static int g_fail = 0;
 static bool expect(bool cond, const char *msg) {
 	if (!cond) {
@@ -319,6 +325,14 @@ int main() {
 		expect(vars[3].second == p.my_installed_exp_bits, "MyInstalledExpBits passes through");
 		expect(vars[4].second.empty() && vars[5].second.empty() && vars[6].second.empty(),
 		       "NWUID / NWCDKIID / NWCDKIIDEXP1 are empty");
+		// dfx2.exe sets its record's two ids there. [orig: CNapiGameSession_OnNovaWorldConnected
+		//  @0x4d1760 - @0x4d18d3..0x4d18f2 (dfx2.exe)]
+		nw::LobbyIdentityParams keyed = p;
+		keyed.nwcdkiid = "BMCCDKDKDLFFNGFDJHMFMMALJCLEFPADLPHHDHEEDHOGCIDLKC";
+		const auto keyed_vars = nw::make_lobby_identity_vars(keyed);
+		expect(keyed_vars[5].first == "NWCDKIID" && keyed_vars[5].second == keyed.nwcdkiid &&
+						keyed_vars[6].first == "NWCDKIIDEXP1" && keyed_vars[6].second.empty(),
+				"NWCDKIID carries the client's CDKIID, NWCDKIIDEXP1 its (empty) CDKIIDEXP1");
 		expect(vars[7].second == p.nwpssk, "NWPSSK passes through from the client environment");
 		expect(vars[8].second == p.nwusid, "NWUSID passes through from the client environment");
 		expect(vars[9].second == p.nwhwi, "NWHWI passes through");
@@ -333,8 +347,8 @@ int main() {
 	{
 		for (const char *id : {"", "machine-a", "machine-b|Fixture GPU", "\x01\x02"}) {
 			const nw::RetailMachineInputs in = nw::fallback_machine_inputs(id);
-			const nw::LobbyMachineTokens fallback = nw::fallback_machine_tokens(id);
-			const nw::LobbyMachineTokens windows = nw::make_retail_machine_tokens(in);
+			const nw::LobbyMachineTokens fallback = nw::fallback_machine_tokens(id, kJoMix);
+			const nw::LobbyMachineTokens windows = nw::make_retail_machine_tokens(in, kJoMix);
 			expect(fallback.nwpssk == windows.nwpssk && fallback.nwusid == windows.nwusid,
 			       "the fallback is the Windows encoders over the hash's words");
 			expect(in.has_ethernet_address && in.volume_name.empty() && in.filesystem_name.empty(),
@@ -356,12 +370,12 @@ int main() {
 			// The hashed adapter makes NWUSID's lead pair the Ethernet tag 77 (0x4D: 'A'+13,
 			// 'A'+4).
 			expect(fallback.nwusid.substr(0, 2) == "NE", "NWUSID leads with the adapter tag");
-			expect(nw::fallback_machine_tokens(id).nwpssk == fallback.nwpssk,
-			       "the fallback is deterministic");
+			expect(nw::fallback_machine_tokens(id, kJoMix).nwpssk == fallback.nwpssk,
+					"the fallback is deterministic");
 		}
-		expect(nw::fallback_machine_tokens("machine-a").nwpssk !=
-		               nw::fallback_machine_tokens("machine-b").nwpssk,
-		       "different ids give different tokens");
+		expect(nw::fallback_machine_tokens("machine-a", kJoMix).nwpssk !=
+						nw::fallback_machine_tokens("machine-b", kJoMix).nwpssk,
+				"different ids give different tokens");
 	}
 
 	// 7. Retail's stable volume/MAC identity transforms, pinned independently
@@ -375,11 +389,18 @@ int main() {
 		in.filesystem_name = "NTFS";
 		in.ethernet_address = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55};
 		in.has_ethernet_address = true;
-		const nw::LobbyMachineTokens tokens = nw::make_retail_machine_tokens(in);
+		const nw::LobbyMachineTokens tokens = nw::make_retail_machine_tokens(in, kJoMix);
 		expect(tokens.nwpssk == "ELHCDHDCSNDFDJMOGMJROAE",
 		       "NWPSSK matches CDKey_GenerateHardwareFingerprint transform");
 		expect(tokens.nwusid == "NEBBDDFFHHJJLLQR",
 		       "NWUSID matches generate_hardware_fingerprint transform");
+		// dfx2.exe's fingerprint differs in its fourth dword alone: (serial >> 3) ^ 0x32944845,
+		// where JO's is (serial ^ 0x0B24B390) >> 3, so the last group's letters differ and NWUSID
+		// does not. [orig: CDKey_GenerateHardwareFingerprint @0x4a4a60 - @0x4a4b7f, @0x4a4b89
+		//  (dfx2.exe)]
+		const nw::LobbyMachineTokens dfx2 = nw::make_retail_machine_tokens(in, kDfx2Mix);
+		expect(dfx2.nwpssk == "ELHCDHDCSNDFDJMOGMODIAD", "DFX2's NWPSSK takes its own serial term");
+		expect(dfx2.nwusid == tokens.nwusid, "the serial term is NWPSSK's alone");
 	}
 
 	// 8. D-NET-469: parse_host_and_port is retail's host-and-port split: the host before the first

@@ -1470,7 +1470,7 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 			std::min<uint32_t>(env.overcast_blend_q16() >> 8, 0xFFu));
 	hs.env.env_param = static_cast<uint8_t>(env.precipitation_kind);
 	hs.mount_ammo.present = (flags2 & kFrameFlags2RouteMask) == kFrameFlags2MountedAmmoRoute;
-	hs.coop_checkpoint_present = protocol_in_match(protocol).objective_checkpoint;
+	hs.coop_checkpoint_present = protocol_in_match(protocol).s2c_0a.objective_checkpoint;
 	hs.coop_checkpoint = coop_checkpoint_slot(w);
 	if (conn.owned_entity.valid()) {
 		if (const world::Entity *own = w.registry.get(conn.owned_entity)) {

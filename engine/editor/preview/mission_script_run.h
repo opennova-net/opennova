@@ -155,6 +155,9 @@ public:
 	int64_t boot_us() const { return boot_us_; }
 	uint32_t script_runs() const;
 	bool scripted() const { return scripted_; }
+	// The gain byte the mission's title starts a script's voice wave at (world::TitleRules::script_voice_volume,
+	// DFX2-42), the booted start's; 0 before a boot, which raises no voice.
+	int32_t script_voice_volume() const;
 
 private:
 	struct Read {

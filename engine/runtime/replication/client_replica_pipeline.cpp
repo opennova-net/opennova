@@ -450,6 +450,8 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		es.spawn_ammo_count = rec.bone_byte;
 		es.spawn_ref_num = rec.alert_byte;
 		es.spawn_sub_type = rec.action_byte;
+		// entity+0xB0, the byte sign-extended [orig: NapiNPClientMsg_0x00D @0x4331B7..0x4331BA].
+		es.spawn_sound_latch = static_cast<int8_t>(rec.sound_latch_byte);
 		es.spawn_mount_mask = rec.seat_mask;
 		for (std::size_t slot = 0; slot < rec.mount_handles.size(); ++slot)
 			es.spawn_mount_handles[slot] = rec.mount_handles[slot];
@@ -889,7 +891,7 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	decode_frame_update(body.data(), body.size(),
 	                    [this](uint16_t tid) { return classify(tid); }, fu,
 	                    frame_objective_body(game_type::is_objective(game_type_),
-	                            protocol_in_match(protocol_).objective_checkpoint),
+	                            protocol_in_match(protocol_).s2c_0a.objective_checkpoint),
 	                    authority_recipient_);
 
 	state_.anchor_x = fu.anchor_x;

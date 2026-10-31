@@ -3,6 +3,7 @@
 
 #include <base/io/crt_ftol.h>
 #include <base/io/le.h>
+#include <base/io/log.h>
 #include <formats/def/reserved_items.h>
 #include <formats/mission/mission_params.h>
 #include <runtime/world/ai.h>
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <limits>
 #include <array>
+#include <cstdio>
 #include <cstdlib>
 #include <utility>
 #include <vector>
@@ -483,8 +485,9 @@ void init_infantry(AiEntity &ae) {
 // bit lives in the runtime view the motors toggle.
 // [orig: Entity_SpawnFromBMSRecord @0x40ED9F..0x40EDA5 (2 -> 0x40),
 //  @0x40EE2A..0x40EE33 (0x4000 -> 0x80), @0x40EE70..0x40EE94 (0x20000 ->
-//  Flags |= 0x80, +0x468 = 0x2D82D, +0x460 = 0x0CCCCCC0, +0x29C = 0x10000)]
-void fold_ai_entity_flags(Entity &entity, const bms::Entity &e) {
+//  Flags |= 0x80, +0x468 = 0x2D82D, +0x460 = 0x0CCCCCC0, +0x29C = 0x10000)]; the rate is the
+// title's full one (DFX2-23) [orig: Entity_SpawnFromBMSRecord - 0x5B05B @0x40ECD0 (dfx2.exe)].
+void fold_ai_entity_flags(Entity &entity, const bms::Entity &e, const PartSpinRates &rates) {
     const uint32_t attrib = e.bmsi_attributes;
     if (attrib & static_cast<uint32_t>(bms::BmsiAttributeFlags::Guarding)) {
         entity.engine_flags |= kEntityFlagMounted;
@@ -496,7 +499,7 @@ void fold_ai_entity_flags(Entity &entity, const bms::Entity &e) {
     }
     if (attrib & static_cast<uint32_t>(bms::BmsiAttributeFlags::EngineRunning)) {
         entity.flags |= 0x80u;
-        rotor_spawn_full(entity.veh.part_spin);
+        rotor_spawn_full(entity.veh.part_spin, rates);
         entity.veh.speed = 0x10000;
     }
 }
@@ -788,10 +791,44 @@ bool admit_record(const bms::Entity &record, const World &world,
 
 } // namespace
 
+bool warn_tables_past_pools(const bms::Header &header, const world::PoolCapacities &capacities,
+        const LoadWarningBox &box) {
+    struct Table {
+        const char *name;
+        uint32_t count;
+        int pool;
+    };
+    const Table tables[] = { { "items", header.num_items, 1 },
+        { "decorations", header.num_buildings, 2 }, { "markers", header.num_markers, 3 },
+        { "organics", header.num_people, 0 } };
+    for (const Table &t : tables) {
+        const int32_t max = static_cast<int32_t>(capacities[t.pool]);
+        if (static_cast<int32_t>(t.count) <= max) continue;
+        char text[128];
+        std::snprintf(text, sizeof text, "Too many %s %i (max is %i)", t.name,
+                static_cast<int32_t>(t.count), max);
+        io::logf(io::LogLevel::kWarn, "%s", text);
+        if (box && box("Error", text) == LoadWarningAnswer::Quit) return false;
+    }
+    return true;
+}
+
 PromoteResult promote_mission(const bms::File &m, World &world,
                               const PromoteOptions &opts) {
     AiSystem &ai = world.ai;
     PromoteResult r;
+
+    // DFX2-24: the loader's own table checks, ahead of the loadout chunk, on the start that loads
+    // the mission file: a single player's or a session's authority, never a joiner, whose start
+    // reads none. A Quit stops the load (the embedder ends the process).
+    // [orig: Mission_LoadBMSFile @0x40F330 - the checks @0x40F400..0x40F4E1, called from
+    //  Game_StartMission @0x521D2E (the restart) and @0x5221CB (the authority's start)
+    //  (dfx2.exe)] (TitleRules::bms_table_warnings)
+    if (world.rules.title().bms_table_warnings && world.rules.projectile_authority &&
+            !warn_tables_past_pools(m.header, opts.pool_capacities, opts.load_warning)) {
+        r.quit = true;
+        return r;
+    }
 
     // Pools (pools 0..3 = actors searched by net id, pool 4 = static props),
     // at the witnessed per-pool retail capacities by default
@@ -1203,7 +1240,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
                      (opts.item_attributes(e.type_id) & kItemAttribAIData) != 0);
             if (ai_class) {
                 if (Entity *spawned = world.registry.get(h)) {
-                    fold_ai_entity_flags(*spawned, e);
+                    fold_ai_entity_flags(*spawned, e, world.rules.title().part_spin);
                     // The AI slot's +156 takes the record's raw 8-byte ai_textfile
                     // (two dwords over the zeroed 16-byte name, so at most 8
                     // characters before a NUL), case and padding kept.
@@ -1278,23 +1315,51 @@ std::vector<std::pair<std::string, int32_t>> mission_availability_pairs(const bm
 }
 
 void stash_mission_loadout_rules(
-        const bms::File &mission,
+        const bms::File &mission, const world::TitleRules &rules,
         std::vector<std::pair<std::string, int32_t>> &r_availability_rows,
         std::vector<world::WeaponKitEntry> &r_kit_rows) {
     r_availability_rows = mission_availability_pairs(mission);
     r_kit_rows.clear();
+    // The kit row's three numbers are the CRT atol (io::retail_atol: the locale's
+    // white space, 0xA0 included, saturating at 32 bits; D-NET-384)
+    // [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550 — j__atol @0x515647,
+    //  @0x51566f, @0x515697].
+    const auto kit_row = [](const std::string &name, const std::string &primary,
+                            const std::string &secondary, const std::string &flags) {
+        world::WeaponKitEntry entry;
+        entry.name = name;
+        entry.ammo_primary = io::retail_atol(primary.c_str());
+        entry.ammo_secondary = io::retail_atol(secondary.c_str());
+        entry.flags = io::retail_atol(flags.c_str());
+        return entry;
+    };
+    if (!rules.bms_loadout_sanitized) {
+        // dfx2.exe walks the chunk as the file holds it, four strings a stride, any of the three
+        // after the name empty: a record that wrote three strings (has_flags false) gives three,
+        // so its stride takes the next record's name as the fourth, and the strides after it
+        // start on that record's numbers, names the walk's def lookup then drops
+        // (world::weapon_kit_filter_by_availability); a stride whose fourth is the empty string
+        // the repair stops at walks on past it (bms::WeaponLoadout::chunk_strings). An empty
+        // string where a name is due ends the walk. A stride past the chunk's last string reads
+        // empty strings, the parse's bound on a short chunk (D-EVT-7), where retail's walk reads
+        // on into its stack buffer.
+        // [orig: Mission_LoadBMSFile @0x40F330 - strlen @0x40F599, the stride
+        //  @0x40F610..0x40F65D, the next stride and its NUL test @0x40F6B1..0x40F6B6 (dfx2.exe)]
+        const std::vector<std::string> strings = bms::loadout_chunk_strings(mission.loadout);
+        static const std::string kNone;
+        const auto at = [&](size_t i) -> const std::string & {
+            return i < strings.size() ? strings[i] : kNone;
+        };
+        for (size_t i = 0; !at(i).empty(); i += 4)
+            r_kit_rows.push_back(kit_row(at(i), at(i + 1), at(i + 2), at(i + 3)));
+        return;
+    }
+    // Jointops.exe's chunk is repaired first, so each stride is one record (bms.h).
+    // [orig: Mission_LoadBMSFile @0x40F4E0 - AIProfile_SanitizeConfigData @0x40CFE0 from
+    //  @0x40F739, the stride @0x40F7B4..0x40F809]
     for (const bms::WeaponLoadoutRecord &row : mission.loadout.entries) {
         if (row.name.empty()) continue;
-        world::WeaponKitEntry entry;
-        entry.name = row.name;
-        // The kit row's three numbers are the CRT atol (io::retail_atol: the locale's
-        // white space, 0xA0 included, saturating at 32 bits; D-NET-384)
-        // [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550 — j__atol @0x515647,
-        //  @0x51566f, @0x515697].
-        entry.ammo_primary = io::retail_atol(row.ammo_primary.c_str());
-        entry.ammo_secondary = io::retail_atol(row.ammo_secondary.c_str());
-        entry.flags = io::retail_atol(row.flags.c_str());
-        r_kit_rows.push_back(std::move(entry));
+        r_kit_rows.push_back(kit_row(row.name, row.ammo_primary, row.ammo_secondary, row.flags));
     }
 }
 

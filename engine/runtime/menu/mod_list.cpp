@@ -20,14 +20,15 @@ void ModList::describe(MenuRuntime &menu, const std::string &text) const {
 }
 
 // [orig: Options_PopulateModList @ 0x559fb0 — every row removed @ 0x559fd8; the base row's text
-//  UIStringTable_LookupAndDup(CWnd_GetInheritedTextRsrc(list), "Joint Operations: Typhoon Rising")
-//  @ 0x559fe2..0x55a000, added with the value -1 @ 0x55a012 and selected @ 0x55a01c; a row per
+//  UIStringTable_LookupAndDup(CWnd_GetInheritedTextRsrc(list), the title's literal: Jointops.exe's
+//  "Joint Operations: Typhoon Rising") @ 0x559fe2..0x55a000, added with the value -1 @ 0x55a012 and selected @ 0x55a01c; a row per
 //  record @ 0x55a036..0x55a077, its display name @ 0x55a03b, selected where its directory
 //  _stricmps g_ExpansionName @ 0x55a04e; MOD_DESC's SetText of that record's description
 //  @ 0x55a084..0x55a0b3, only when one was]
-void ModList::populate(MenuRuntime &menu, int id, const std::string &current) const {
+void ModList::populate(MenuRuntime &menu, int id, const std::string &current,
+		const char *base_key) const {
 	std::vector<std::string> rows;
-	rows.push_back(menu.widget_string(id, kModListBaseKey));
+	rows.push_back(base_key != nullptr ? menu.widget_string(id, base_key) : std::string());
 	for (const ExpansionRecord &record : records_) rows.push_back(record.info.name);
 	menu.set_widget_items(id, rows);
 	menu.select_row(id, 0, false);

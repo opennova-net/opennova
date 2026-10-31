@@ -1549,14 +1549,34 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         // vertical vel <= -0x3800, dir == 0 [orig: @0x4b7920..0x4b793d]) adds
         // the same term again.
         if (inf.player_moving) {
+            const double pad = static_cast<double>(inf.player_move_dir_index) * 0.7853975;
             const double angle =
                     static_cast<double>(static_cast<int16_t>(e.heading >> 16)) *
                             9.587371826171875e-05 +
-                    static_cast<double>(inf.player_move_dir_index) * 0.7853975;
+                    pad;
             const int32_t cx = static_cast<int32_t>(std::cos(angle) * -64.0);
             const int32_t sy = static_cast<int32_t>(std::sin(angle) * -64.0);
-            inf.vel[0] -= cx;
-            inf.vel[1] -= sy;
+            if (world.rules.title().airborne_steer_glide) {
+                // dfx2.exe's glide (DFX2-112): the pair also takes the fall's (-vz) >> 7 along
+                // the angle, and the steer turns the body pitch (+0x90) and Roll (+0x18) by the
+                // pad angle's cosine and sine at 2^22.
+                // [orig: the twin of Entity_UpdateInfantryPlayerBody @0x4B4140 - Q
+                //  @0x4B794B..0x4B7956, ftol(Q cos A) @0x4B7972, the pair's adds @0x4B7990 /
+                //  @0x4B79B4, +0x90 @0x4B79C0..0x4B79D3, Roll @0x4B79D1..0x4B79E2 (dfx2.exe)]
+                const double q = static_cast<double>(
+                        static_cast<int32_t>(0u - static_cast<uint32_t>(inf.vel[2])) >> 7);
+                const int32_t qx = static_cast<int32_t>(q * std::cos(angle));
+                const int32_t qy = static_cast<int32_t>(q * std::sin(angle));
+                inf.vel[0] = io::bam_add(inf.vel[0], io::bam_sub(qx, cx));
+                inf.vel[1] = io::bam_add(inf.vel[1], io::bam_sub(qy, sy));
+                const int32_t turn_pitch = static_cast<int32_t>(std::cos(pad) * 4194304.0);
+                const int32_t turn_roll = static_cast<int32_t>(std::sin(pad) * 4194304.0);
+                e.body_pitch = io::bam_add(e.body_pitch, turn_pitch);
+                e.roll = io::bam_add(e.roll, turn_roll);
+            } else {
+                inf.vel[0] -= cx;
+                inf.vel[1] -= sy;
+            }
             if ((tick_flags & kEntityFlagParachute) != 0 && inf.vel[2] <= -0x3800 &&
                     inf.player_move_dir_index == 0) {
                 inf.vel[0] -= cx;
@@ -1720,12 +1740,26 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             if (!gravity_skip) inf.vel[2] -= kGravityStepPlayer;
             if (tick_entity != nullptr) {
                 uint32_t flags = tick_entity->flags | tick_entity->engine_flags;
+                // The body's MoveOrder jump bit (+0x12C & 0x20): the local player's packed key,
+                // another body's uplinked byte (DFX2-111's trigger).
+                // [orig: Player_PackInputStateToEntity @0x4DF6FA..0x4DF701; the twin of
+                //  Entity_UpdateInfantryPlayerBody @0x4B4140 - @0x4B7BCD (dfx2.exe)]
+                const bool move_order_jump = inf.is_local_player
+                        ? inf.jump_held
+                        : (tick_entity->net_move_input & Entity::kMoveOrderJump) != 0;
                 const ParachuteEvents events = parachute_tick(inf.parachute, flags,
-                        tick_entity->carry_flags, inf.vel[2], is_authority, logic_tick);
+                        tick_entity->carry_flags, inf.vel[2], is_authority, logic_tick,
+                        world.rules.title().parachute_opens_on_jump, move_order_jump);
                 tick_entity->flags = (tick_entity->flags & ~kEntityFlagParachute) |
                         (flags & kEntityFlagParachute);
                 tick_entity->engine_flags = (tick_entity->engine_flags & ~kEntityFlagParachute) |
                         (flags & kEntityFlagParachute);
+                // An open canopy holds the body in "parachute" (47) every tick, in both titles
+                // whatever opened it (DFX2-111 changes only the trigger).
+                // [orig: Entity_UpdateInfantryPlayerBody `mov dword ptr [esi+2BCh], 2Fh`
+                //  @0x4B7BAA; g_AnimStateNameTable @0x8135F0 [47] "parachute"]
+                // [orig: the twin @0x4B4140 - @0x4B7C85; g_AnimStateNameTable @0x8125F0 [47]
+                //  "parachute" (dfx2.exe)]
                 if ((flags & kEntityFlagParachute) != 0 && inf.anim_state != anim_state::kParachute)
                     inf.request_body_animation(anim_state::kParachute);
                 if (events.opened) emit_slot_sound(world, e, audio::kSlotChuteOpen, e.self->position.words().data());

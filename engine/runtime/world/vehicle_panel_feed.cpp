@@ -171,6 +171,51 @@ void fill_vehicle_panel_seats(const World &world, EntityHandle root_h,
     }
 }
 
+void vehicle_panel_riders(const World &world, EntityHandle root_h,
+                          const VehicleOccupancySource *source,
+                          std::vector<VehiclePanelRider> &out) {
+    out.clear();
+    const Entity *root = world.registry.get(root_h);
+    if (root == nullptr) return;
+    VehiclePanelSlotList slots;
+    build_vehicle_panel_slots(world, root_h, slots);
+    // The driver seat's occupant with a definition [orig: the +0x1A0 word @0x5A44BE, its def
+    // @0x5A4525, entityPtr @0x5A4530 (dfx2.exe)].
+    if (const Seat *control = seat_by_retail_slot(*root, 8)) {
+        const VehicleSeatOccupancy o =
+                vehicle_seat_occupancy(world, *root, *control, EntityHandle{}, source);
+        if (o.occupied && o.rider_resolved)
+            out.push_back(VehiclePanelRider{o.rider, false, false, {}});
+    }
+    for (const VehiclePanelSlot &slot : slots) {
+        if (slot.type != 9) continue;
+        const Entity *gun = world.registry.get(slot.entity);
+        if (gun == nullptr) continue;
+        const Seat *use_gun = gun_seat(*gun);
+        if (use_gun == nullptr) continue;
+        const VehicleSeatOccupancy o =
+                vehicle_seat_occupancy(world, *gun, *use_gun, EntityHandle{}, source);
+        if (!o.occupied || !o.rider_resolved) continue;
+        // The gun's slot weapon: Entity_GetWeaponSlots of the gun the gunner rides, the root's
+        // slot under the route bit; its slot-0 def's attachtextid.
+        const Entity *slot_owner = gun;
+        if ((gun->item_attrib & kAttribVehicle) == 0 &&
+                gun->primary_weapon_slot.redirect_to_parent_slot)
+            slot_owner = root;
+        const WeaponTableEntry *weapon =
+                world.tables.weapons.by_index(slot_owner->primary_weapon_slot_adm);
+        VehiclePanelRider rider{o.rider, true,
+                weapon != nullptr && !weapon->attach_text_id.empty(), {}};
+        if (rider.has_weapon) rider.weapon_key = weapon->attach_text_id;
+        // Once per definition gun-slot byte equal to the gun's bone, the root's userpoint at the
+        // gun's slot byte [orig: Entity_GetMountSlotBoneIndex @0x5A4200; `cmp [edx+ecx+214h], al`
+        // @0x5A424C over the four slots @0x5A4240..0x5A4377 (dfx2.exe)].
+        const uint8_t bone = root->def_slot_userpoints[static_cast<size_t>(slot.gun_slot)];
+        for (const uint8_t userpoint : root->def_slot_userpoints)
+            if (userpoint == bone) out.push_back(rider);
+    }
+}
+
 namespace {
 
 const Entity *local_panel_root_entity(const World &world, EntityHandle &root_h) {

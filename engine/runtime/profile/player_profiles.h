@@ -10,8 +10,11 @@
 // @0x54be00]. The embedder owns the files: it hands the loader their bytes and
 // writes the bytes the saver returns, player.sav in the game's working
 // directory and weapon.sav at playersav::weapon_sav_relpath(expansion).
+// Both files' headers open with the title's magic (Title::profile_magic), the
+// one the load gates on and the save writes.
 // Witness record: docs/playerinfo/player-sav-re.md.
 
+#include <base/title/title.h>
 #include <formats/playersav/player_sav.h>
 #include <formats/playersav/weapon_sav.h>
 
@@ -25,12 +28,16 @@ namespace opennova::rtxt {
 struct File;
 }
 
+namespace opennova::controls {
+struct Catalog; // base/title/controls_catalog.h
+}
+
 namespace opennova::profile {
 
 // What a fresh record takes from outside the profile
 // [orig: PlayerProfile_InitDefaults @0x54bb40].
 struct ProfileDefaults {
-	// The default key-binding table (default_binding_table()).
+	// The default key-binding table (default_binding_table of the title's catalog).
 	std::vector<playersav::BindingEntry> bindings;
 	// The ten chat macros (default_macros()).
 	std::array<std::string, playersav::kMacroCount> macros;
@@ -50,14 +57,16 @@ struct ProfileDefaults {
 	std::array<Avatar, 2> avatars{};
 };
 
-// The default key-binding table: every catalog row whose flag word carries
-// 0x4000000, in action-code order (the order the boot's sort leaves the rows
-// in), each entry the row's identity and its default bindings, at most
-// kBindingCapacity [orig: KeyBinding_BuildFilteredTable @0x54c2b0 — the walk
-// @0x54c2d6..0x54c3a5, the capacity stop @0x54c39b; KeyBinding_SortBySequentialId
-// @0x498260]. The original then parses a loose default.key over it when one
-// exists (@0x54c3b6); no shipped game carries one and it is not ported.
-std::vector<playersav::BindingEntry> default_binding_table();
+// The default key-binding table of `catalog` (the title's, controls::title_catalog):
+// every row whose flag word carries 0x4000000, in action-code order (the order the
+// boot's sort leaves the rows in), each entry the row's identity and its default
+// bindings, at most kBindingCapacity [orig: KeyBinding_BuildFilteredTable @0x54c2b0 —
+// the walk @0x54c2d6..0x54c3a5, the capacity stop @0x54c39b;
+// KeyBinding_SortBySequentialId @0x498260] [orig: KeyBinding_BuildFilteredTable
+// @0x549530 over the table @0x8148A0 (dfx2.exe)]. The original then parses a loose
+// default.key over it when one exists (@0x54c3b6); no shipped game carries one and it
+// is not ported.
+std::vector<playersav::BindingEntry> default_binding_table(const controls::Catalog &catalog);
 
 // The ten chat macros a fresh record takes: the menu table's "Macros" section,
 // MACRO_0 .. MACRO_9, the expansion's override table first, a miss the
@@ -71,9 +80,20 @@ std::array<std::string, playersav::kMacroCount> default_macros(
 // A fresh record and its weapon record [orig: PlayerProfile_InitDefaults
 // @0x54bb40]: the record cleared and seeded, the weapon record's two class
 // bytes, avatar bytes and kit pages written (the rest of it kept, as the
-// original writes only those).
+// original writes only those). The kit pages are `title`'s
+// (Title::profile_single_player_kit, profile_class_kits).
 void init_defaults(playersav::ProfileRecord &record, playersav::Record &weapons,
-		const ProfileDefaults &defaults);
+		const ProfileDefaults &defaults, const Title &title);
+
+// A fresh profile's weapon record under `title`: init_defaults' weapon half over a cleared
+// record, with no character table to read (the avatar bytes 0): both class bytes 8 and the
+// title's kit pages. A null title (none named) writes no page, as an unwitnessed title's. The
+// session start's copy and the C2S 0x2F read it for a profile weapon.sav never wrote.
+// [orig: PlayerProfile_InitDefaults @0x54bb40 - 8 @0x54bbe0 / @0x54bbe3, the single-player page
+//  @0x54bced, the class pages @0x54bcf7..0x54bde4]
+// [orig: PlayerProfile_InitDefaults @0x548db0 - 8 @0x548e50 / @0x548e53, the single-player page
+//  @0x548f6d, the class pages @0x548f94..0x549051 (dfx2.exe)]
+playersav::Record fresh_weapon_record(const Title *title);
 
 // The table a loaded record keeps: the defaults, each entry whose action code
 // and token (without case) a saved entry matches taking that entry's eight
@@ -113,20 +133,29 @@ void set_voice_override(playersav::ProfileRecord &record, int side, int value);
 
 class PlayerProfiles {
 public:
-	PlayerProfiles();
+	// The profile of `title`, the title the process runs as (CONTEXT.md "Title"):
+	// its magic (Title::profile_magic) gates both files at the load and heads
+	// both at the save, its record 0 name (Title::profile_first_name) names
+	// the fresh record 0, and its kit pages seed every fresh weapon record
+	// (init_defaults). `title` outlives the profile (the registry's titles do).
+	explicit PlayerProfiles(const Title &title);
+	// The title the profile is (its files', its binding catalog's).
+	const Title &title() const { return *title_; }
 
 	// The files the load reads; a null pointer is a file that does not exist.
 	struct LoadInput {
 		const std::vector<uint8_t> *player_sav = nullptr;
 		const std::vector<uint8_t> *weapon_sav = nullptr;
 		// The account name GetUserNameA reads into a 16-byte buffer: a longer
-		// one fails and leaves the field empty [orig: @0x54f525..0x54f535].
+		// one fails and leaves the field empty [orig: @0x54f525..0x54f535]. A
+		// title that names its record 0 (Title::profile_first_name) reads none.
 		std::string user_name;
 	};
 
 	// [orig: PlayerProfile_LoadAllFromDisk @0x54f4d0]: every record seeded,
-	// record 0 named for the account, player.sav's records read over them and
-	// each one's bindings merged into the defaults, then weapon.sav's. A file
+	// record 0 named for the account (or the title's name for it), player.sav's
+	// records read over them and each one's bindings merged into the defaults,
+	// then weapon.sav's. A file
 	// shorter than its records leaves the defaults past its end, as the
 	// original's File_Read into the seeded memory does.
 	void load(const LoadInput &in, const ProfileDefaults &defaults);
@@ -229,6 +258,7 @@ public:
 	void clear_intro_pending();
 
 private:
+	const Title *title_;
 	playersav::PlayerSav player_;
 	playersav::File weapons_;
 	int slot_ = 0;

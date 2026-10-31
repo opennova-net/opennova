@@ -15,6 +15,7 @@
 #include <editor/preview/mission_world.h>
 #include <editor/preview/model_preview_rig.h>
 #include <editor/preview/viewport_follow.h>
+#include <editor/project/project_document.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
@@ -128,6 +129,7 @@ const MissionPoses::Catalog &MissionPoses::catalog_(const std::string &file) {
 }
 
 bool MissionPoses::refresh(const SessionView &view, const MissionScene &scene, const std::vector<MissionStartSeat> &seats) {
+	game_ = view.project.document ? view.project.document->target_game : std::string();
 	std::vector<MissionPoseInput> inputs;
 	for (const MissionEntityMark &entity : scene.entities()) {
 		if (entity.pool != MissionPool::Organic) continue;
@@ -239,7 +241,8 @@ std::unique_ptr<MissionWorld> MissionPoses::load_people_world(std::map<NodeId, w
 }
 
 bool MissionPoses::floor_files_moved() const {
-	return floor_files_ && source_ && floor_files_->stamped->stamps().moved(*source_);
+	return floor_files_ && source_ &&
+			(floor_files_->stamped->stamps().moved(*source_) || floor_files_->game != game_);
 }
 
 bool MissionPoses::stand(const MissionScene &scene, const MissionPeopleFloor &floor) {
@@ -253,7 +256,7 @@ bool MissionPoses::stand(const MissionScene &scene, const MissionPeopleFloor &fl
 	// noted afresh where one moved, the world built or not (else the move stands and the people are
 	// stood again every frame).
 	if (source_ && (!floor_files_ || floor_files_moved())) {
-		floor_files_ = std::make_shared<MissionFiles>(source_);
+		floor_files_ = std::make_shared<MissionFiles>(source_, game_);
 		floor_world_.reset();
 	}
 	MissionWorld *world = nullptr;

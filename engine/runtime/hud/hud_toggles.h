@@ -27,6 +27,10 @@
 #include <cstdint>
 #include <string>
 
+namespace opennova {
+struct Title; // base/title/title.h
+} // namespace opennova
+
 namespace opennova::hud {
 
 // One action row's down-edge latch with the witnessed gate: the row fires
@@ -63,10 +67,22 @@ struct HudToggleState {
 	// from the session settings @0x551D0F].
 	bool mp_verbose = kMpVerboseDefault;
 	// The F9 AudioEmote and F10 RadioMacro menus (catalog rows 101 / 102,
-	// dispatch 33 / 54) [orig: dword_24C18D4 / dword_24C18D8 — `xor 1` then the
+	// dispatch 33 / 54) [orig: g_EmotesMenuOpen / g_RadioMenuOpen — `xor 1` then the
 	// keeping init @0x49b6c9 / @0x49b6e2].
 	bool emotes_menu_open = false;
 	bool radio_menu_open = false;
+	// DFX2-96: the briefing panel's own window. dfx2.exe's Objectives row (dispatch 58)
+	// flips it out of a session and re-dispatches Briefing (53) in one; Jointops.exe carries
+	// the word too, which only its respawn init and escape chain write (both clear it), so no
+	// key reaches it there. While it holds the gameplay overlays draw the briefing panel
+	// (hud_briefing_window).
+	// [orig: g_BriefingPanelOpen - Game_InitRespawnState @0x49938B, the escape leg
+	//  @0x49B2DA..0x49B2E2, HUD_DrawGameplayOverlays @0x5BE16B -> HUD_DrawBriefingPanel @0x5BE174]
+	// [orig: g_BriefingPanelOpen - Input_HandleActionBinding @0x49AD50 case 58 @0x49B6DB..0x49B70F,
+	//  Game_InitRespawnState @0x49939B, the escape leg @0x49B2EA..0x49B2F2,
+	//  HUD_DrawGameplayOverlays @0x5BCFAC -> HUD_DrawBriefingPanel (HUD_DrawBriefingPanel's twin)
+	//  @0x5BCFB5 (dfx2.exe)]
+	bool briefing_panel_open = false;
 	// The single-player pause word's bit 0: the pause row (catalog 70,
 	// dispatch 25) flips it out of a session, the in-game menu sets it on
 	// open and clears it on resume out of a session, the escape chain clears
@@ -117,6 +133,7 @@ struct HudToggleState {
 	HudKeyEdge toggle_server;
 	HudKeyEdge flipmouse, mousescale;
 	HudKeyEdge lockgame;
+	HudKeyEdge objectives, emote_toggle;
 };
 
 // The briefing window's open value [orig: `mov eax, 2` @0x49b615].
@@ -159,6 +176,8 @@ struct HudKeyPoll {
 	bool flipmouse = false;      // row 79 flipmouse, dispatch 9
 	bool mousescale = false;     // row 82 mousescale, dispatch 17
 	bool lockgame = false;       // row 84 lockgame, dispatch 119
+	bool objectives = false;     // dfx2.exe's row 53 Objectives, dispatch 58
+	bool emote_toggle = false;   // dfx2.exe's row 99 EmoteToggle, dispatch 59
 	// Shift held: the sign bit (bit 31) the keyboard fallback pass and the
 	// mouse dispatch put on the queued binding id, which steps mousescale
 	// down. The modifier pass queues no sign, so a row whose modifier word is
@@ -193,6 +212,11 @@ struct HudKeyPoll {
 	// [orig: Input_HandleActionBinding @0x49AD40 - the row's flags
 	//  dword_8159AC[code * 0x6C] @0x49AD8D, the gates @0x49AD95..0x49AE23]
 	uint32_t head_drops = 0;
+	// The client death-screen latch [orig: g_DeathScreenActive @0xA860EC], and the
+	// title's rule over it (Title::friendly_tags_skip_mode_1_on_death_screen):
+	// with both, the friendly-tags cycle steps on past mode 1 to mode 2, as dfx2.exe's does.
+	bool death_screen = false;
+	bool friendly_tags_skip_mode_1_on_death_screen = false;
 };
 
 // What a poll flipped, for the embedder's device side effects.
@@ -277,8 +301,8 @@ inline constexpr uint32_t kPauseCleared = 0x1000000;
 } // namespace hud_toggle_event
 
 // The catalog rows the poll samples, one bit each: the embedder reads each
-// row's held state by its config token (controls catalog) and hands the
-// mask in.
+// row's held state by its config token (the title's controls catalog) and
+// hands the mask in.
 enum HudToggleRow : int {
 	kRowHudDetail,    // 50 huddetail
 	kRowHudColor,     // 76 hudcolor
@@ -304,13 +328,15 @@ enum HudToggleRow : int {
 	kRowFlipMouse,    // 79 flipmouse
 	kRowMouseScale,   // 82 mousescale
 	kRowLockGame,     // 84 lockgame
+	kRowObjectives,   // dfx2.exe's 53 Objectives
+	kRowEmoteToggle,  // dfx2.exe's 99 EmoteToggle
 	kHudToggleRowCount,
 };
-// The row's catalog config token.
+// The row's catalog config token ("" out of range).
 const char *hud_toggle_row_token(int row);
-// The row's static catalog row (controls::action_code reads the dispatch code
-// the head tests the row's flags by); -1 out of range.
-int hud_toggle_row_catalog_row(int row);
+// The row's dispatch code, by which the head tests its catalog row's flags; -1
+// out of range.
+int hud_toggle_row_code(int row);
 // Sets the poll's key bits from a mask of (1 << HudToggleRow).
 void hud_key_poll_set_rows(HudKeyPoll &keys, uint32_t rows_down);
 
@@ -334,6 +360,27 @@ uint32_t hud_toggles_dispatch(HudToggleState &state, const HudKeyPoll &fired);
 // its once-counters clear as the next start from the menu clears them.
 void hud_toggles_reset_mission(HudToggleState &state);
 
+// DFX2-96: what the I window (briefing_mode) draws: in a session the end-game screen, out of
+// one Jointops.exe's briefing panel, dfx2.exe's single-player how-to (`sp_how_to`,
+// Title::hud_sp_how_to: Overlays STROVER_SPMISSIONHOWTO in the panel's box, from its first line,
+// no page kept). The briefing panel's own word (briefing_panel_open, dfx2.exe's Objectives
+// window; Jointops.exe draws it too, never set) is not the I window's: it draws the briefing
+// panel in a session or out of one, after the win conditions, at its own slot of the gameplay
+// overlays (HudFrameCompiler::compile_gameplay_overlay_windows).
+// [orig: HUD_DrawGameplayOverlays @0x5BDE60 - dword_24C18C8 @0x5BE12C, in a session
+//  HUD_DrawEndGameScreen @0x5BE13E, out of one HUD_DrawBriefingPanel @0x5BE145;
+//  HUD_DrawWinConditions @0x5BE163; g_BriefingPanelOpen @0x5BE16B -> HUD_DrawBriefingPanel
+//  @0x5BE174; HUD_DrawSinglePlayerHowTo @0x5B9210 has no caller]
+// [orig: HUD_DrawGameplayOverlays @0x5BCD20 - dword_24BAE78 @0x5BCF6D, in a session
+//  HUD_DrawEndGameScreen @0x5BCF7F, out of one HUD_DrawSinglePlayerHowTo (the
+//  HUD_DrawSinglePlayerHowTo twin: HUD_DrawLabelBox(200, 40, 824, 728), the rect (235, 75)..(789,
+//  693), GameText_GetString("Overlays", "STROVER_SPMISSIONHOWTO"), HUD_DrawWrappedText from line 0)
+//  @0x5BCF86; sub_5B9890 @0x5BCFA4; g_BriefingPanelOpen @0x5BCFAC -> HUD_DrawBriefingPanel
+//  @0x5BCFB5 (dfx2.exe)]
+enum class HudBriefingWindow : uint8_t { None, Briefing, HowTo, EndGame };
+HudBriefingWindow hud_briefing_window(const HudToggleState &state, bool in_session,
+		bool sp_how_to);
+
 // An S2C 0x0F folded with the death screen up forces the declutter level to
 // the blank level through the same live seam the cycle uses (the replica's
 // HudDetailBlankCommand; a join's 0x0F with the death screen down leaves it)
@@ -351,7 +398,7 @@ void hud_toggles_death_screen(HudToggleState &state);
 // g_EpilogScreenActive, cleared beside the pause word, is only ever raised
 // while the SP round-over latch holds (the SP round end sets it before the
 // epilog cine starts, and a session never runs the epilog), so this chain
-// never sees it; dword_24C18D0 and dword_B76494 have no reachable setter;
+// never sees it; g_BriefingPanelOpen and dword_B76494 have no reachable setter;
 // g_CScreenActive (ex dword_24C18B8) rises only from the cine editor's dialog. The quit
 // dialog closes third, after the voice-macro menus; with none open the tail
 // runs the init keeping the dialog word, then opens the dialog on the
@@ -536,8 +583,8 @@ void hud_toggles_restart_round(HudToggleState &state);
 
 // A menu pick closes its menu with a plain store, no respawn init (the
 // special-key handler's digit arms; the pick itself is the controls poll's).
-// [orig: Input_HandleSpecialKeys — `dword_24C18D4 = 0` @0x49c75c (emotes),
-//  `dword_24C18D8 = 0` @0x49c7a8 (radio)]
+// [orig: Input_HandleSpecialKeys — `g_EmotesMenuOpen = 0` @0x49c75c (emotes),
+//  `g_RadioMenuOpen = 0` @0x49c7a8 (radio)]
 void hud_toggles_close_voice_menu(HudToggleState &state, bool radio);
 
 // The verbose toggle's toast key [orig: STRMISC_VERBOSE_ON / _OFF @0x49b78f].
@@ -559,5 +606,13 @@ std::string mouse_scale_toast(const GameTextLookup &gametext, int32_t scale);
 // @0x49b5c1 / @0x49b5d0 / @0x49b5da]. Returns the toast key for the new mode.
 const char *hud_toggles_cycle_friendly_tags(HudToggleState &state);
 const char *friendly_tag_toast_key(FriendlyTagMode mode);
+
+// The friendly-tags toast line for `mode` under the title: the title's literal line where
+// it posts one (Title::friendly_tag_toast_literals, dfx2.exe's modes 1 and 2), else
+// gametext Misc/<friendly_tag_toast_key>; "" (which posts nothing) when the string is
+// missing. The embedder posts it to the system ring as the verbose toast is posted (the
+// witness rides the Title).
+std::string friendly_tag_toast(const GameTextLookup &gametext, FriendlyTagMode mode,
+		const Title &title);
 
 } // namespace opennova::hud

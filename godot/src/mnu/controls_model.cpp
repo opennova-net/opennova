@@ -1,5 +1,6 @@
 #include "mnu/controls_model.h"
 #include "player/player_profiles.h"
+#include "resource_index/resource_root.h"
 #include "util/string_convert.h"
 
 #include <godot_cpp/classes/global_constants.hpp>
@@ -131,8 +132,13 @@ String ControlsModel::display_text_for_token(const String &p_token) const {
 	return opennova::to_gd(opennova::controls::format_display_string(*r));
 }
 
+// The launch title's binding catalog (its rows the live records follow).
+ControlsModel::ControlsModel()
+		: bindings_(opennova::controls::title_catalog(
+				  ResourceRoot::session_title(Ref<ResourceRoot>()))) {}
+
 String ControlsModel::display_text_for_action_code(int p_code) const {
-	const opennova::controls::ActionDef *def = opennova::controls::action_for_code(p_code);
+	const opennova::controls::ActionDef *def = bindings_.catalog().for_code(p_code);
 	if (def == nullptr) {
 		return opennova::to_gd(
 				opennova::controls::format_display_string(opennova::controls::BindingRecord{}));
@@ -241,10 +247,9 @@ int ControlsModel::event_code(int p_scan_code) const {
 	// The scan names a catalog index; its dispatch code is the row id's (the port's
 	// catalog leaves row 66 out, so an index past it is not its id).
 	const int index = bindings_.event_row(p_scan_code, key_down);
-	std::size_t count = 0;
-	const opennova::controls::ActionDef *rows = opennova::controls::catalog(&count);
-	return index >= 0 && static_cast<std::size_t>(index) < count
-			? opennova::controls::action_code(rows[index].id)
+	const opennova::controls::Catalog &catalog = bindings_.catalog();
+	return index >= 0 && static_cast<std::size_t>(index) < catalog.count
+			? catalog.rows[index].code
 			: -1;
 }
 
@@ -281,7 +286,7 @@ void ControlsModel::advance_scripted_input(int64_t p_logic_tick) {
 	};
 	const auto slot_of = [&](int p_code) {
 		Slot slot;
-		const opennova::controls::ActionDef *def = opennova::controls::action_for_code(p_code);
+		const opennova::controls::ActionDef *def = bindings_.catalog().for_code(p_code);
 		if (def == nullptr) return slot;
 		const opennova::controls::BindingRecord *r =
 				bindings_.record(bindings_.index_of_token(def->token));
@@ -413,11 +418,10 @@ ControlsModel::MouseClickRecord ControlsModel::mouse_click_record(int p_event) c
 	const auto key_down = [this](int vk) { return vk_down_(vk); };
 	const opennova::controls::BindingSet::MouseClickRecord record = bindings_.mouse_click_record(
 			static_cast<uint32_t>(p_event), key_down, bindings_.scan_death_screen());
-	std::size_t count = 0;
-	const auto *cat = opennova::controls::catalog(&count);
+	const opennova::controls::Catalog &catalog = bindings_.catalog();
 	MouseClickRecord out;
-	if (record.index >= 0 && static_cast<std::size_t>(record.index) < count) {
-		out.code = opennova::controls::action_code(cat[record.index].id);
+	if (record.index >= 0 && static_cast<std::size_t>(record.index) < catalog.count) {
+		out.code = catalog.rows[record.index].code;
 		out.sign = record.sign;
 	}
 	return out;
@@ -534,8 +538,8 @@ void ControlsModel::apply_profile(const Ref<PlayerProfiles> &p_profiles) {
 
 Dictionary ControlsModel::save_blob() const {
 	Dictionary blob;
-	std::size_t n = 0;
-	const opennova::controls::ActionDef *cat = opennova::controls::catalog(&n);
+	const std::size_t n = bindings_.catalog().count;
+	const opennova::controls::ActionDef *cat = bindings_.catalog().rows;
 	for (std::size_t i = 0; i < n; ++i) {
 		const opennova::controls::BindingRecord *r = bindings_.record(static_cast<int>(i));
 		// The rows a player's binding table carries: those whose flags hold 0x4000000 (engine

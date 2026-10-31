@@ -177,7 +177,7 @@ uint32_t ChatEntry::dispatch(int action, const ChatEntryFacts &f, const GameText
 		case kChatDispatchSquad:
 		case kChatDispatchLocal: {
 			// [orig: @0x49b989..0x49b9b4 — `death && !round over`, in session,
-			// !dword_24C195C]
+			// !g_RoundResetHold]
 			if (f.death_screen && !f.round_over) return 0;
 			if (!f.in_session) return 0;
 			if (f.reset_hold) return 0;

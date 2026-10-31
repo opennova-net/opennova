@@ -19,13 +19,16 @@ constexpr IntField integers[] = { { "max_players", &HostedSettings::max_players 
 	{ "max_packet_size", &HostedSettings::max_packet_size } };
 } //namespace
 
+SettingRange max_packet_size_range() {
+	const gamecfg::ServerSetting *row = gamecfg::server_setting("max_packet_size");
+	return { static_cast<int>(row->minimum), static_cast<int>(row->maximum) };
+}
+
 io::JsonValue hosted_settings_schema(std::string_view title) {
 	Json schema = gamecfg::server_settings_schema(inmatch::server_settings_title(title), true);
 	for (auto &row : schema.array) {
 		if (row.get_string("key", "") != "max_packet_size") continue;
 		row.set("core", Json::make_bool(true));
-		row.set("min", io::json_number(kMaxPacketSizeRange.min));
-		row.set("max", io::json_number(kMaxPacketSizeRange.max));
 	}
 	return schema;
 }

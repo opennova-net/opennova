@@ -2,12 +2,17 @@
 // AI system, then the AI is ticked to prove the brains/nav are wired to the real mission
 // data (entities patrol their authored routes). See engine/runtime/mission/promote.cpp.
 #include <array>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <variant>
+#include <vector>
+#include <string>
 
+#include <base/io/log.h>
+#include <formats/mission/bms_edit.h>
 #include <runtime/mission/promote.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/friendly_tags.h>
@@ -1071,7 +1076,7 @@ static void test_bms_pool0_used_window_is_the_accepted_count() {
 // The running capacities size the load (world::set_pool_capacities): items past
 // retail's 1200 drop under retail's pools and all load under an expansion's scaled
 // ones, each capped at what the protocol's wire can name (wire_pool_capacities over
-// its pool0_wire_capacity: JO's 256); any other mount takes retail's. [orig: Game_Run
+// its person_index cap: JO's 256); any other mount takes retail's. [orig: Game_Run
 // @0x4a7fb0 -> EntityPool_Allocate @0x4a7fc5; Mission_LoadBMSFile @0x40F4E0, pool 1
 // @0x40f9bb..0x40f9c6]
 static void test_pool_capacities_size_the_load() {
@@ -1111,6 +1116,148 @@ static void test_pool_capacities_size_the_load() {
     const Entity *last = scaled->registry.get(EntityHandle::make(1, 1213));
     CHECK(last != nullptr && last->net_id == 1000 + 1213);
     CHECK(pool_capacity(1) == 1200);
+}
+
+// DFX2-24: a header counting more of a table than its pool holds warns at the load under
+// dfx2.exe's rules, "Too many <table> %i (max is %i)" in the load's order with the pool's capacity
+// as the max, in the log and in the embedder's box under the caption "Error", where Jointops.exe's
+// says nothing. OK carries the load on; Cancel stops it at that box, the later checks unrun and
+// nothing promoted. A joiner's load, which retail's start never runs, checks nothing.
+// [orig: Mission_LoadBMSFile @0x40F4E0 - the jumps @0x40F5BA..; Mission_LoadBMSFile @0x40F330 -
+//  `jle` @0x40F40A, @0x40F443, @0x40F47C, @0x40F4B5, Game_ShowWarningDialog("Error", ..)
+//  @0x40F431 (dfx2.exe); Game_ShowWarningDialog @0x4A5D60 - IDOK @0x4A5D91,
+//  Game_ShutdownAndExit @0x4A5D96 (dfx2.exe)]
+static std::vector<std::string> g_warnings;
+static void test_dfx2_warns_of_a_table_past_its_pool() {
+    io::set_log_sink([](io::LogLevel level, const char *message) {
+        if (level == io::LogLevel::kWarn && std::strncmp(message, "Too many", 8) == 0)
+            g_warnings.push_back(message);
+    });
+    bms::File file;
+    file.header.num_items = 1201;
+    file.header.num_buildings = 1200; // at the limit: no warning
+    file.header.num_markers = 769;
+    file.header.num_people = 257;
+    file.items.push_back(bms::Entity{});
+    file.items[0].type_id = 0x50;
+    const std::vector<std::string> all = { "Too many items 1201 (max is 1200)",
+        "Too many markers 769 (max is 768)", "Too many organics 257 (max is 256)" };
+    std::vector<std::string> boxed;
+    mission::LoadWarningAnswer answer = mission::LoadWarningAnswer::Continue;
+    size_t quit_at = 0; // the box (1-based) answered Quit, 0 = none
+    mission::PromoteOptions opts;
+    opts.load_warning = [&](const std::string &caption, const std::string &text) {
+        CHECK(caption == "Error");
+        boxed.push_back(text);
+        return boxed.size() == quit_at ? mission::LoadWarningAnswer::Quit : answer;
+    };
+    struct Case {
+        const char *code;
+        bool authority;
+        size_t quit_at;
+    };
+    for (const Case c : { Case{ "jo", true, 0 }, Case{ "dfx2", true, 0 }, Case{ "dfx2", true, 2 },
+                 Case{ "dfx2", false, 0 } }) {
+        g_warnings.clear();
+        boxed.clear();
+        quit_at = c.quit_at;
+        auto w = std::make_unique<World>();
+        w->rules.title_rules = &title_rules(c.code);
+        w->rules.projectile_authority = c.authority;
+        const mission::PromoteResult r = mission::promote_mission(file, *w, opts);
+        if (std::strcmp(c.code, "jo") == 0 || !c.authority) {
+            CHECK(g_warnings.empty() && boxed.empty());
+            CHECK(!r.quit && r.spawned == 1);
+        } else if (c.quit_at == 0) {
+            CHECK(g_warnings == all && boxed == all);
+            CHECK(!r.quit && r.spawned == 1);
+        } else {
+            const std::vector<std::string> two(all.begin(), all.begin() + 2);
+            CHECK(g_warnings == two && boxed == two);
+            CHECK(r.quit && r.spawned == 0 && w->registry.get(EntityHandle::make(1, 0)) == nullptr);
+        }
+    }
+    io::set_log_sink(nullptr);
+}
+
+// The loadout chunk's kit rows: Jointops.exe repairs a record that wrote three strings, so
+// each stride of four is one record; dfx2.exe walks the file's strings as they stand, so the
+// three-string record takes the next record's name as its fourth, the strides after it start
+// on numbers, and the last runs past the chunk's last string onto its closing NUL (DFX2-27).
+// [orig: Mission_LoadBMSFile @0x40F4E0 - AIProfile_SanitizeConfigData @0x40CFE0 from @0x40F739]
+// [orig: Mission_LoadBMSFile @0x40F330 - strlen @0x40F599, the stride @0x40F610..0x40F65D
+//  (dfx2.exe)]
+static void test_dfx2_walks_the_loadout_chunk_unrepaired() {
+    const auto record = [](const char *name, const char *primary, const char *secondary,
+                           const char *flags) {
+        bms::WeaponLoadoutRecord row;
+        row.name = name;
+        row.ammo_primary = primary;
+        row.ammo_secondary = secondary;
+        if (flags != nullptr) row.flags = flags;
+        row.has_flags = flags != nullptr;
+        return row;
+    };
+    const auto same = [](const std::vector<WeaponKitEntry> &got,
+                         const std::vector<WeaponKitEntry> &want) {
+        if (got.size() != want.size()) return false;
+        for (size_t i = 0; i < got.size(); ++i) {
+            if (got[i].name != want[i].name || got[i].ammo_primary != want[i].ammo_primary ||
+                    got[i].ammo_secondary != want[i].ammo_secondary ||
+                    got[i].flags != want[i].flags)
+                return false;
+        }
+        return true;
+    };
+    bms::File file;
+    file.loadout.entries = { record("WPN_M4AUTO", "5", "2", nullptr),
+                             record("WPN_AK47AUTO", "3", "1", "2"),
+                             record("WPN_KNIFE", "-1", "-1", "-1") };
+    std::vector<std::pair<std::string, int32_t>> availability;
+    std::vector<WeaponKitEntry> kit;
+    mission::stash_mission_loadout_rules(file, title_rules("jo"), availability, kit);
+    CHECK(same(kit, { { "WPN_M4AUTO", 5, 2, -1 }, { "WPN_AK47AUTO", 3, 1, 2 },
+                      { "WPN_KNIFE", -1, -1, -1 } }));
+    mission::stash_mission_loadout_rules(file, title_rules("dfx2"), availability, kit);
+    CHECK(same(kit, { { "WPN_M4AUTO", 5, 2, 0 }, { "3", 1, 2, 0 }, { "-1", -1, -1, 0 } }));
+
+    // An empty string where a stride's name is due ends dfx2.exe's walk.
+    file.loadout.entries = { record("WPN_M4AUTO", "5", "2", nullptr),
+                             record("WPN_AK47AUTO", "", "1", "2") };
+    mission::stash_mission_loadout_rules(file, title_rules("dfx2"), availability, kit);
+    CHECK(same(kit, { { "WPN_M4AUTO", 5, 2, 0 } }));
+
+    // A parsed chunk is walked as the file holds it: a three-string record followed by an empty
+    // string ends Jointops.exe's repaired records there (the empty string takes the name's place),
+    // while dfx2.exe's stride takes that empty string as A's fourth and walks on to B, stopping
+    // on the chunk's closing NUL.
+    // [orig: AIProfile_SanitizeConfigData @0x40CFE0] [orig: Mission_LoadBMSFile @0x40F330 - the
+    //  stride's empty fourth @0x40F652, the next stride @0x40F6B1 (dfx2.exe)]
+    bms::File parsed;
+    {
+        bms::File blank;
+        mission::make_default(blank);
+        std::vector<uint8_t> bytes;
+        std::string error;
+        CHECK(bms::write(blank, bytes, error));
+        static const char kChunk[] = "A\0-1\0-1\0\0B\0-1\0-1\0-1\0"; // and the literal's closing NUL
+        bytes.insert(bytes.begin() + bms::kHeaderSize, kChunk, kChunk + sizeof(kChunk));
+        bytes[offsetof(bms::Header, weapon_loadout_chunk_len)] = static_cast<uint8_t>(sizeof(kChunk));
+        CHECK(bms::parse(bytes.data(), bytes.size(), parsed, error));
+    }
+    CHECK(parsed.loadout.entries.size() == 1 && parsed.loadout.entries[0].name == "A" &&
+          !parsed.loadout.entries[0].has_flags);
+    CHECK((parsed.loadout.chunk_strings ==
+           std::vector<std::string>{ "A", "-1", "-1", "", "B", "-1", "-1", "-1", "" }));
+    mission::stash_mission_loadout_rules(parsed, title_rules("jo"), availability, kit);
+    CHECK(same(kit, { { "A", -1, -1, -1 } }));
+    mission::stash_mission_loadout_rules(parsed, title_rules("dfx2"), availability, kit);
+    CHECK(same(kit, { { "A", -1, -1, 0 }, { "B", -1, -1, -1 } }));
+    // An edit of the records leaves the chunk the parse read: the walk takes the strings the
+    // writer writes for them, as the file a save writes holds.
+    parsed.loadout.entries[0].name = "C";
+    mission::stash_mission_loadout_rules(parsed, title_rules("dfx2"), availability, kit);
+    CHECK(same(kit, { { "C", -1, -1, 0 } }));
 }
 
 // Each pool's used count after the load: pools 1..3 take their record count, a
@@ -1355,6 +1502,8 @@ static void test_item_brain_follows_class_and_attrib() {
 }
 
 int main() {
+    test_dfx2_warns_of_a_table_past_its_pool();
+    test_dfx2_walks_the_loadout_chunk_unrepaired();
     test_item_brain_follows_class_and_attrib();
     test_bms_ai_attribute_fold();
     test_bms_range_slots_read_their_own_fields();

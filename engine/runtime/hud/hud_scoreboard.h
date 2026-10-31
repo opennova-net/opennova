@@ -183,12 +183,16 @@ struct ScoreboardRowContext {
 	// Solo KOTH's countdown rows [orig: g_ScoreboardFlags & 2 @0x423e7d].
 	bool timed = false;
 	// The countdown's minutes [orig: is_authority ? g_KothLimitMinutes :
-	// dword_A821C0 @0x423a4b..0x423a5e].
+	// g_JoinerTimeLimitMinutes @0x423a4b..0x423a5e].
 	int time_limit = 0;
 	// The local player's team byte, -1 without a local entity (retail
 	// dereferences g_LocalPlayerEntity unguarded @0x423d64; no entity never
 	// matches here).
 	int local_team = -1;
+	// The class suffix and its stash run at all: Jointops.exe's board, not dfx2.exe's
+	// (Title::hud_kill_list_no_class, DFX2-83) [orig: HUD_DrawKillList @0x423890 - the team arm's
+	// format @0x423BB1 with no class read (dfx2.exe)].
+	bool class_suffix = true;
 };
 
 // The row text composer — one per board draw, fed the rows that reach the

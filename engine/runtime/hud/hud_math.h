@@ -10,6 +10,10 @@
 // here and keep only CanvasItem work. Witness record:
 // docs/interface/hud-re.md.
 
+namespace opennova {
+struct Title; // base/title/title.h
+} // namespace opennova
+
 namespace opennova::hud {
 
 // ---------------------------------------------------------------------------
@@ -43,6 +47,20 @@ int32_t screen_to_design_y(int32_t y, int32_t surface_h);
 // @0x5D2B4E..0x5D2B69].
 int32_t design_to_screen_x(int32_t x, int32_t surface_w);
 int32_t design_to_screen_y(int32_t y, int32_t surface_h);
+
+// HUD_DrawTexturedQuadCentered's design rect: the centre +- the extent / 2 (C division). With
+// clipToScreen a rect crossing a design edge slides fully back on, left, right, top then bottom,
+// each test reading the edges the one before moved, and draws in auxiliaryColors[1] (0xFFFF8020)
+// in place of the caller's colour.
+// [orig: HUD_DrawTexturedQuadCentered @0x5909E0 -- the corners @0x590A14..0x590A33, the gate
+//  @0x590A37, left @0x590A45..0x590A5F, right @0x590A70..0x590A87, top @0x590A8B..0x590AA9,
+//  bottom @0x590AB4..0x590ACB; auxiliaryColors[1] HUD_InitTeamColorTable @0x51F28B]
+struct HudCenteredRect {
+	int32_t left = 0, top = 0, right = 0, bottom = 0;
+	uint32_t color = 0;
+};
+HudCenteredRect hud_centered_rect(int32_t cx, int32_t cy, int32_t width, int32_t height,
+		uint32_t color, bool clip_to_screen);
 
 // The bordered textured quad's texture window: u0 = 0.05 / tex_w inside the
 // left edge, u1 = 1 - u0 + 1 / (right - left) in on-screen pixels, and the
@@ -261,6 +279,12 @@ int friendly_tag_alpha(int32_t dist_q16);
 
 // Whether the text form draws for this mode/distance [orig: @0x5a3fc3..0x5a3fcf].
 bool friendly_tag_text_visible(int mode, int32_t dist_q16);
+// dfx2.exe's FULL-mode reach (DFX2-87), 16.16: 300 u, 50 u for an entity without the Player
+// class bit (an AI organic), 1000 u for a player whose slot +0x3C word is the local player's
+// slot's. [orig: HUD_DrawEntityLabel @0x5A27F0 - 0x12C0000 @0x5A288C, `test [ebx+24h], 100h`
+// @0x5A287F -> 0x320000 @0x5A2896, the slot word compare @0x5A28B9..0x5A28BF -> 0x3E80000 @0x5A28C1
+// (dfx2.exe)]
+int32_t friendly_tag_reach_q16(bool player, bool same_account);
 
 // The speaking-entity pulse over the mixer meter's first stage `level`
 // (g_AudioOutLevelStage1, 0..0x3FF): each 16-bit lane is the channel byte
@@ -300,28 +324,32 @@ inline constexpr uint8_t kFriendlyTagRadioRequestIcon = 0x17;
 // g_FallbackPeopleNames @0x840a78, count @0x840a0c].
 std::string friendly_tag_fallback_name(uint16_t encoded_entity_id);
 
-// The overlay label-font selection by surface width: the Arial pair and the
-// slot scale the friendly-tag / attach-label draws ride
-// [orig: HUD_InitAllFonts @0x51ee20 — width <= 640: Arial14n/Arial12b over
-// 640; <= 800: Arial14n/Arial14b over 800; > 800: Arial16n/Arial16b over
-// 1024; scale = (screenWidth<<16)/divisor @0x51ef26, stored as the slot's
-// float pair by HUD_LoadFontIntoSlot @0x580400].
+// The overlay label-font selection by surface width, from the title's table (Title::hud_fonts):
+// the Arial pair and the slot scale the friendly-tag / attach-label draws ride, of the first
+// tier whose bound holds the width; scale = (screenWidth<<16)/divisor, stored as the slot's
+// float pair by HUD_LoadFontIntoSlot @0x580400. A title with no table chooses no file (every
+// name empty) at scale 1, tier -1; the tables are the titles' rows.
+// [orig: HUD_InitAllFonts @0x51ee20 — @0x51ef26]
+// [orig: the twin @0x51BD70 (@0x51BEE1) (dfx2.exe)]
 struct HudLabelFontChoice {
-	const char *normal_fnt;
-	const char *bold_fnt;
-	// The single-file large slot the big-map grid labels ride
-	// [orig: HUD_InitAllFonts — g_HUDLabelFontLarge @0xB4C3A0 = Impac22b.fnt
-	//  at the over-800 scale for every width].
-	const char *large_fnt;
+	const char *normal_fnt = "";
+	const char *bold_fnt = "";
+	// The single-file large slot the big-map grid labels ride, at the large divisor for every
+	// width: Impac22b.fnt over 800 in Jointops.exe, Impac44b.fnt over 1600 in dfx2.exe
+	// [orig: HUD_InitAllFonts — g_HUDLabelFontLarge @0xB4C3A0].
+	const char *large_fnt = "";
 	// The Impact38 slot the end-round overlay / death screen / disconnect
-	// dialog draw with, loaded at the SAME over-800 scale as the large slot
-	// [orig: HUD_InitAllFonts — g_HUDLabelFontImpact38 @0xB4C3AC = Impac38b.fnt
-	//  @0x51ef7b..0x51ef94, the scale register shared with Impac22b].
-	const char *impact38_fnt = nullptr;
+	// dialog draw with, loaded at the SAME scale as the large slot
+	// (Impac38b.fnt, Impac76b.fnt in dfx2.exe), the scale register shared with the large
+	// [orig: HUD_InitAllFonts — g_HUDLabelFontImpact38 @0xB4C3AC (@0x51ef7b..0x51ef94)].
+	const char *impact38_fnt = "";
 	float scale = 1.0f;
 	float large_scale = 1.0f;
-	int tier = 0; // 0 <= 640 / 1 <= 800 / 2 > 800 — stable id for reload checks
+	int tier = -1; // the tier's index in the title's table — a stable id for reload checks
 };
-HudLabelFontChoice hud_label_font_choice(int surface_w);
+HudLabelFontChoice hud_label_font_choice(int surface_w, const Title &title);
+// The large slot's one file, whatever the width ("" for a title with no table): the splash's
+// continue line and the epilog cine's text load it.
+const char *hud_large_label_font(const Title &title);
 
 } // namespace opennova::hud

@@ -13,6 +13,7 @@
 
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
+#include <runtime/hud/hud_math.h> // half_bright_argb (HUD_DrawTextCentered_HalfBright)
 
 #include <algorithm>
 #include <cstdint>
@@ -513,6 +514,9 @@ public:
 	void line(uint32_t argb, float x0, float y0, float x1, float y1) override {
 		compiler_.push_line({ x0, y0, x1, y1, argb });
 	}
+	void hud_label(const std::string &text, float center_x, float foot, uint32_t argb) override {
+		compiler_.emit_hud_label_(text, center_x, foot, argb);
+	}
 
 private:
 	MenuFrameCompiler &compiler_;
@@ -522,6 +526,44 @@ private:
 	WalkScale s_;
 	const MenuWidgetState *ws_;
 };
+
+// A table painter's HUD label: the HUD label face (the font registered under
+// kMenuHudLabelFontName), which the HUD's own loader keeps at 800 / design_width, its
+// 'W' extent measured at that scale alone, centred on `center_x` with its top that
+// height above `foot`, drawn at the slot's scale pair in the halved colour, opaque. No
+// face, nothing drawn.
+// [orig: sub_550CF0 @0x550d88..0x550dc8 - CGameFont_GetCharExtent(g_HUDLabelFont, 'W')
+//  @0x550d95, the extent's height off the y @0x550da0, HUD_DrawTextCentered_HalfBright
+//  (&g_HUDLabelFont, x, y, text, colour, 1) @0x550dc8; CGameFont_GetCharExtent @0x6b1980 -
+//  the height (v1 - v0) * [this+12ECh] * 256 @0x6b1a09; HUD_DrawTextCentered_HalfBright
+//  @0x57eb00 - ((c >> 1) & 0x7F7F7F) | 0xFF000000, flag 1 centres, the slot's +4 / +8 scale;
+//  GameFont_LoadFromBlob @0x6b1300 - 800 / design_width into +12ECh @0x6b135e (dfx2.exe)]
+void MenuFrameCompiler::emit_hud_label_(const std::string &text, float center_x, float foot,
+		uint32_t argb) {
+	const int32_t slot = font_slot_(kMenuHudLabelFontName);
+	const opennova::fnt::fnt_font_t *font = font_at_(slot);
+	if (font == nullptr || text.empty()) return;
+	hud::GameFont gf;
+	gf.set_font(font);
+	const float x = static_cast<float>(static_cast<int>(center_x));
+	const float y = static_cast<float>(static_cast<int>(foot) -
+			static_cast<int>(gf.char_height('W', 1.0f)));
+	const hud::GameFontRun run = gf.layout(text.c_str(), x, y, hud_label_scale_, hud_label_scale_,
+			hud::kFontAlignCenter, hud::half_bright_argb(argb));
+	const size_t first = draw_list_.glyphs.size();
+	const size_t underline_first = draw_list_.underlines.size();
+	draw_list_.glyphs.insert(draw_list_.glyphs.end(), run.quads.begin(), run.quads.end());
+	draw_list_.underlines.insert(draw_list_.underlines.end(), run.underlines.begin(),
+			run.underlines.end());
+	if (run.quads.empty()) return;
+	MenuDrawList::FontRun fr;
+	fr.font = slot;
+	fr.first = static_cast<int32_t>(first);
+	fr.count = static_cast<int32_t>(run.quads.size());
+	fr.underline_first = static_cast<int32_t>(underline_first);
+	fr.underline_count = static_cast<int32_t>(run.underlines.size());
+	push_font_run(fr);
+}
 
 // CTableWnd_DrawCell(row, column, flags): the cell rect by its OWN walk — the
 // column's left from the table's left over every earlier column's width plus

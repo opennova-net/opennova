@@ -71,15 +71,18 @@ CineEvent text_fade(int32_t start, CineTextSource source, const char *section, c
 // [orig: CineEventEpilogCounter_Construct @0x5732C0 (this, start, duration,
 //  +0x430, +0x434, +0x438, +0x43C, label, +0x420, +0x424, +0x428, +0x42C,
 //  +0x14)]
-CineEvent epilog_counter(int32_t start, const char *label_key, int32_t row_y, int32_t value,
-		int32_t max) {
+// The live builds pass the label at x 192 and the count-up column at x 832; the
+// value column is Jointops.exe's 692 or dfx2.exe's 832 [orig: @0x5765F6..0x576611;
+// Cine_EpilogStateMachineUpdate @0x574555..0x57455f (dfx2.exe)].
+CineEvent epilog_counter(int32_t start, const char *label_key, int32_t value_x, int32_t row_y,
+		int32_t value, int32_t max) {
 	CineEvent e;
 	e.kind = CineEventKind::EpilogCounter;
 	e.start = start;
 	e.duration = kEpilogHoldFrames;
 	e.label_key = label_key;
 	e.label_x = 192;
-	e.value_x = 692;
+	e.value_x = value_x;
 	e.count_x = 832;
 	e.row_y = row_y;
 	// The live epilog's every line passes -1 as its points target and rate,
@@ -90,6 +93,22 @@ CineEvent epilog_counter(int32_t start, const char *label_key, int32_t row_y, in
 	e.value = value;
 	e.max = max;
 	e.flags = 1;
+	return e;
+}
+
+// dfx2.exe's two score rows: Jointops.exe's counter columns, the count-up's
+// -1 target and rate, no max, in Impact38 (-3), the label and the columns in
+// `color` with the alpha byte raised.
+// [orig: CineEventEpilogCounterFont_Construct @0x571770 (this, start, duration, +0x430, +0x434,
+//  +0x438, +0x43C, label, +0x420, +0x424, +0x428, +0x42C, +0x450, +0x448 / +0x44C (a14 |
+//  0xFF000000), +0x14); the calls @0x5746f1 / @0x574753 (dfx2.exe)]
+CineEvent epilog_counter_font(int32_t start, const char *label_key, int32_t row_y, int32_t value,
+		uint32_t color) {
+	CineEvent e = epilog_counter(start, label_key, 832, row_y, value, -1);
+	e.kind = CineEventKind::EpilogCounterFont;
+	e.font = -3;
+	e.label_color = color | 0xFF000000u;
+	e.value_color = color | 0xFF000000u;
 	return e;
 }
 
@@ -113,6 +132,9 @@ uint32_t cine_event_draw_argb(const CineEvent &e) {
 		return hud::half_bright_keep_alpha(cine_text_fade_argb(e));
 	case CineEventKind::EpilogCounter:
 		return hud::half_bright_argb(0xFFFFFFFFu);
+	case CineEventKind::EpilogCounterFont:
+		// [orig: Render_EpilogCounter @0x571b14 - the label in +0x44C (dfx2.exe)]
+		return hud::half_bright_argb(e.label_color);
 	default:
 		return 0;
 	}
@@ -178,9 +200,11 @@ void EpilogCine::activate_event(CineEvent &e, World &world) {
 		e.alpha = 0.0f;
 		break;
 	case CineEventKind::EpilogCounter:
+	case CineEventKind::EpilogCounterFont:
 		// The count-up column's start: the count at 0, the first step four
 		// frames away [orig: CineEventEpilogCounter's start @0x573370 —
-		//  +0x440 = 0, +0x444 = 4 @0x57337a].
+		//  +0x440 = 0, +0x444 = 4 @0x57337a] [orig: CineEventEpilogCounterFont_Start @0x571840 /
+		//  @0x57184a (dfx2.exe)].
 		e.points = 0;
 		e.points_cooldown = kEpilogCounterStepWait;
 		break;
@@ -244,17 +268,25 @@ void EpilogCine::update_event(CineEvent &e, World &world) {
 			e.alpha = static_cast<float>(static_cast<double>(e.duration - count + 1) / e.fade_out);
 		break;
 	}
-	case CineEventKind::EpilogCounter: {
+	case CineEventKind::EpilogCounter:
+	case CineEventKind::EpilogCounterFont: {
 		// The count-up step: after its wait the count moves toward the target
 		// by the rate (a negative target subtracts it), clamped past the target,
 		// and the step that lands on the target plays TEXT_END; every step
 		// re-arms the wait. The live epilog's -1 target and rate step the count
 		// up from 0, away from the target, so it never lands and never sounds.
-		// (The step's busy flag dword_269721C, raised while the count is off
+		// (The step's busy flag g_CineCounterBusy, raised while the count is off
 		// its target, has no reader.)
 		// [orig: CineEventEpilogCounter_Step @0x573390 — the wait @0x5733ab..0x5733b8;
 		//  the step @0x5733c0..0x5733fa; the arrival @0x573400..0x57340e ->
 		//  Sound_PlayInterfaceTriggerSet(g_SndTextEnd); the re-arm @0x573416]
+		// An EpilogCounterFont's step is the same and plays HEADSHOTTONE on each
+		// step off its target, before it moves (the live rows' -1 target and
+		// rate: every fifth dispatch), and its rand() colour pulse runs under
+		// flags bit 1, which no live row sets.
+		// [orig: CineNode_ColorFadeUpdate @0x571860 - the wait @0x57187b..0x571888, the
+		//  tone @0x57189c..0x5718a5, the step @0x5718aa..0x5718e9, TEXT_END @0x5718f7, the
+		//  re-arm @0x5718ff, the pulse @0x57190d (dfx2.exe)]
 		if (e.points_cooldown != 0) {
 			--e.points_cooldown;
 			break;
@@ -263,6 +295,12 @@ void EpilogCine::update_event(CineEvent &e, World &world) {
 		const uint32_t count = static_cast<uint32_t>(e.points);
 		const uint32_t rate = static_cast<uint32_t>(e.points_rate);
 		if (e.points != target) {
+			if (e.kind == CineEventKind::EpilogCounterFont) {
+				ScriptSoundEvent tone;
+				tone.name = kEpilogCounterToneSoundset;
+				tone.kind = ScriptSoundEvent::Kind::Interface;
+				world.out.script_sounds.push_back(std::move(tone));
+			}
 			if (target > 0) {
 				e.points = static_cast<int32_t>(count + rate); // @0x5733da
 				if (e.points > target) e.points = target;      // @0x5733fa
@@ -401,9 +439,13 @@ void EpilogCine::update_lose(World &world) {
 		break;
 	case 1:
 		// The screen builds on the first dispatch after a cine frame has
-		// rendered [orig: `cmp dword_26970F4, 0` @0x5744FD].
+		// rendered [orig: `cmp g_CineFrameDrawn, 0` @0x5744FD]
+		// [orig: Cine_EpilogLoseUpdate - `cmp g_CineFrameDrawn, 0` @0x575a23 (dfx2.exe)].
 		if (!frame_drawn) break;
-		build_lose_screen();
+		if (mission.debriefing_screens)
+			build_lose_debriefing_screen();
+		else
+			build_lose_screen();
 		++lose_state; // [orig: @0x5747D4]
 		// Then the dialog reset (the world's dialog table, its waiting lines
 		// with it) and the audio channel shutdown, which the embedder's audio
@@ -459,6 +501,77 @@ void EpilogCine::build_lose_screen() {
 			hud::kGameTextEpilogKeyInfo.key, 0, 600, -2, 140, 140, 1024, 100, 1, 0xFFFFFF));
 }
 
+const std::string &EpilogCine::heading_title() const {
+	// [orig: Cine_EpilogLoseUpdate @0x575b0a..0x575b2b - the entry test and the strlen;
+	//  Cine_EpilogStateMachineUpdate @0x57446c..0x57448b (dfx2.exe)]
+	return mission.entry && !mission.title.empty() ? mission.title : mission.server_mission_name;
+}
+
+void EpilogCine::build_lose_debriefing_screen() {
+	// The same states and build delay as Jointops.exe's; the fades are black,
+	// the letterbox fades out over one frame, the image starts a frame later, the
+	// heading names the mission in Impact38 yellow, and the lines below it start
+	// 62 frames past it, the mission's debriefing among them.
+	// [orig: Cine_EpilogLoseUpdate - the screen flag @0x575a32 (dfx2.exe)]
+	screen_active = true;
+	const int32_t t = frame + kEpilogLoseScreenDelay; // [orig: @0x575a38]
+	// The fade pair, solid colour 0 [orig: @0x575a5c / @0x575a99].
+	events.push_back(image_fade(t, kEpilogFadeFrames, "", CineFadeMode::In, 0,
+			CineFadeSource::SolidColor, 0u, 0));
+	const int32_t fade_out = t + kEpilogFadeFrames; // [orig: @0x575a77]
+	events.push_back(image_fade(fade_out, kEpilogFadeFrames, "", CineFadeMode::Out, 0,
+			CineFadeSource::SolidColor, 0u, 0));
+	events.push_back(letterbox(fade_out, kEpilogDebriefingLetterboxFrames,
+			kEpilogScreenLetterboxMode, 0)); // [orig: @0x575ac5]
+	const int32_t image_start = fade_out + 1; // [orig: @0x575acf]
+	events.push_back(image_fade(image_start, kEpilogHoldFrames, "jo_Epil2.tga",
+			CineFadeMode::Hold, 0, CineFadeSource::Image, 0u, 0)); // [orig: @0x575af4]
+	// MISSION FAILED sprintf'd over the mission's title [orig: @0x575b40 / @0x575b5f, the
+	//  sprintf @0x575b65; CCineEventTextFade_Construct @0x575bad - (heading, 223200,
+	//  "CineText", buffer, 0, 120, -3, 100, 140, 1024, 0, 1, 0xFFFF00)].
+	const int32_t heading = image_start + kEpilogFadeFrames; // [orig: @0x575b72]
+	CineEvent failed = text_fade(heading, CineTextSource::GameTextFormat,
+			hud::kGameTextMissionFailed.section, hud::kGameTextMissionFailed.key, 0, 120, -3, 100,
+			140, 1024, 0, 1, 0xFFFF00);
+	failed.text = heading_title();
+	events.push_back(failed);
+	int32_t start = heading + kEpilogDebriefingLineDelay; // [orig: @0x575bb2]
+	// The banner line through the text-pointer TextFade, built only over a stored
+	// banner, which also moves the y cursor from 230 to 262; the embedder holds the
+	// banner and draws nothing for an empty one, so the node rides every build and
+	// the debriefing's y follows the banner at the draw (CineEvent::banner_y)
+	// [orig: `cmp g_BannerText, 0` @0x575bb5; CineEventTextFade_Construct @0x575bfc - (start,
+	//  223200, &g_BannerText, 0, 230, -2, 140, 140, 1024, 100, 1, 0xFFFFFF); the cursor
+	//  @0x5759ad / @0x575c01 (dfx2.exe)].
+	events.push_back(text_fade(start, CineTextSource::Banner, "", "", 0, 230, -2, 140, 140, 1024,
+			100, 1, 0xFFFFFF));
+	// The saved-game list it would add below (sub_5B6230 @0x575c0d, the rows
+	// @0x575c1c..0x575c81, each 32 further on and 32 lower) is the unported
+	// savegame record (D-SAVE-1).
+	// The mission's LOSE_DEBRIEFING, from the entry's table, when it holds the key,
+	// at x 192 in a box 640 wide and unbounded below, on the y cursor; the key help
+	// moves 32 frames on. A mission the catalog does not list has no entry to read
+	// (retail's dereferences its entry).
+	// [orig: TextResource_FindEntryBySectionAndKey(entry+1040, "Info", "LOSE_DEBRIEFING")
+	//  @0x575c9e, the entry and its text pointer @0x575ca3..0x575cac; CineEventTextFade_Construct
+	//  @0x575cec - (start, 223200, text, 192, cursor, -2, 140, 140, 640, 0, flags, 0xFFFFFF), the
+	//  flags the saved-game walk's counter, 1 with none @0x5759b9 / @0x575cc9; @0x575cf1
+	//  (dfx2.exe)]
+	if (mission.entry && mission.lose_debriefing.has_value()) {
+		CineEvent debriefing = text_fade(start, CineTextSource::Text, "", "", 192, 230, -2, 140,
+				140, 640, 0, 1, 0xFFFFFF);
+		debriefing.text = *mission.lose_debriefing;
+		debriefing.banner_y = 262;
+		events.push_back(debriefing);
+		start += 32;
+	}
+	// The key help 124 frames on, y 600 [orig: @0x575cf9 / @0x575d4a]; its second
+	// line (y 632, @0x575dac) builds only over a saved game (D-SAVE-1).
+	events.push_back(text_fade(start + 124, CineTextSource::GameText,
+			hud::kGameTextEpilogKeyInfo.section, hud::kGameTextEpilogKeyInfo.key, 0, 600, -2, 140,
+			140, 1024, 100, 1, 0xFFFFFF));
+}
+
 void EpilogCine::update_win(World &world) {
 	switch (win_state) {
 	case 0:
@@ -473,9 +586,13 @@ void EpilogCine::update_win(World &world) {
 		if (frame >= win_build_frame) win_state = 4;
 		break;
 	case 4:
-		// [orig: `cmp dword_26970F4, 0` @0x5764DB]
+		// [orig: `cmp g_CineFrameDrawn, 0` @0x5764DB] [orig: Cine_EpilogStateMachineUpdate - `cmp
+		//  g_CineFrameDrawn, 0` @0x57437d (dfx2.exe)]
 		if (!frame_drawn) break;
-		build_win_screen(world);
+		if (mission.debriefing_screens)
+			build_win_debriefing_screen(world);
+		else
+			build_win_screen(world);
 		++win_state; // [orig: @0x5767D7]
 		break;
 	case 5:
@@ -515,18 +632,110 @@ void EpilogCine::build_win_screen(const World &world) {
 	// [orig: @0x5765D0..0x576776 — y 160 / 208 / 256 / 304]
 	const hud::EndRoundStatisticsInput in = end_round_statistics_input(world);
 	const int32_t first = line_start + 124; // [orig: @0x5765E1]
-	events.push_back(epilog_counter(first, hud::kGameTextEpilogObjectiveBonus.key, 160, in.subgoals_won,
-			in.subgoals_defined));
-	events.push_back(epilog_counter(first + 60, hud::kGameTextEpilogEnemyUnits.key, 208,
+	events.push_back(epilog_counter(first, hud::kGameTextEpilogObjectiveBonus.key, 692, 160,
+			in.subgoals_won, in.subgoals_defined));
+	events.push_back(epilog_counter(first + 60, hud::kGameTextEpilogEnemyUnits.key, 692, 208,
 			hud::end_round_enemy_units(in), in.enemy_unit_total)); // [orig: @0x576649]
-	events.push_back(epilog_counter(first + 120, hud::kGameTextEpilogTeamUnits.key, 256, in.team_unit_kills,
-			-1)); // [orig: @0x5766C9]
-	events.push_back(epilog_counter(first + 180, hud::kGameTextEpilogFriendlyUnits.key, 304,
+	events.push_back(epilog_counter(first + 120, hud::kGameTextEpilogTeamUnits.key, 692, 256,
+			in.team_unit_kills, -1)); // [orig: @0x5766C9]
+	events.push_back(epilog_counter(first + 180, hud::kGameTextEpilogFriendlyUnits.key, 692, 304,
 			in.friendly_unit_kills, -1)); // [orig: @0x57672A]
 	// The key help, 120 frames past the last counter, y 700 [orig: @0x5767B9 /
 	//  @0x5767D2].
 	events.push_back(text_fade(first + 300, CineTextSource::GameText, hud::kGameTextEpilogKeyInfo.section,
 			hud::kGameTextEpilogKeyInfo.key, 0, 700, -2, 140, 140, 1024, 100, 1, 0xFFFFFF));
+}
+
+void EpilogCine::build_win_debriefing_screen(World &world) {
+	// The same states and build delay as Jointops.exe's; the fades, the
+	// letterbox and the image as the lose screen's, the heading names the
+	// mission, three counters at x 832 and 32 apart from 62 frames past it (no
+	// FRIENDLYUNITS line), then the mission's debriefing and the key help.
+	// [orig: Cine_EpilogStateMachineUpdate case 4 - the flag @0x57438e (dfx2.exe)]
+	screen_active = true;
+	const int32_t t = frame + kEpilogWinScreenDelay; // [orig: @0x574398]
+	// [orig: @0x5743bb / @0x5743f9, solid colour 0]
+	events.push_back(image_fade(t, kEpilogFadeFrames, "", CineFadeMode::In, 0,
+			CineFadeSource::SolidColor, 0u, 0));
+	const int32_t fade_out = t + kEpilogFadeFrames; // [orig: @0x5743d6]
+	events.push_back(image_fade(fade_out, kEpilogFadeFrames, "", CineFadeMode::Out, 0,
+			CineFadeSource::SolidColor, 0u, 0));
+	events.push_back(letterbox(fade_out, kEpilogDebriefingLetterboxFrames,
+			kEpilogScreenLetterboxMode, 0)); // [orig: @0x574426]
+	const int32_t image_start = fade_out + 1; // [orig: @0x574430]
+	events.push_back(image_fade(image_start, kEpilogHoldFrames, "jo_Epil.tga",
+			CineFadeMode::Hold, 0, CineFadeSource::Image, 0u, 0)); // [orig: @0x574456]
+	// MISSION WON sprintf'd over the mission's title [orig: @0x5744a0 / @0x5744bf, the
+	//  sprintf @0x5744a6 / @0x5744c5; CCineEventTextFade_Construct @0x57450e - (heading, 223200,
+	//  "CineText", buffer, 0, 110, -3, 100, 140, 1024, 0, 1, 0xFFFF00)].
+	const int32_t heading = image_start + kEpilogFadeFrames; // [orig: @0x5744d2]
+	CineEvent won = text_fade(heading, CineTextSource::GameTextFormat,
+			hud::kGameTextMissionWon.section, hud::kGameTextMissionWon.key, 0, 110, -3, 100, 140,
+			1024, 0, 1, 0xFFFF00);
+	won.text = heading_title();
+	events.push_back(won);
+	// The counters, their values Jointops.exe's, frozen at the build: the won
+	// subgoals over the defined ones, the clamped enemy buckets over the enemy
+	// total, the team sum with no max; the friendly line is not built.
+	// [orig: @0x574513..0x574658 - (start, 223200, 192, 832, 832, y, label, -1, -1, value, max, 1)
+	//  at y 210 @0x57456c, 242 @0x5745f6, 274 @0x574658; the starts @0x574524 / @0x57458b /
+	//  @0x57460c]
+	const hud::EndRoundStatisticsInput in = end_round_statistics_input(world);
+	const int32_t first = heading + kEpilogDebriefingLineDelay;
+	events.push_back(epilog_counter(first, hud::kGameTextEpilogObjectiveBonus.key, 832, 210,
+			in.subgoals_won, in.subgoals_defined));
+	events.push_back(epilog_counter(first + 60, hud::kGameTextEpilogEnemyUnits.key, 832, 242,
+			hud::end_round_enemy_units(in), in.enemy_unit_total));
+	events.push_back(epilog_counter(first + 120, hud::kGameTextEpilogTeamUnits.key, 832, 274,
+			in.team_unit_kills, -1));
+	int32_t cursor = first + 180; // [orig: @0x574663]
+	// With the local player's slot: its points (stats field 29) and the entry's
+	// high score, which a higher point total replaces (the unsigned compare),
+	// drawing the high score yellow then and white else, both rows in Impact38
+	// 60 apart from the cursor at y 354 / 402, 60 frames further each; with no
+	// slot neither row, the cursor kept. A mission the catalog does not list
+	// scores against its own 0 and writes no row (retail's dereferences its
+	// entry); a new best posts the effect the embedder writes into the table.
+	// [orig: Entity_ValidatePtr(g_LocalPlayerEntity) @0x574666 (the active slot whose
+	//  entity it is), CPlayerStats_GetFieldPlusOne(slot+0x48, 0x1C) @0x57467b, `cmp
+	//  [entry+0x11E4], points; jnb` @0x574687, the store @0x57468f, the colours
+	//  @0x574695 / @0x57469c; CineEventEpilogCounterFont_Construct @0x5746f1 - (cursor, 223200,
+	//  192, 832, 832, 354, STREPILOG_TOTALEXP, -1, -1, points, -1, -3, 0xFFFF00, 1), @0x574753 -
+	//  (cursor + 60, .., 402, STREPILOG_HIGHSCORE, -1, -1, entry+0x11E4, -1, -3, colour, 1); the
+	//  cursor @0x5746fb / @0x574758 (dfx2.exe)]
+	if (const MatchPlayer *slot = world.match.player(world.cached.local_player)) {
+		const int32_t points = slot->stats[MatchStats::kPoints];
+		uint32_t best_color = 0xFFFFFFFFu;
+		if (static_cast<uint32_t>(mission.high_score) < static_cast<uint32_t>(points)) {
+			mission.high_score = points;
+			best_color = 0xFFFF00u;
+			if (mission.entry)
+				world.out.effects.push({kEpilogHighScoreEffect, points, 0, 0, 0, mission.file});
+		}
+		events.push_back(epilog_counter_font(cursor, hud::kGameTextEpilogTotalExp.key, 354, points,
+				0xFFFF00u));
+		cursor += 60;
+		events.push_back(epilog_counter_font(cursor, hud::kGameTextEpilogHighScore.key, 402,
+				mission.high_score, best_color));
+		cursor += 60;
+	}
+	// The mission's WIN_DEBRIEFING, from the entry's table, when it holds the key,
+	// at (47, 475) in a box 930 wide and unbounded below; it moves nothing on.
+	// A mission the catalog does not list has no entry to read (retail's
+	// dereferences its entry).
+	// [orig: TextResource_FindEntryBySectionAndKey(entry+1040, "Info", "WIN_DEBRIEFING")
+	//  @0x574771, the entry and its text pointer @0x574776..0x574782; CineEventTextFade_Construct
+	//  @0x5747c1 - (cursor, 223200, text, 47, 475, -2, 140, 140, 930, 0, 1, 0xFFFFFF) (dfx2.exe)]
+	if (mission.entry && mission.win_debriefing.has_value()) {
+		CineEvent debriefing = text_fade(cursor, CineTextSource::Text, "", "", 47, 475, -2, 140,
+				140, 930, 0, 1, 0xFFFFFF);
+		debriefing.text = *mission.win_debriefing;
+		events.push_back(debriefing);
+	}
+	// The key help 60 frames past the cursor, y 700 [orig: @0x574817 / @0x57481d].
+	events.push_back(text_fade(cursor + 60, CineTextSource::GameText,
+			hud::kGameTextEpilogKeyInfo.section, hud::kGameTextEpilogKeyInfo.key, 0, 700, -2, 140,
+			140, 1024, 100, 1, 0xFFFFFF));
 }
 
 bool EpilogCine::playback_active() {
@@ -541,7 +750,7 @@ bool EpilogCine::playback_active() {
 void EpilogCine::render_pass() {
 	// [orig: Cine_RenderOrEndPlayback @0x575A57 — the running gate; the time-range recalc
 	//  @0x575A59; the draw @0x575A8A -> Cine_RenderOverlays, whose tail raises
-	//  dword_26970F4 @0x570C66; past the end the cine stops @0x575A6B]
+	//  g_CineFrameDrawn @0x570C66; past the end the cine stops @0x575A6B]
 	if (!active) return;
 	if (frame < end_frame())
 		frame_drawn = true;

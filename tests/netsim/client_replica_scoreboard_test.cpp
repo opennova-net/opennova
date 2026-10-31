@@ -592,9 +592,70 @@ void test_score_delta_sound_fold() {
 	CHECK(view.state().score_feedback.updates == 2);
 	CHECK(view.state().revision == revision + 1);
 
+	// A short body reads 0, a long one its first four bytes
+	// [orig: NapiNPClientMsg_ScoreDeltaSound @0x42A0BA..0x42A0CD].
 	view.apply(s2c::SCORE_DELTA_SOUND, {0x01, 0x00, 0x00});
-	CHECK(view.state().score_feedback.score == -3);
-	CHECK(view.state().score_feedback.updates == 2);
+	CHECK(view.state().score_feedback.score == 0);
+	CHECK(view.state().score_feedback.delta == 3);
+	CHECK(view.state().score_feedback.updates == 3);
+	view.apply(s2c::SCORE_DELTA_SOUND, {0x05, 0x00, 0x00, 0x00, 0xFF});
+	CHECK(view.state().score_feedback.score == 5 && view.state().score_feedback.updates == 4);
+}
+
+// Each 0x81 whose delta sounds the EXP_FANFARE ladder is a fanfare arm, the last one's tone kept
+// (dfx2.exe's EXPPOINTS fade starts there, DFX2-36); a delta the ladder leaves silent arms none.
+// [orig: @0x422350..0x4223C5 (dfx2.exe)]
+void test_score_fanfare_arms() {
+	ClientReplicaPipeline view;
+	view.state().exp_fanfare = 0x1405; // lo 5 (KILLTONE), hi 20 (HEADSHOTTONE)
+	view.apply(s2c::SCORE_DELTA_SOUND, {0x02, 0x00, 0x00, 0x00}); // +2: HIT
+	CHECK(view.state().score_feedback.fanfare_arms == 1);
+	CHECK(view.state().score_feedback.fanfare_tone == hud::ScoreTone::Hit);
+	view.apply(s2c::SCORE_DELTA_SOUND, {0x18, 0x00, 0x00, 0x00}); // +22: HEADSHOT
+	CHECK(view.state().score_feedback.fanfare_arms == 2);
+	CHECK(view.state().score_feedback.fanfare_tone == hud::ScoreTone::Headshot);
+	view.apply(s2c::SCORE_DELTA_SOUND, {0x10, 0x00, 0x00, 0x00}); // -8: silent
+	CHECK(view.state().score_feedback.fanfare_arms == 2);
+	CHECK(view.state().score_feedback.fanfare_tone == hud::ScoreTone::Headshot);
+	view.state().exp_fanfare = 0; // disarmed
+	view.apply(s2c::SCORE_DELTA_SOUND, {0x40, 0x00, 0x00, 0x00});
+	CHECK(view.state().score_feedback.fanfare_arms == 2);
+}
+
+// The S2C 0x80 / 0x82 score tracker: an 0x82 with no node records nothing; an 0x80 names the
+// node and clears the record; the node's first 0x82 appends its entry (start = time, elapsed 0),
+// a later one keeps the start and stores the gain; another node keeps its own entry; a short
+// body reads 0.
+// [orig: NapiNPClientMsg_0x080 @0x42A070; NapiNPClientMsg_0x082 @0x42A0E0 ->
+//  CineTracker_RecordTimeEntry @0x422410]
+void test_score_tracker_fold() {
+	ClientReplicaPipeline view;
+	const ClientScoreTracker &t = view.state().score_tracker;
+	view.apply(s2c::SCORE_TRACKER_TIME, {0x64, 0x00, 0x00, 0x00});
+	CHECK(!t.valid && view.score_tracker_entries().empty());
+	view.apply(s2c::SCORE_TRACKER_RESET, {0x07, 0x00, 0x00, 0x00});
+	CHECK(t.node == 7 && !t.valid);
+	view.apply(s2c::SCORE_TRACKER_TIME, {0x64, 0x00, 0x00, 0x00}); // 100
+	CHECK(t.valid && t.start == 100 && t.time == 100 && t.elapsed == 0 && view.score_tracker_entries().size() == 1);
+	view.apply(s2c::SCORE_TRACKER_TIME, {0x96, 0x00, 0x00, 0x00}); // 150
+	CHECK(t.valid && t.start == 100 && t.time == 150 && t.elapsed == 50 && view.score_tracker_entries().size() == 1);
+	view.apply(s2c::SCORE_TRACKER_RESET, {0x08, 0x00, 0x00, 0x00});
+	CHECK(t.node == 8 && !t.valid && t.start == 0 && t.elapsed == 0 && t.time == 150);
+	view.apply(s2c::SCORE_TRACKER_TIME, {0x01, 0x00});
+	CHECK(t.valid && t.time == 0 && t.elapsed == 0 && view.score_tracker_entries().size() == 2);
+	view.apply(s2c::SCORE_TRACKER_RESET, {0x07, 0x00, 0x00, 0x00});
+	view.apply(s2c::SCORE_TRACKER_TIME, {0xC8, 0x00, 0x00, 0x00}); // 200
+	CHECK(t.valid && t.start == 100 && t.time == 200 && t.elapsed == 100 && view.score_tracker_entries().size() == 2);
+	// A zero or short game start leaves it; a nonzero one clears the node, valid, start and
+	// elapsed, keeping the time and the entries [orig: NapiNPClientMsg_HandleGameStart @0x42E180].
+	view.apply(s2c::GAME_START_SIGNAL, {0x00});
+	view.apply(s2c::GAME_START_SIGNAL, {});
+	CHECK(t.valid && t.node == 7);
+	view.apply(s2c::GAME_START_SIGNAL, {0x01});
+	CHECK(!t.valid && t.node == 0 && t.start == 0 && t.elapsed == 0 && t.time == 200 &&
+			view.score_tracker_entries().size() == 2);
+	view.apply(s2c::SCORE_TRACKER_TIME, {0x2C, 0x01, 0x00, 0x00});
+	CHECK(!t.valid); // no node: nothing records
 }
 
 void test_spawn_wave_status_fold() {
@@ -818,6 +879,8 @@ int main() {
 	test_projection_unknown_is_empty();
 	test_score_sign_extends();
 	test_score_delta_sound_fold();
+	test_score_fanfare_arms();
+	test_score_tracker_fold();
 	test_spawn_wave_status_fold();
 	test_malformed_body_is_rejected();
 	test_visible_players_fold();

@@ -89,7 +89,12 @@ void MenuFrameCompiler::set_text_tables(const MenuTextTables *tables) {
 void MenuFrameCompiler::register_font(const std::string &name,
 		const fnt_font_t *font) {
 	if (font != nullptr) {
-		registered_fonts_[opennova::strutil::to_lower(name)] = font;
+		const std::string key = opennova::strutil::to_lower(name);
+		registered_fonts_[key] = font;
+		// A name the compile interned already draws with the font registered now (the HUD
+		// label face a resolution change reloads between configures).
+		for (size_t i = 1; i < font_names_.size(); ++i)
+			if (opennova::strutil::to_lower(font_names_[i]) == key) fonts_[i] = font;
 	}
 }
 
@@ -773,7 +778,7 @@ void MenuFrameCompiler::measure_with_(const fnt_font_t *font,
 		return;
 	}
 	hud::GameFont gf;
-	gf.set_font(font, true); // a menu font: its texels (D-FNT-7)
+	gf.set_font(font, font_scale_); // a menu font: the cache's scale (D-FNT-7)
 	// Menu measurement runs at scale 1 in design space
 	// [orig: CStaticWnd_DrawLabel @ 0x656fb0 fld1 before the measure].
 	gf.measure(text.c_str(), 1.0f, 1.0f, out_w, out_h);
@@ -923,8 +928,22 @@ void MenuFrameCompiler::emit_outline(const mnu::RectEdges &design,
 // `appearance_slot` is the FINAL slot (fallback or force already applied);
 // -1 skips every pass.
 void MenuFrameCompiler::emit_appearance(const WidgetNode &node,
-		const mnu::RectEdges &rect, const WalkScale &s, int appearance_slot) {
+		const mnu::RectEdges &rect, const WalkScale &s, int appearance_slot,
+		const MenuWidgetState *ws) {
 	if (appearance_slot < 0 || appearance_slot > 3) {
+		return;
+	}
+	// A texture set at run time ORs the IMAGE type into the state's appearance and loads its
+	// texture, the file's own height, its MAP_STATE as authored [orig: CWnd_SetAppearanceTexture
+	// @0x646450 - `*channel |= 2` @0x64647c, CTextureManager_LoadOrFindTexture(.., 0xFFFFFFFF)
+	// @0x646497].
+	if (ws != nullptr && ws->has_image && (ws->image_states & (1u << appearance_slot)) != 0) {
+		StatePass pass = node.states[appearance_slot];
+		pass.has_image = true;
+		pass.texture = intern_texture(ws->image);
+		pass.band_height = -1;
+		pass.row_height = -1;
+		emit_state_pass(rect, s, pass);
 		return;
 	}
 	emit_state_pass(rect, s, node.states[appearance_slot]);
@@ -1104,7 +1123,7 @@ void MenuFrameCompiler::emit_glyph_run_with_(int32_t font_slot,
 		return;
 	}
 	hud::GameFont gf;
-	gf.set_font(font, true); // a menu font: its texels (D-FNT-7)
+	gf.set_font(font, font_scale_); // a menu font: the cache's scale (D-FNT-7)
 	const size_t first = draw_list_.glyphs.size();
 	const size_t underline_first = draw_list_.underlines.size();
 	const float x = menu_text_anchor(design_x, s.x);
@@ -1368,7 +1387,7 @@ void MenuFrameCompiler::emit_edit(int index, const WidgetNode &node,
 			const fnt_font_t *font = font_for(node);
 			if (font != nullptr) {
 				hud::GameFont gf;
-				gf.set_font(font, true); // a menu font: its texels (D-FNT-7)
+				gf.set_font(font, font_scale_); // a menu font: the cache's scale (D-FNT-7)
 				const int edge =
 						w.string_data.has_edge ? w.string_data.edge : 0;
 				int x_offset = 0;
@@ -1782,7 +1801,12 @@ void MenuFrameCompiler::emit_list_rows(const WidgetNode &node,
 			}
 		}
 		int style = -1;
-		if (i == selected || multi_selected) {
+		if (ws != nullptr && static_cast<size_t>(i) < ws->disabled_items.size() &&
+				ws->disabled_items[static_cast<size_t>(i)] != 0) {
+			// A locked row's state is 1, the disabled index, whatever the pointer
+			// [orig: CListWnd_SetRowAvailable @ 0x644aa0; the state as the style index @ 0x64419c].
+			style = kStateDisabled;
+		} else if (i == selected || multi_selected) {
 			style = kStateSelected;
 		} else if (i == hovered) {
 			style = kStateMouseover;
@@ -2182,7 +2206,7 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 			if (w.draw_frame) {
 				emit_frame(node, rect, s);
 			}
-			emit_appearance(node, rect, s, visual);
+			emit_appearance(node, rect, s, visual, ws);
 			emit_widget_text(node, rect, s, color_state, ws);
 			break;
 		}

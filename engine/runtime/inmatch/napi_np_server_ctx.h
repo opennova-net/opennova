@@ -670,8 +670,9 @@ struct NapiNPServerCtx {
 	//  by CNapiNPCtx_GetAppId @0x4c4db0 (Server_DrawStatusScreen @0x50a7fa)]
 	uint32_t novaworld_app_id = 0;
 	// The host's own CD-key ids, the wire forms its registry key decodes to: a DFX2 LAN host
-	// refuses a joiner sending either (code 12, server_join_check.h). Empty for a host that
-	// holds none, opennova-serve's. [orig: g_CDKeyInfo +16 (g_CDKeyInfoWireCdkiid) and +0x810
+	// refuses a joiner sending either (code 12, server_join_check.h). The session start installs
+	// them (HostConfig::host_cd_keys: the game's, its activation's). Empty for a host that holds
+	// none, opennova-serve's. [orig: g_CDKeyInfo +16 (g_CDKeyInfoWireCdkiid) and +0x810
 	//  (g_CDKeyInfoWireExp1), read by Server_ValidatePlayerJoinRequest @0x50f458 / @0x50f510
 	//  (dfx2.exe)]
 	cdkey::WireKeys host_cd_keys;

@@ -117,7 +117,7 @@ std::string ScoreboardRowComposer::compose(const ScoreboardEntry &e) {
 		// g_LocalPlayerEntity->Team` @0x423d64..0x423d7a; the stash @0x423dc3].
 		// Non-team spectators take the spectator arm, which never stashes
 		// [orig: @0x423e04].
-		if (!ctx_.non_team && e.has_entity && ctx_.local_team >= 0 &&
+		if (ctx_.class_suffix && !ctx_.non_team && e.has_entity && ctx_.local_team >= 0 &&
 				e.team == static_cast<uint8_t>(ctx_.local_team))
 			pending_class_ = &scoreboard_class_name(names_, e.player_class);
 		// [orig: "%s<ch>%s<co> [%02ld]" @0x423ddf / @0x423e2d]

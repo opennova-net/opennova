@@ -129,6 +129,10 @@ bool GameConfigBlock::enter_main_menu(const Ref<ResourceRoot> &p_root,
 	// The boot's renderer start and device creation follow its game.cfg read: the NWHWI device
 	// facts are sampled there, once (network/novaworld_identity.h).
 	sample_device_identity(block_.cfg());
+	// The boot reads the CD-key record from its registry value, and the startup menu reads it
+	// again at each entry (engine cdkey::read_registry carries the witness).
+	std::string protocol_error;
+	read_cd_key_registry(ResourceRoot::session_protocol(p_root, protocol_error));
 	return kept;
 }
 

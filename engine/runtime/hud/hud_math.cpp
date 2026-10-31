@@ -1,7 +1,10 @@
 #include <runtime/hud/hud_math.h>
 
+#include <base/title/title.h> // Title::hud_fonts
+
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 namespace opennova::hud {
@@ -36,6 +39,34 @@ int32_t design_to_screen_x(int32_t x, int32_t surface_w) {
 
 int32_t design_to_screen_y(int32_t y, int32_t surface_h) {
 	return static_cast<int32_t>((static_cast<int64_t>(y) * surface_h + 384) / 768);
+}
+
+HudCenteredRect hud_centered_rect(int32_t cx, int32_t cy, int32_t width, int32_t height,
+		uint32_t color, bool clip_to_screen) {
+	constexpr uint32_t edge_color = uint32_t(-32736);
+	HudCenteredRect r{ cx - width / 2, cy - height / 2, width / 2 + cx, cy + height / 2, color };
+	if (!clip_to_screen) return r;
+	if (r.left < 0) {
+		r.right += std::abs(r.left) + 1;
+		r.left = 1;
+		r.color = edge_color;
+	}
+	if (r.right > 1024) {
+		r.left = 1023 - r.right + r.left;
+		r.right = 1023;
+		r.color = edge_color;
+	}
+	if (r.top < 0) {
+		r.bottom += std::abs(r.top) + 1;
+		r.top = 1;
+		r.color = edge_color;
+	}
+	if (r.bottom > 768) {
+		r.top = 767 - r.bottom + r.top;
+		r.bottom = 767;
+		r.color = edge_color;
+	}
+	return r;
 }
 
 BorderedQuadUv bordered_quad_uv(int tex_w, int tex_h, double left, double top, double right,
@@ -250,6 +281,11 @@ int friendly_tag_alpha(int32_t dist_q16) {
 
 // [orig: @0x5a3fc3 mode 2 always; @0x5a3fcf mode 1 iff dist < 0x12C0000;
 // modes 0/3 never draw the text form]
+int32_t friendly_tag_reach_q16(bool player, bool same_account) {
+	if (!player) return 0x320000;
+	return same_account ? 0x3E80000 : 0x12C0000;
+}
+
 bool friendly_tag_text_visible(int mode, int32_t dist_q16) {
 	if (mode == kFriendlyTagModeFull) return true;
 	return mode == kFriendlyTagModeFarBrief && dist_q16 < kFriendlyTagTextCutQ16;
@@ -308,24 +344,32 @@ std::string friendly_tag_fallback_name(uint16_t encoded_entity_id) {
 	return out;
 }
 
-// [orig: HUD_InitAllFonts @0x51ee20 — the sprintf'd names per width branch
-// @0x51ee8a..0x51ef0e; the retail fixed-point (w<<16)/divisor lands in the
-// slot as a float @0x58045d, so the float division is the same value modulo
-// the 16.16 truncation]
-HudLabelFontChoice hud_label_font_choice(int surface_w) {
-	// The large slot is one file at the over-800 divisor for every width
-	// [orig: g_HUDLabelFontLarge = Impac22b.fnt "over 800" @0x51ee20].
-	const float large_scale = static_cast<float>(surface_w) / 800.0f;
-	if (surface_w > 800) {
-		return {"Arial16n.fnt", "Arial16b.fnt", "Impac22b.fnt", "Impac38b.fnt",
-				static_cast<float>(surface_w) / 1024.0f, large_scale, 2};
+const char *hud_large_label_font(const Title &title) {
+	return title.hud_fonts != nullptr ? title.hud_fonts->large_fnt : "";
+}
+
+// [orig: HUD_InitAllFonts @0x51ee20 — the width tests `cmp, jle` @0x51ee7e / @0x51eeab, the
+// sprintf'd names per branch @0x51ee8a..0x51ef0e; the retail fixed-point (w<<16)/divisor lands in
+// the slot as a float @0x58045d, so the float division is the same value modulo the 16.16
+// truncation] [orig: the twin @0x51BD70 (@0x51BDCE..0x51BECD) (dfx2.exe)]
+HudLabelFontChoice hud_label_font_choice(int surface_w, const Title &title) {
+	HudLabelFontChoice out;
+	const TitleHudFonts *fonts = title.hud_fonts;
+	if (fonts == nullptr || fonts->tiers == nullptr) return out;
+	// The large pair is one file each at the large divisor for every width.
+	out.large_fnt = fonts->large_fnt;
+	out.impact38_fnt = fonts->impact38_fnt;
+	out.large_scale = static_cast<float>(surface_w) / static_cast<float>(fonts->large_divisor);
+	// Each branch takes the width up to its bound (`jle`), the last any width.
+	for (int i = 0;; ++i) {
+		const TitleHudFontTier &tier = fonts->tiers[i];
+		if (tier.max_width != 0 && surface_w > tier.max_width) continue;
+		out.normal_fnt = tier.normal_fnt;
+		out.bold_fnt = tier.bold_fnt;
+		out.scale = static_cast<float>(surface_w) / static_cast<float>(tier.divisor);
+		out.tier = i;
+		return out;
 	}
-	if (surface_w > 640) {
-		return {"Arial14n.fnt", "Arial14b.fnt", "Impac22b.fnt", "Impac38b.fnt",
-				static_cast<float>(surface_w) / 800.0f, large_scale, 1};
-	}
-	return {"Arial14n.fnt", "Arial12b.fnt", "Impac22b.fnt", "Impac38b.fnt",
-			static_cast<float>(surface_w) / 640.0f, large_scale, 0};
 }
 
 } // namespace opennova::hud

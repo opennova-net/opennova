@@ -195,6 +195,308 @@ void test_counter_step_plays_text_end_on_arrival() {
 	CHECK(std::string(w::kEpilogCounterEndSoundset) == "TEXT_END");
 }
 
+// The mission dfx2.exe's end screens read (world::EpilogMission), as the embedder stamps it.
+w::EpilogMission dfx2_mission(bool with_debriefings) {
+	w::EpilogMission mission;
+	mission.debriefing_screens = true;
+	mission.entry = true;
+	mission.file = "synth.bms";
+	mission.title = "Op Red";
+	if (with_debriefings) {
+		mission.win_debriefing = std::string("Won.");
+		mission.lose_debriefing = std::string("Lost.");
+	}
+	mission.server_mission_name = "Header Name";
+	return mission;
+}
+
+// DFX2-64: dfx2.exe's lose screen. The same states as Jointops.exe's and the build 249
+// frames past its frame; black fades, a one-frame letterbox at the fade-out's start, the
+// image a frame later, MISSION FAILED sprintf'd over the entry's title in Impact38 yellow 48
+// frames on, then 62 frames on the banner and the entry's LOSE_DEBRIEFING (x 192, 640 wide,
+// y 230, 262 past a banner) and the key help 124 frames past those (32 more past a debriefing).
+// [orig: Cine_EpilogLoseUpdate @0x575a38..0x575dac (dfx2.exe)]
+void test_dfx2_lose_screen() {
+	const std::map<std::string, std::string> files;
+	for (const bool debriefed : {true, false}) {
+		SpMission m;
+		CHECK(m.boot(files, false));
+		m.frames(4);
+		w::World &world = m.world();
+		w::EpilogCine &cine = world.epilog;
+		cine.mission = dfx2_mission(debriefed);
+		world.process_round_end(2);
+		(void)m.frame();
+		(void)m.frame();
+		CHECK(cine.screen_active && cine.lose_state == 2 && cine.frame == 2);
+		CHECK(world.out.audio_channels_shutdown);
+		// The build ran at frame 1; the update's tail dispatched once more (frame 2).
+		const int t = 1 + 249;
+		const w::CineEvent *fade1 = find_event(cine, w::CineEventKind::ImageFade, 0);
+		const w::CineEvent *fade2 = find_event(cine, w::CineEventKind::ImageFade, 1);
+		const w::CineEvent *backdrop = find_event(cine, w::CineEventKind::ImageFade, 2);
+		CHECK(fade1 != nullptr && fade1->start == t && fade1->duration == 48 &&
+				fade1->fade_mode == w::CineFadeMode::In &&
+				fade1->fade_source == w::CineFadeSource::SolidColor && fade1->solid_color == 0u);
+		CHECK(fade2 != nullptr && fade2->start == t + 48 && fade2->solid_color == 0u &&
+				fade2->fade_mode == w::CineFadeMode::Out);
+		CHECK(backdrop != nullptr && backdrop->start == t + 49 && backdrop->image == "jo_Epil2.tga" &&
+				backdrop->duration == 223200);
+		const w::CineEvent *bars = find_event(cine, w::CineEventKind::Letterbox, 1);
+		CHECK(bars != nullptr && bars->start == t + 48 && bars->duration == 1 &&
+				bars->letterbox_mode == 2);
+		const w::CineEvent *failed = find_event(cine, w::CineEventKind::TextFade, 0);
+		CHECK(failed != nullptr && failed->start == t + 97 &&
+				failed->text_source == w::CineTextSource::GameTextFormat &&
+				failed->text_key == "STROVER_MISSION_FAILED" && failed->text == "Op Red" &&
+				failed->y == 120 && failed->font == -3 && failed->box_height == 0 &&
+				failed->color_mask == 0xFFFF00u && failed->fade_in == 100);
+		const int lines = t + 97 + 62;
+		const w::CineEvent *banner = find_event(cine, w::CineEventKind::TextFade, 1);
+		CHECK(banner != nullptr && banner->text_source == w::CineTextSource::Banner &&
+				banner->start == lines && banner->y == 230 && banner->font == -2);
+		const w::CineEvent *debriefing = find_event(cine, w::CineEventKind::TextFade, 2);
+		const w::CineEvent *help = find_event(cine, w::CineEventKind::TextFade, debriefed ? 3 : 2);
+		if (debriefed) {
+			CHECK(debriefing != nullptr && debriefing->text_source == w::CineTextSource::Text &&
+					debriefing->text == "Lost." && debriefing->start == lines &&
+					debriefing->x == 192 && debriefing->y == 230 && debriefing->banner_y == 262 &&
+					debriefing->box_width == 640 && debriefing->box_height == 0);
+		}
+		CHECK(help != nullptr && help->text_key == "STREPILOG_KEYINFO" && help->y == 600 &&
+				help->start == lines + (debriefed ? 32 : 0) + 124);
+		CHECK(find_event(cine, w::CineEventKind::TextFade, debriefed ? 4 : 3) == nullptr);
+		// The heading names the session status's mission when the entry has no title, or
+		// there is no entry [orig: @0x575b0a..0x575b2b, g_ServerMissionName @0x575b48].
+		cine.mission.title.clear();
+		cine.events.clear();
+		cine.frame = 0;
+		cine.lose_state = 1;
+		cine.update(world);
+		const w::CineEvent *named = find_event(cine, w::CineEventKind::TextFade, 0);
+		CHECK(named != nullptr && named->text == "Header Name");
+		// A rewind keeps the embedder's mission.
+		const w::World::Snapshot snap = world.snapshot();
+		cine.mission.high_score = 77;
+		world.restore(snap);
+		CHECK(world.epilog.mission.high_score == 77 && world.epilog.mission.debriefing_screens);
+	}
+	// No entry: no debriefing (retail dereferences its entry).
+	{
+		SpMission m;
+		CHECK(m.boot(files, false));
+		m.frames(4);
+		w::World &world = m.world();
+		world.epilog.mission = dfx2_mission(true);
+		world.epilog.mission.entry = false;
+		world.process_round_end(2);
+		m.frames(2);
+		const w::CineEvent *named = find_event(world.epilog, w::CineEventKind::TextFade, 0);
+		CHECK(named != nullptr && named->text == "Header Name");
+		const w::CineEvent *help = find_event(world.epilog, w::CineEventKind::TextFade, 2);
+		CHECK(help != nullptr && help->text_key == "STREPILOG_KEYINFO");
+	}
+}
+
+// DFX2-65: dfx2.exe's win screen. Jointops.exe's states and build delay; the black fades,
+// the one-frame letterbox and the image a frame later as its lose screen's, MISSION WON
+// sprintf'd over the entry's title at y 110 in Impact38 yellow, 62 frames on the objectives,
+// enemy and team counters 60 apart at y 210 / 242 / 274 with the value at x 832 (no
+// FRIENDLYUNITS line), then the entry's WIN_DEBRIEFING at (47, 475), 930 wide, and the key help
+// 60 frames on at y 700.
+// [orig: Cine_EpilogStateMachineUpdate case 4 @0x57437d..0x57481d (dfx2.exe)]
+void test_dfx2_win_screen() {
+	const std::map<std::string, std::string> files;
+	for (const bool debriefed : {true, false}) {
+		SpMission m;
+		CHECK(m.boot(files, false));
+		m.frames(4);
+		w::World &world = m.world();
+		w::EpilogCine &cine = world.epilog;
+		cine.mission = dfx2_mission(debriefed);
+		world.kill_stats.subgoals_won = 1;
+		world.process_round_end(1);
+		for (int i = 0; i < 200 && !cine.screen_active; ++i) (void)m.frame();
+		CHECK(cine.screen_active && cine.win_state == 5 && cine.frame == 97);
+		const int t = 96 + 1; // the build at frame 96
+		const w::CineEvent *fade1 = find_event(cine, w::CineEventKind::ImageFade, 0);
+		const w::CineEvent *fade2 = find_event(cine, w::CineEventKind::ImageFade, 1);
+		const w::CineEvent *backdrop = find_event(cine, w::CineEventKind::ImageFade, 2);
+		CHECK(fade1 != nullptr && fade1->start == t && fade1->solid_color == 0u &&
+				fade1->fade_mode == w::CineFadeMode::In);
+		CHECK(fade2 != nullptr && fade2->start == t + 48 && fade2->solid_color == 0u);
+		CHECK(backdrop != nullptr && backdrop->start == t + 49 && backdrop->image == "jo_Epil.tga");
+		const w::CineEvent *bars = find_event(cine, w::CineEventKind::Letterbox, 1);
+		CHECK(bars != nullptr && bars->start == t + 48 && bars->duration == 1 &&
+				bars->letterbox_mode == 2);
+		const w::CineEvent *won = find_event(cine, w::CineEventKind::TextFade, 0);
+		CHECK(won != nullptr && won->start == t + 97 &&
+				won->text_source == w::CineTextSource::GameTextFormat &&
+				won->text_section == "Overlays" && won->text_key == "STROVER_MISSION_WON" &&
+				won->text == "Op Red" && won->y == 110 && won->font == -3 && won->box_height == 0 &&
+				won->color_mask == 0xFFFF00u);
+		const int first = t + 97 + 62;
+		const char *labels[3] = {"STREPILOG_OBJECTIVEBONUS", "STREPILOG_ENEMYUNITS",
+				"STREPILOG_TEAMUNITS"};
+		for (int i = 0; i < 3; ++i) {
+			const w::CineEvent *line = find_event(cine, w::CineEventKind::EpilogCounter, i);
+			CHECK(line != nullptr && line->start == first + 60 * i && line->label_key == labels[i] &&
+					line->row_y == 210 + 32 * i && line->label_x == 192 && line->value_x == 832 &&
+					line->count_x == 832 && line->points_target == -1 && line->points_rate == -1);
+		}
+		CHECK(find_event(cine, w::CineEventKind::EpilogCounter, 3) == nullptr);
+		const w::CineEvent *objective = find_event(cine, w::CineEventKind::EpilogCounter, 0);
+		CHECK(objective != nullptr && objective->value == 1);
+		// DFX2-66: the local player's slot's points and the entry's high score, raised by
+		// the new best, in Impact38 at y 354 / 402 from the counters' end.
+		const w::MatchPlayer *slot = world.match.player(world.cached.local_player);
+		CHECK(slot != nullptr);
+		const int32_t points = slot != nullptr ? slot->stats[w::MatchStats::kPoints] : 0;
+		const w::CineEvent *total = find_event(cine, w::CineEventKind::EpilogCounterFont, 0);
+		const w::CineEvent *best = find_event(cine, w::CineEventKind::EpilogCounterFont, 1);
+		CHECK(total != nullptr && total->start == first + 180 &&
+				total->label_key == "STREPILOG_TOTALEXP" && total->row_y == 354 &&
+				total->label_x == 192 && total->value_x == 832 && total->count_x == 832 &&
+				total->value == points && total->max == -1 && total->font == -3 &&
+				total->label_color == 0xFFFFFF00u && total->value_color == 0xFFFFFF00u &&
+				total->points_target == -1 && total->points_rate == -1);
+		// The demo round scores 0 against the entry's 0: no new best, white.
+		CHECK(best != nullptr && best->start == first + 240 &&
+				best->label_key == "STREPILOG_HIGHSCORE" && best->row_y == 402 && best->value == 0 &&
+				best->label_color == 0xFFFFFFFFu && best->font == -3);
+		CHECK(points == 0 && cine.mission.high_score == 0 &&
+				world.out.effects.count(w::kEpilogHighScoreEffect) == 0);
+		CHECK(find_event(cine, w::CineEventKind::EpilogCounterFont, 2) == nullptr);
+		const int cursor = first + 300;
+		const w::CineEvent *debriefing = find_event(cine, w::CineEventKind::TextFade, 1);
+		const w::CineEvent *help = find_event(cine, w::CineEventKind::TextFade, debriefed ? 2 : 1);
+		if (debriefed) {
+			CHECK(debriefing != nullptr && debriefing->text_source == w::CineTextSource::Text &&
+					debriefing->text == "Won." && debriefing->start == cursor &&
+					debriefing->x == 47 && debriefing->y == 475 && debriefing->box_width == 930 &&
+					debriefing->box_height == 0 && debriefing->banner_y == -1);
+		}
+		CHECK(help != nullptr && help->text_key == "STREPILOG_KEYINFO" && help->y == 700 &&
+				help->start == cursor + 60);
+		CHECK(find_event(cine, w::CineEventKind::TextFade, debriefed ? 3 : 2) == nullptr);
+	}
+}
+
+// DFX2-66: the score rows' high score. A point total above the entry's (an unsigned compare)
+// replaces it, draws it yellow and posts the effect the embedder writes into the table; an
+// equal or lower one keeps it and draws it white; a negative total is a huge unsigned one, so it
+// raises; with no entry the cine's own 0 is raised and nothing is posted; with no local slot
+// neither row is built and the cursor stays.
+// [orig: Cine_EpilogStateMachineUpdate @0x574666..0x574758 (dfx2.exe)]
+void test_dfx2_high_score() {
+	const std::map<std::string, std::string> files;
+	struct Case {
+		int32_t score, points;
+		bool entry, raised;
+	};
+	const Case cases[] = {
+			{100, 250, true, true},
+			{250, 250, true, false},
+			{300, 250, true, false},
+			{100, -5, true, true},
+			{0, 40, false, true},
+	};
+	for (const Case &c : cases) {
+		SpMission m;
+		CHECK(m.boot(files, false));
+		m.frames(4);
+		w::World &world = m.world();
+		w::EpilogCine &cine = world.epilog;
+		cine.mission = dfx2_mission(false);
+		cine.mission.entry = c.entry;
+		cine.mission.high_score = c.score;
+		w::MatchPlayer *slot = world.match.player(world.cached.local_player);
+		CHECK(slot != nullptr);
+		if (slot == nullptr) continue;
+		world.process_round_end(1);
+		for (int i = 0; i < 200 && !cine.screen_active; ++i) {
+			slot->stats[w::MatchStats::kPoints] = c.points;
+			world.out.effects.clear();
+			(void)m.frame();
+		}
+		const w::CineEvent *best = find_event(cine, w::CineEventKind::EpilogCounterFont, 1);
+		const int32_t want = c.raised ? c.points : c.score;
+		CHECK(best != nullptr && best->value == want && cine.mission.high_score == want);
+		CHECK(best != nullptr &&
+				best->label_color == (c.raised ? 0xFFFFFF00u : 0xFFFFFFFFu) &&
+				best->value_color == best->label_color);
+		size_t posted = 0;
+		for (const w::Effect &e : world.out.effects.entries()) {
+			if (e.kind != w::kEpilogHighScoreEffect) continue;
+			++posted;
+			CHECK(e.a == c.points && e.str == "synth.bms");
+		}
+		CHECK(posted == (c.raised && c.entry ? 1u : 0u));
+	}
+	// No local slot: no score row, the debriefing and the key help at the counters' end.
+	{
+		SpMission m;
+		CHECK(m.boot(files, false));
+		m.frames(4);
+		w::World &world = m.world();
+		w::EpilogCine &cine = world.epilog;
+		cine.mission = dfx2_mission(true);
+		world.match.remove_player(world, world.cached.local_player);
+		CHECK(world.match.player(world.cached.local_player) == nullptr);
+		world.process_round_end(1);
+		for (int i = 0; i < 200 && !cine.screen_active; ++i) (void)m.frame();
+		CHECK(cine.screen_active);
+		CHECK(find_event(cine, w::CineEventKind::EpilogCounterFont) == nullptr);
+		const w::CineEvent *counter = find_event(cine, w::CineEventKind::EpilogCounter, 0);
+		const w::CineEvent *debriefing = find_event(cine, w::CineEventKind::TextFade, 1);
+		const w::CineEvent *help = find_event(cine, w::CineEventKind::TextFade, 2);
+		CHECK(counter != nullptr && debriefing != nullptr && help != nullptr &&
+				debriefing->start == counter->start + 180 && help->start == counter->start + 240);
+	}
+}
+
+// DFX2-66: an EpilogCounterFont's step is the plain counter's and plays HEADSHOTTONE on each step
+// it takes off its target, ahead of the move; TEXT_END on the arrival. The live rows' -1 target
+// and rate step away, so the tone plays every fifth dispatch and TEXT_END never.
+// [orig: CineNode_ColorFadeUpdate @0x571860 - the tone @0x5718a5, TEXT_END @0x5718f7 (dfx2.exe)]
+void test_counter_font_step_plays_the_tone() {
+	struct Case {
+		int32_t target, rate;
+		int tones;         // over frames 0..100
+		int arrival_frame; // -1: never
+	};
+	const Case cases[] = {
+			{3, 1, 3, 14},    // three steps to the target, then none
+			{-3, 1, 3, 14},   // a negative target subtracts the rate
+			{0, 1, 0, -1},    // a zero target is the start's count: no step, no tone
+			{-1, -1, 20, -1}, // the live rows': a tone on frames 4, 9 .. 99
+	};
+	for (const Case &c : cases) {
+		auto world = std::make_unique<w::World>();
+		w::EpilogCine cine;
+		cine.active = true;
+		cine.frame = -1;
+		w::CineEvent line;
+		line.kind = w::CineEventKind::EpilogCounterFont;
+		line.start = 0;
+		line.duration = 200;
+		line.points_target = c.target;
+		line.points_rate = c.rate;
+		cine.events.push_back(line);
+		int arrival = -1;
+		for (int f = 0; f <= 100; ++f) {
+			const int before = count_sounds(*world, w::kEpilogCounterEndSoundset);
+			cine.update(*world);
+			if (count_sounds(*world, w::kEpilogCounterEndSoundset) != before) arrival = f;
+		}
+		CHECK(count_sounds(*world, w::kEpilogCounterToneSoundset) == c.tones);
+		CHECK(arrival == c.arrival_frame);
+		for (const w::ScriptSoundEvent &s : world->out.script_sounds)
+			CHECK(s.kind == w::ScriptSoundEvent::Kind::Interface);
+	}
+	CHECK(std::string(w::kEpilogCounterToneSoundset) == "HEADSHOTTONE");
+}
+
 // D-NET-1233: the single player's session create adds its own slot with no body (the own
 // arm stores g_LocalPlayerEntity, which every teardown zeroes), and its mission start's round
 // init spawns the body, hidden, past the PreMission pass; Player_InitPlayer and the start's
@@ -643,7 +945,7 @@ int main() {
 		//  @0x49c910..0x49c95f, the status page @0x49c960..0x49c9c7, the deploy tail
 		//  @0x49c9c9..0x49ca97, the help and briefing pages @0x49ca9e..0x49cb53]
 		const w::SpawnZoneRegistry zones{};
-		controls::PlayerActions actions;
+		controls::PlayerActions actions(opennova::controls::default_catalog());
 		hud::HudToggleState toggles;
 		const auto key = [&](SpMission &mission, int vk) {
 			im::SpecialKeyInput in;
@@ -787,7 +1089,7 @@ int main() {
 		CHECK(!rw.epilog.active && rw.epilog.mode == w::EpilogCineMode::None);
 		CHECK(rw.epilog.events.empty() && !rw.epilog.screen_active);
 		// The process-lifetime words cross over: the entity-update counter and
-		// the cine's drawn flag [orig: g_EntityUpdateCounter; dword_26970F4].
+		// the cine's drawn flag [orig: g_EntityUpdateCounter; g_CineFrameDrawn].
 		CHECK(rw.entity_update_counter == counter_at_exit);
 		CHECK(rw.epilog.frame_drawn);
 		CHECK(!fresh.world().epilog.frame_drawn);
@@ -799,6 +1101,10 @@ int main() {
 
 	test_counter_step_plays_text_end_on_arrival();
 	test_the_local_body_is_born_at_the_round_init();
+	test_dfx2_lose_screen();
+	test_dfx2_win_screen();
+	test_dfx2_high_score();
+	test_counter_font_step_plays_the_tone();
 	if (failures == 0) std::printf("sp_mission_lifecycle: OK\n");
 	return failures == 0 ? 0 : 1;
 }

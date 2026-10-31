@@ -92,7 +92,13 @@ void EnvironmentState::update_tod() {
 	// boundaries [orig: Environment_GetLightDirectionFloat @ 0x57d870].
 	const DayPhase phase = compute_day_phase(static_cast<float>(time_of_day_));
     weather_->tod_keyframed = !config_->keyframes.empty();
-    if (weather_->tod_keyframed) weather_->night_phase = phase.is_night ? 1 : 0;
+    // The standalone home (menus, previews) takes its clock's phase here. A mission World's is
+    // the weather tick's alone (WeatherState::tick_sim), so a mission start's T0 publish leaves
+    // the phase the last mission left [orig: g_EnvIsNightPhase @0x26C645C, written only by
+    // Environment_ComputeTimeOfDayColors @0x57DEAE..0x57E061, from the tick @0x57E9C7, and the
+    // WAC set].
+    if (weather_->tod_keyframed && weather_is_standalone())
+        weather_->night_phase = phase.is_night ? 1 : 0;
     is_night_ = weather_->is_night_phase();
 	day_phase_blend_ = phase.blend;
 	light_dir_ = is_night_ ? moon_dir_ : sun_dir_;
@@ -148,6 +154,10 @@ void EnvironmentState::reset_standalone_weather(int wind_scale) {
 			: weather_seed_from_config(Config{}, header);
 	seed.wind_scale = wind_scale;
 	standalone_weather_.seed(seed);
+	// The standalone home (menus, previews) follows no mission, so it carries no night phase: it
+	// starts on its seed clock's, as a fresh home does.
+	standalone_weather_.night_phase = 0;
+	standalone_weather_.compute_night_phase();
 	uint32_t precipitation_seed = io::kPrng16BSeed;
 	standalone_weather_.precipitation.reset(&io::rotating_prng_callback, &precipitation_seed);
 	if (!clock_configured_) {
@@ -169,7 +179,8 @@ void EnvironmentState::configure_mission_clock(int start_time_q8_8,
 			world::WeatherState::kTodDayFixed24;
 	standalone_weather_.tod_advance_per_tick =
 			static_cast<uint32_t>(tod_advance_per_tick(minutes_per_day));
-	standalone_weather_.tod_epoch_tickdown = world::WeatherState::kTodEpochTicks;
+	// A clock set: the minute counter at the set's 10 [orig: Environment_SetCurrentTime @0x57C4B9].
+	standalone_weather_.tod_epoch_tickdown = world::WeatherState::kClockSetTickdown;
 	if (weather_is_standalone()) {
 		sync_clock_from_weather();
 	}

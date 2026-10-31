@@ -3,10 +3,10 @@
 #include <functional>
 #include <string>
 
-// The mission loading screen's background pick and the two rules that read its
-// custom-background flag: the session text band's right edge and the SP
-// start-mission splash gate. The layout values and the sidecar name rule are
-// loading_screen.h's.
+// The mission loading screen's background pick and the SP start-mission splash
+// gate its custom-background flag drives (the session band's right edge, the
+// flag's other reader, is loading_screen.h's loading_band_right, with the
+// layout values and the sidecar name rule).
 // [orig: Render_LoadingScreen @0x521d10; Game_StartMission @0x524360]
 // Witness record: docs/interface/loading-screen-re.md.
 
@@ -28,13 +28,6 @@ struct LoadingBackground {
 //  the g_MissionExitReason == 8 test end there)].
 LoadingBackground loading_background(const std::string &mission_file,
 		const std::function<bool(const std::string &)> &file_exists);
-
-// The session text band's right edge, image space: 661 over a custom
-// background, 782 over the stock one (loading_screen.h kLoadingBandRight*)
-// [orig: Render_LoadingScreen @0x521fec..0x522006 (`neg bl; sbb; and
-//  0FFFFFF87h; add 30Eh` over the custom flag), the band's three draws
-//  @0x52200f..0x522050].
-int loading_band_right(bool custom_background);
 
 // The SP start-mission splash runs after the load when the screen holds a
 // custom background and the load is not a session's

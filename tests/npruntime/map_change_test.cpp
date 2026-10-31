@@ -103,6 +103,8 @@ struct Host {
 	int map_changes = 0;
 	// A kept slot that held an entity when the boot's bring-up returned.
 	bool kept_slot_spawned_in_bringup = false;
+	// The session config's time-of-day continuity word for every boot.
+	int32_t tod_continuity = 0;
 
 	bool start() {
 		socket = net::ScopedSocket(net::udp_bind(0, &port));
@@ -132,6 +134,7 @@ struct Host {
 		r.host_cfg.config.mission_name = r.mission.get_mission_name();
 		r.host_cfg.config.max_players = 9;
 		r.host_cfg.config.num_teams = 2;
+		r.host_cfg.config.time_of_day_continuity = tod_continuity;
 		r.host_cfg.config.replay_enabled = 0;
 		r.host_cfg.socket_mode = inmatch::SocketMode::Lan;
 		r.host_cfg.serve_and_play = false;
@@ -614,8 +617,65 @@ void test_round_end_abandons_a_joiners_mission_start() {
 
 } // namespace
 
+// The session's time-of-day continuity (mptodcontinuity): an in-session authority's map change
+// keeps the old mission's clock, its time and its per-tick advance, and with the word set the
+// next mission starts on it in place of its BMS header's; with the word clear the next mission
+// starts on its header's clock, as the first did. A joiner's boot (no host) never takes a kept
+// clock: its start is the header's, and the host's clock reaches it on the wire.
+// [orig: Game_TeardownMission @0x522350 - @0x52252A..0x522543; Game_StartMission @0x524360 -
+//  @0x525399..0x5253C3, else the header @0x5253CA..0x5253E2; UI_HandleHostSessionStart
+//  @0x556DD1]
+void test_the_clock_carries_across_a_map_change_with_continuity() {
+	// A clock no header start reaches here, standing still (no advance), so the next mission's
+	// 255-tick settle leaves it as kept.
+	constexpr uint32_t kKept = 0x03123456u;
+	for (const int32_t continuity : { 1, 0 }) {
+		Host host;
+		host.tod_continuity = continuity;
+		CHECK(host.start());
+		if (host.kernel == nullptr)
+			return;
+		// The first mission starts on its header's clock: no map change kept one.
+		CHECK(inmatch::kept_mission_clock(host.boot) == nullptr);
+		// A fresh process's night phase is 0 (the image's).
+		CHECK(host.kernel->world.weather.night_phase == 0);
+		const uint32_t header_time = host.kernel->world.weather.tod_fixed24;
+		const uint32_t header_advance = host.kernel->world.weather.tod_advance_per_tick;
+		CHECK(header_time != kKept);
+		host.kernel->world.weather.tod_fixed24 = kKept;
+		host.kernel->world.weather.tod_advance_per_tick = 0;
+		// The first mission ends at night (a WAC set: these maps carry no TOD keyframes, so no tick
+		// computes the phase).
+		host.kernel->world.weather.night_phase = 1;
+		host.ctx().mission_exit_reason = inmatch::kMissionExitMapCycle;
+		for (int f = 0; f < 64 && host.map_changes == 0; ++f)
+			host.frame();
+		CHECK(host.map_changes == 1);
+		// The teardown latched the clock whatever the word.
+		CHECK(host.role.map_change.kept_clock.has_value() &&
+				host.role.map_change.kept_clock->tod_fixed24 == kKept &&
+				host.role.map_change.kept_clock->tod_advance_per_tick == 0);
+		if (continuity != 0) {
+			CHECK(inmatch::kept_mission_clock(host.boot) != nullptr);
+			CHECK(host.kernel->world.weather.tod_fixed24 == kKept &&
+					host.kernel->world.weather.tod_advance_per_tick == 0);
+		} else {
+			CHECK(inmatch::kept_mission_clock(host.boot) == nullptr);
+			CHECK(host.kernel->world.weather.tod_fixed24 == header_time &&
+					host.kernel->world.weather.tod_advance_per_tick == header_advance);
+		}
+		// Either way the next mission starts on the last one's night phase, and with no keyframes
+		// keeps it through its settle [orig: g_EnvIsNightPhase @0x26C645C].
+		CHECK(host.kernel->world.weather.night_phase == 1);
+	}
+	// A joiner's boot names no host: it takes no kept clock.
+	inmatch::HostBoot joiner;
+	CHECK(inmatch::kept_mission_clock(joiner) == nullptr);
+}
+
 int main() {
 	if (net::startup() != 0) return (std::printf("FAIL net::startup\n"), 1);
+	test_the_clock_carries_across_a_map_change_with_continuity();
 	test_play_host_map_change();
 	test_an_orphaned_row_is_reset_and_respawned_at_the_map_change();
 	test_a_kept_slots_live_age_outlives_the_map_change();

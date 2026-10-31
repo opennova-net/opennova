@@ -4209,7 +4209,7 @@ struct HeloRig {
         ve->self->position.z.q16 = to_fixed(r.veh().position.z);
         r.veh().spawn_position = r.veh().position;
         r.veh().bound_radius = 6.0f;
-        if (rotor_full) rotor_spawn_full(r.veh().veh.part_spin);
+        if (rotor_full) rotor_spawn_full(r.veh().veh.part_spin, PartSpinRates{});
         Entity npc;
         npc.kind = EntityKind::Organic;
         npc.item_id = 2072;

@@ -236,14 +236,26 @@ void vehicle_contact_mass_share(World &world, const Entity &vehicle, EntityHandl
 // Entity_ProcessPlatformPhysics @0x481870, @0x482336..0x48253D;
 // Entity_ProcessWheeledVehiclePhysics @0x475DE0, @0x4769B8..0x476BBF;
 // Entity_ProcessLightVehiclePhysics @0x479600; Entity_ProcessAircraftContactPhysics @0x47EF10]
+int32_t tracked_impact_speed(int32_t vx, int32_t vy, int32_t vz, bool xz_first) {
+	const double x = vx, y = vy, z = vz;
+	const double sum = xz_first ? (x * x + z * z) + y * y : x * x + (y * y + z * z);
+	return static_cast<int32_t>(std::min(std::sqrt(sum), 2147418112.0));
+}
+
 void vehicle_contact_impact(World &world, Entity &vehicle, const VehicleTraits &traits,
 		int severity, EntityHandle hit, int32_t px, int32_t py, int32_t pz) {
+	const auto &m = vehicle.veh;
+	vehicle_contact_impact(world, vehicle, traits, severity, hit, px, py, pz,
+			severity == 3 ? length_q16(m.vel_x, m.vel_y, m.slide_z) : 0);
+}
+
+void vehicle_contact_impact(World &world, Entity &vehicle, const VehicleTraits &traits,
+		int severity, EntityHandle hit, int32_t px, int32_t py, int32_t pz, int32_t impact) {
 	auto &m = vehicle.veh;
 	if (severity < 2)
 		m.collision_sound_latched = false;
 	if (severity != 3)
 		return;
-	const int32_t impact = length_q16(m.vel_x, m.vel_y, m.slide_z);
 	// Indestructible is the whole Flags word, which the port splits: the
 	// promote writes the bit to engine_flags. [orig: bike `test [esi+24h],
 	// 4000000h` @0x479E0D]

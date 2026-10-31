@@ -95,7 +95,7 @@ int test_round_trip() {
 
 // The writer's table: a file whose table is out of first-use order (a string interned ahead of its use, one
 // twice, one no word names) reads to the same text, and its form from that text is the one the game's writer
-// makes, each string at its first use in the layout, the key kept [orig: the ConfigFile writer @ 0x75e250 -
+// makes, each string at its first use in the layout, the key kept [orig: the ConfigFile writer @ 0x75e170 -
 // ConfigFile_InternString @ 0x75e3a0 / @ 0x75e450 / @ 0x75e53f].
 int test_writer_order() {
 	BinaryConfig shuffled = minted_credits();

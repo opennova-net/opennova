@@ -300,6 +300,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	clear_present_effect_poses();
 	setup_error_ = OK;
 	process_exit_ = false;
+	process_exit_code_ = 0;
 	mission_ = p_mission;
 	// A remote join may already own the live socket + NP session while it waits
 	// for S2C 0x7B to identify the mission. Keep that exact connection across the
@@ -356,7 +357,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 			playable);
 	if (boot_err != OK) {
 		setup_error_ = ERR_CANT_OPEN;
-		process_exit_ = sim_->session_create_ended_process();
+		process_exit_ = sim_->load_ended_process(process_exit_code_);
 		sim_.unref(); // the RefCounted sim drops with its last reference
 		has_trace_stats_sampling_ = false;
 		return 0;

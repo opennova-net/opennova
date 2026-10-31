@@ -71,9 +71,10 @@ std::optional<SettingsRefusal> check_settings(
 				"holds a character the game's code page (cp1252) has none for" };
 		if (strutil::trim_view(bytes).empty())
 			return SettingsRefusal{ "game_name", "is empty" };
-		if (bytes.size() > kGameNameMaxBytes)
+		const size_t name_max = gamecfg::text_limit(&gamecfg::GameCfg::game_name);
+		if (bytes.size() > name_max)
 			return SettingsRefusal{ "game_name",
-				"is longer than " + std::to_string(kGameNameMaxBytes) + " characters" };
+				"is longer than " + std::to_string(name_max) + " characters" };
 		// NovaLogic's service refuses a server name holding "nova" in any case with 1009,
 		// SERVERNAMENOTACCEPTED (witnessed live 2026-10-25, ADR 0068), so a listing there
 		// asked over one would list nowhere: the start asks for another name.
@@ -82,9 +83,10 @@ std::optional<SettingsRefusal> check_settings(
 				"holds \"Nova\", which NovaLogic's NovaWorld does not accept in a server name: "
 				"rename the server or untick the NovaLogic box" };
 	}
-	if (s.game_password.size() > kGamePasswordMaxBytes)
+	const size_t password_max = gamecfg::text_limit(&gamecfg::GameCfg::mp_host_game_password);
+	if (s.game_password.size() > password_max)
 		return SettingsRefusal{ "game_password",
-			"is longer than " + std::to_string(kGamePasswordMaxBytes) + " characters" };
+			"is longer than " + std::to_string(password_max) + " characters" };
 	for (const char c : s.game_password) {
 		if (c <= ' ' || c > '~' || c == '"')
 			return SettingsRefusal{ "game_password",
@@ -99,7 +101,7 @@ std::optional<SettingsRefusal> check_settings(
 	if (auto r = out_of_range("start_delay", s.start_delay, limits.start_delay)) return r;
 	if (auto r = out_of_range("send_holdoff_ticks", s.send_holdoff_ticks, kSendHoldoffTicksRange)) return r;
 	if (auto r = out_of_range("entity_send_budget", s.entity_send_budget, kEntitySendBudgetRange)) return r;
-	if (auto r = out_of_range("max_packet_size", s.max_packet_size, kMaxPacketSizeRange)) return r;
+	if (auto r = out_of_range("max_packet_size", s.max_packet_size, max_packet_size_range())) return r;
 	if (s.options.get("max_packet_size"))
 		return SettingsRefusal{ "options.max_packet_size", "Core settings belong at the top level." };
 	const OfferedExpansion *expansion = nullptr;

@@ -98,12 +98,13 @@ void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world) {
 			--conn.link.armory_reuse_seconds;
 		else if (conn.link.armory_reuse_seconds < 0)
 			conn.link.armory_reuse_seconds = 0;
-		if (conn.link.respawn_delay_seconds != 0)
-			--conn.link.respawn_delay_seconds;
-		if (conn.link.spawn_target_hold_seconds != 0)
-			--conn.link.spawn_target_hold_seconds;
-		if (conn.link.downed_revive_seconds != 0)
-			--conn.link.downed_revive_seconds;
+		// The +360 / +364 holds and the +368 revive window: a positive value counts down,
+		// any other (a negative raw store among them) clamps to zero, signed as retail's jle.
+		// [orig: Server_TickUpdate @0x51DFBA..0x51E005 - the jle @0x51DFC2 / @0x51DFDD /
+		//  @0x51DFF8, the zeroes @0x51DFCF / @0x51DFEA / @0x51E005]
+		for (uint32_t *hold : {&conn.link.respawn_delay_seconds,
+				&conn.link.spawn_target_hold_seconds, &conn.link.downed_revive_seconds})
+			*hold = static_cast<int32_t>(*hold) > 0 ? *hold - 1 : 0;
 		// The +376 emote and +380 radio-call cooldowns: a positive value counts
 		// down, a negative one clamps to zero [orig: @0x51e028..0x51e05c].
 		for (int32_t *cooldown : {&conn.link.emote_cooldown_seconds,

@@ -1342,6 +1342,17 @@ bool check_armory_reuse_cooldown() {
 		if (!expect(ctx.np_protocol.connection_list.front().link.armory_reuse_seconds == 29,
 				"the cooldown counts down once per periodic second"))
 			return false;
+		// The respawn holds count down signed: a negative raw store clamps to zero on the
+		// next periodic second, as retail's jle does (D-NET-1476).
+		auto &link = ctx.np_protocol.connection_list.front().link;
+		link.respawn_delay_seconds = static_cast<uint32_t>(-1);
+		link.spawn_target_hold_seconds = static_cast<uint32_t>(-5);
+		link.downed_revive_seconds = 7;
+		tick_to_periodic_second(ctx);
+		if (!expect(link.respawn_delay_seconds == 0 && link.spawn_target_hold_seconds == 0 &&
+						link.downed_revive_seconds == 6,
+				"a negative respawn hold clamps to zero; a positive one counts down"))
+			return false;
 	}
 	// Expired: granted again, re-seeded.
 	conn.link.armory_reuse_seconds = 0;

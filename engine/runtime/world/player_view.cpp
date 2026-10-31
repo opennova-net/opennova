@@ -154,18 +154,31 @@ void player_view_set_third_person_selected(PlayerViewState &v, bool selected) {
     player_view_resolve_mode(v);
 }
 
-void player_view_apply_view_action(PlayerViewState &v, uint32_t *input_action_bits,
+bool player_view_apply_view_action(PlayerViewState &v, uint32_t *input_action_bits,
                                    int action) {
+    if (action == kViewActionToggle) {
+        // [orig: case 412 - the test `g_InputActionBits & 0x8000000` @0x49c09a, the first-person
+        //  arm (g_FpWeaponViewFlags |= 1, bits & 0xE7FFFFFF | 0x10000000, the preference 0)
+        //  @0x49c09c..0x49c0ad, the chase arm (bits & 0xE7FFFFFF | 0x8000000, the preference 1)
+        //  @0x49c0c3..0x49c0c8, the store @0x49c0b4]
+        const uint32_t word = input_action_bits != nullptr ? *input_action_bits : 0u;
+        const bool first_person = (word & 0x8000000u) != 0;
+        if (input_action_bits != nullptr)
+            *input_action_bits = (word & 0xE7FFFFFFu) | (first_person ? 0x10000000u : 0x8000000u);
+        player_view_set_third_person_selected(v, !first_person);
+        return first_person;
+    }
     uint32_t bit = 0;
     bool chase = false;
     switch (action) {
         case kViewActionFirstPerson: bit = 0x4000000u; break;
         case kViewActionWithGun: bit = 0x10000000u; break;
         case kViewActionChase: bit = 0x8000000u; chase = true; break;
-        default: return;
+        default: return false;
     }
     if (input_action_bits != nullptr) *input_action_bits |= bit;
     player_view_set_third_person_selected(v, chase);
+    return action == kViewActionWithGun;
 }
 
 void player_view_chase_action(PlayerViewState &v, int action, uint32_t *input_action_bits) {

@@ -11,6 +11,7 @@
 #include <cstring>
 #include <string>
 
+#include <base/title/title.h>
 #include <runtime/hud/hud_minimap.h>
 
 using namespace opennova::hud;
@@ -620,6 +621,21 @@ void test_pool3_walk() {
 	for (const HudMapGeomVertex &v : p.geom)
 		if (v.color == 0x40FF2020u) red_fill = true;
 	CHECK(red_ring && red_fill, "the 6027 ring with its 0x40 fill");
+	// DFX2-49: dfx2.exe's map walks the capture rings ahead of the marker layers too, so each
+	// draws twice, the first ahead of every other sprite of the walk's mask.
+	// [orig: the twin of HUD_DrawMapOverlay @0x5a4fc0 - @0x5a5da3..0x5a5e68 ahead of
+	//  MapOverlay_RenderAllLayers @0x5a5e8d (dfx2.exe)]
+	const auto red_rings = [](const HudMapPass &pass) {
+		int n = 0;
+		for (const HudMapSprite &s : pass.sprites)
+			if (s.texture == kHudMapTextureNone && s.color == 0xFFFF2020u) ++n;
+		return n;
+	};
+	CHECK(red_rings(p) == 1, "Jointops.exe's map draws the ring once");
+	ov.capture_rings_under_layers = true;
+	const HudMapPass &twice = compiler.compile(in);
+	CHECK(red_rings(twice) == 2, "dfx2.exe's map draws it under the layers and over them");
+	ov.capture_rings_under_layers = false;
 
 	HudMinimapPoolEntity koth;
 	koth.def_id = 6006;
@@ -692,6 +708,18 @@ void test_entity_labels_and_markers() {
 	full.markers = {person};
 	const HudMapLabel *label = find_label(compiler.compile(full), "^SGT  Brown");
 	CHECK(label != nullptr && label->font == 2, "loop 2 names the person in the regular face");
+	// dfx2.exe's walk names nobody (DFX2-81) [orig: HUD_DrawEntityLabelsAndMarkers @0x5A3850 -
+	// @0x5A3D53..0x5A3DD4 (dfx2.exe)].
+	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+	const opennova::Title *jo = opennova::title_by_code("jo");
+	CHECK(dfx2 != nullptr && dfx2->hud_map_no_bank_names && jo != nullptr &&
+					!jo->hud_map_no_bank_names,
+			"the empty walk is dfx2.exe's");
+	full.markers[0].team = 1;
+	full.bank_names = false;
+	CHECK(find_label(compiler.compile(full), "^SGT  Brown") == nullptr,
+			"dfx2's second walk draws no name");
+	full.bank_names = true;
 	full.markers[0].team = 2;
 	CHECK(find_label(compiler.compile(full), "^SGT  Brown") == nullptr,
 			"another team's person is not named");

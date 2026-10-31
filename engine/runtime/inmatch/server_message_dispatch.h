@@ -183,11 +183,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 // arm, g_SessionTitle: the map file unless a [TITLE] override or a SetServerName
 // replaced it, inmatch::mission_session_title); every other mode the mission text's [info]/title (`mission_text_title`,
 // MissionText_GetString's, the override table searched first), or, when that
-// reads empty, the mission header's name (`header_name`, dword_A761D4: the
+// reads empty, the mission header's name (`header_name`, g_MissionHeaderName: the
 // session config's mission_name).
 // [orig: Game_SerializeMissionInfoToDataStream @0x523620 -- the coop arm
 //  @0x523758 (g_SessionTitle @0x52375A), TextResource_FindEntryBySectionAndKey(g_TextMission,
-//  "info", "title") @0x5237df, the strlen test and dword_A761D4 @0x5237f8..0x52380d]
+//  "info", "title") @0x5237df, the strlen test and g_MissionHeaderName @0x5237f8..0x52380d]
 std::string session_mission_name(uint32_t game_type, const std::string &session_title,
 		const std::string &mission_text_title, const std::string &header_name);
 

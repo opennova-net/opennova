@@ -7,6 +7,7 @@
 #include <map>
 #include <variant>
 
+#include <base/title/title.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/model/diagnostic.h>
@@ -641,7 +642,8 @@ ViewportAction MenuViewport::follow_(const ViewportInput &input, PreviewClock &)
 	style_vars_ = style_.vars(files);
 	++configures_;
 	screen_variables_made_ = false;
-	const MenuScreenStatus compiled = render_.configure(*document, row->id, files, style_vars_);
+	const MenuScreenStatus compiled = render_.configure(*document, row->id, files, style_vars_,
+			menu_font_scale_of(view.project.document ? view.project.document->target_game : std::string()));
 	if (compiled != MenuScreenStatus::Ready) return stop_(compiled, render_.detail());
 	forced_index_ = -1;
 	if (options_.force_window) {
@@ -726,7 +728,12 @@ MenuTrySource MenuViewport::try_source_(const SessionView &view, const MnuDocume
 	// in file order (Mission_CompareMapNames @ 0x5628e0), each row's session word stamped
 	// (mission_catalog::game_type_of, as the game's catalog binding stamps it).
 	const std::shared_ptr<const AssetScan> scan = view.project.scan;
-	source.missions = [scan, &files]() {
+	// In the project's game's order (Title::mission_list_order carries the witness); a project
+	// document names a known game (project_document.cpp's check).
+	const Title *game = view.project.document ? title_by_code(view.project.document->target_game) : nullptr;
+	const MissionListOrder order = (game != nullptr ? *game : default_title()).mission_list_order;
+	source.title = game;
+	source.missions = [scan, &files, order]() {
 		std::vector<menu::MissionChoice> choices;
 		if (!scan) return choices;
 		std::vector<std::string> names;
@@ -740,7 +747,7 @@ MenuTrySource MenuViewport::try_source_(const SessionView &view, const MnuDocume
 					return scan->find(bin) && files.read(bin, bytes) && rtxt::parse(bytes.data(), bytes.size(), text, error);
 				},
 				nullptr); // the editor's preview searches no override table
-		mission_catalog::sort_rows(rows);
+		mission_catalog::sort_rows(rows, order);
 		for (const mission_catalog::Row &row : rows) choices.push_back(menu::mission_choice(row));
 		return choices;
 	};

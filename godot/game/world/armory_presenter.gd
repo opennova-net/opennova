@@ -101,6 +101,59 @@ func is_open() -> bool:
 	return _frame != null and is_instance_valid(_frame) and _frame.visible
 
 
+## Whether the title `root` names picks the loadout on its DEATH screen (DFX2-41, engine
+## Title::death_screen_loadout), whose serializer this presenter's class pages then run.
+func death_screen_loadout(root: ResourceRoot) -> bool:
+	var loadout := _armory.get_loadout()
+	loadout.set_title_root(root)
+	return loadout.death_screen_loadout()
+
+
+## The DEATH screen's activation fill over its driver: the spawned entity's team and class,
+## the host's class mask and the map's availability, as this screen's open reads them, over
+## this presenter's class pages (engine world::deploy_loadout_shown carries the witness).
+func populate_death_screen(driver: MenuDriver) -> void:
+	var sim: Simulation = _view.sim() if _view != null else null
+	if sim == null or driver == null:
+		return
+	_player_class = int(sim.get_local_player_class())
+	_armory.set_entity_team(int(sim.get_local_player_team()))
+	_armory.set_class_allow_mask(int(sim.get_class_allow_mask()))
+	_armory.set_player_class(_player_class)
+	_armory.set_availability_lookup(
+			func(weapon_name: String) -> int:
+				return int(sim.get_weapon_availability(weapon_name)))
+	_armory.set_weapon_database(_view.weapon_database())
+	_armory.populate_screen(driver, _view.resource_root())
+
+
+## A pick in the DEATH screen's PRIMARY / SECONDARY / ACCESSORY (the handlers its title
+## registers on every screen, DFX2-41): the slot's pick, the weight line and the icons.
+func pick_death_screen(driver: MenuDriver, control: String) -> void:
+	if _view != null:
+		_armory.pick_screen(driver, control, _view.resource_root())
+
+
+## The DEATH screen's icons placed again over its frame (a resize, the shroud's reveal).
+func refresh_death_screen(driver: MenuDriver) -> void:
+	if _view != null:
+		_armory.refresh_screen(driver, _view.resource_root())
+
+
+## The DEATH screen's close on its triggers' clear (DFX2-41): its picks serialized into the
+## class's page and applied as this screen's ACCEPT applies a kit, one C2S 0x2F in a session,
+## gated as the ACCEPT is on the press latch, the input reset first (engine
+## ClientState::take_death_menu_close carries the witness).
+func submit_death_screen(driver: MenuDriver) -> void:
+	var sim: Simulation = _view.sim() if _view != null else null
+	if sim == null or driver == null or not can_dismiss():
+		return
+	_reset_all_input_state()
+	var kit := _armory.accept_screen(driver)
+	_player_class = _armory.get_selected_class()
+	sim.apply_local_player_loadout(kit, _player_class)
+
+
 ## The live menu driver over the armory frame (ADR 0018 read seam for tests and
 ## diagnostics; null until the first open builds the menu).
 func get_menu_driver() -> MenuDriver:
@@ -273,6 +326,9 @@ func _reset_all_input_state() -> void:
 
 func teardown() -> void:
 	set_process(false)
+	# The DEATH screen's icon mounts go with that screen's frame (DeployScreenPresenter's
+	# teardown beside this one), so the next mission's open mounts fresh ones.
+	_armory.release_screen_icon_mounts()
 	if _frame != null and is_instance_valid(_frame):
 		_frame.queue_free()
 	if _audio != null and is_instance_valid(_audio):

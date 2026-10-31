@@ -1,7 +1,10 @@
 #include "network/novaworld_identity.h"
 
 #include <formats/gamecfg/game_cfg.h> // gamecfg::display_size
+#include <net/novaworld/cookie_jar_file.h> // process_menu_browser (the jar the activation rides)
+#include <net/novaworld/http_login.h> // consume_activation
 #include <net/novaworld/lobby_identity.h>
+#include <net/protocol/protocol.h> // Protocol::cd_key
 
 #include <godot_cpp/classes/display_server.hpp>
 #include <godot_cpp/classes/os.hpp>
@@ -101,7 +104,77 @@ void sample_device_identity(const opennova::gamecfg::GameCfg &cfg) {
 	if (!sample) sample = read_device_identity(cfg);
 }
 
-opennova::LobbyIdentityParams collect_lobby_identity_params(const opennova::gamecfg::GameCfg &cfg) {
+opennova::LobbyMachineTokens machine_tokens(const opennova::FingerprintSerialMix &mix) {
+	// Retail derives these tokens from stable volume/MAC data. Off Windows, Godot's
+	// platform-stable opaque ID stands in: hashed into the words retail's inputs would supply,
+	// then retail's own encoders (engine fallback_machine_tokens), so no raw machine identifier
+	// reaches the wire.
+	opennova::RetailMachineInputs machine;
+	if (opennova::read_retail_machine_inputs(machine))
+		return opennova::make_retail_machine_tokens(machine, mix);
+	OS *os = OS::get_singleton();
+	// The stand-in tokens' machine words take the renderer's adapter name (the model name, then
+	// "OpenNova", where it has none).
+	RenderingServer *rendering = RenderingServer::get_singleton();
+	std::string adapter_name =
+			rendering ? to_std(rendering->get_video_adapter_name()) : std::string();
+	if (adapter_name.empty() && os)
+		adapter_name = to_std(os->get_model_name());
+	if (adapter_name.empty())
+		adapter_name = "OpenNova";
+	std::replace(adapter_name.begin(), adapter_name.end(), '$', '_');
+	std::string stable_identity = os ? to_std(os->get_unique_id()) : std::string();
+	if (stable_identity.empty() && os) {
+		stable_identity = to_std(os->get_processor_name()) + "|" + to_std(os->get_model_name());
+	}
+	stable_identity += "|" + adapter_name;
+	return opennova::fallback_machine_tokens(stable_identity, mix);
+}
+
+namespace {
+
+// A protocol whose executable keeps a CD key, and so an activation (DFX2's).
+bool keeps_cd_key(const opennova::Protocol *protocol) {
+	return protocol != nullptr && protocol->cd_key != nullptr && protocol->nwpssk_mix.has_value();
+}
+
+// The registry value the activation lives in: the registry's, or, where the platform has none,
+// the stand-in file beside the executable.
+opennova::cdkey::KeyStore machine_store(const opennova::Protocol &protocol) {
+	OS *os = OS::get_singleton();
+	const std::string exe_dir =
+			os ? to_std(os->get_executable_path().get_base_dir()) : std::string();
+	return opennova::cdkey::machine_key_store(*protocol.cd_key, exe_dir);
+}
+
+} // namespace
+
+void read_cd_key_registry(const opennova::Protocol *protocol) {
+	if (!keeps_cd_key(protocol))
+		return;
+	(void)opennova::cdkey::read_registry(opennova::cdkey::process_key_info(), *protocol->cd_key,
+			machine_tokens(*protocol->nwpssk_mix).nwpssk, machine_store(*protocol));
+}
+
+bool consume_cd_key_activation(const opennova::Protocol *protocol) {
+	if (!keeps_cd_key(protocol))
+		return false;
+	opennova::CookieJar &jar = opennova::process_menu_browser().jar;
+	const std::string *nwact = jar.find("NWACT");
+	if (nwact == nullptr || nwact->empty())
+		return false;
+	return opennova::consume_activation(jar, opennova::cdkey::process_key_info(), protocol->cd_key,
+			machine_tokens(*protocol->nwpssk_mix).nwpssk, machine_store(*protocol));
+}
+
+opennova::cdkey::WireKeys machine_activation_cd_keys(const opennova::Protocol *protocol) {
+	if (!keeps_cd_key(protocol))
+		return {};
+	return opennova::cdkey::process_key_info().keys;
+}
+
+opennova::LobbyIdentityParams collect_lobby_identity_params(
+		const opennova::gamecfg::GameCfg &cfg, const opennova::Protocol &protocol) {
 	opennova::LobbyIdentityParams out;
 
 	OS *os = OS::get_singleton();
@@ -138,33 +211,15 @@ opennova::LobbyIdentityParams collect_lobby_identity_params(const opennova::game
 			hw.display_height);
 	out.nwhwi = opennova::make_nwhwi(hw);
 
-	// The stand-in tokens' machine words take the renderer's adapter name (the model name, then
-	// "OpenNova", where it has none).
-	RenderingServer *rendering = RenderingServer::get_singleton();
-	std::string adapter_name =
-			rendering ? to_std(rendering->get_video_adapter_name()) : std::string();
-	if (adapter_name.empty() && os) adapter_name = to_std(os->get_model_name());
-	if (adapter_name.empty()) adapter_name = "OpenNova";
-	std::replace(adapter_name.begin(), adapter_name.end(), '$', '_');
-
-	// Retail derives these telemetry-only tokens from stable volume/MAC data. Off
-	// Windows, Godot's platform-stable opaque ID stands in: hashed into the words
-	// retail's inputs would supply, then retail's own encoders (engine
-	// fallback_machine_tokens), so no raw machine identifier reaches the wire.
-	std::string stable_identity = os ? to_std(os->get_unique_id()) : std::string();
-	if (stable_identity.empty() && os) {
-		stable_identity = to_std(os->get_processor_name()) + "|" + to_std(os->get_model_name());
+	const opennova::LobbyMachineTokens tokens = machine_tokens(*protocol.nwpssk_mix);
+	// The client's CD-key ids from the process's record, for a protocol that keeps one (engine
+	// LobbyIdentityParams::nwcdkiid carries the witness).
+	if (keeps_cd_key(&protocol)) {
+		out.nwcdkiid = opennova::cdkey::process_key_info().keys.cdkiid;
+		out.nwcdkiidexp1 = opennova::cdkey::process_key_info().keys.exp1;
 	}
-	stable_identity += "|" + adapter_name;
-	const opennova::LobbyMachineTokens fallback = opennova::fallback_machine_tokens(stable_identity);
-	out.nwpssk = fallback.nwpssk;
-	out.nwusid = fallback.nwusid;
-	opennova::RetailMachineInputs machine;
-	if (opennova::read_retail_machine_inputs(machine)) {
-		const opennova::LobbyMachineTokens tokens = opennova::make_retail_machine_tokens(machine);
-		out.nwpssk = tokens.nwpssk;
-		out.nwusid = tokens.nwusid;
-	}
+	out.nwpssk = tokens.nwpssk;
+	out.nwusid = tokens.nwusid;
 
 	// The supported retail capture and OpenNova base install both advertise 0.
 	// Keep the field explicit so an expansion-aware binding can replace it.

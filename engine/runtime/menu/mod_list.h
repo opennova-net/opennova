@@ -16,10 +16,6 @@
 
 namespace opennova::menu {
 
-// The base game's row: the key the code looks up through the list's string table, its text where
-// the table holds none [orig: Options_PopulateModList @ 0x559fe2, the literal JO's program carries].
-inline constexpr const char *kModListBaseKey = "Joint Operations: Typhoon Rising";
-
 class ModList {
 public:
 	// The read-only texts a pick describes the expansion in (the shell's ModDescriptions names).
@@ -29,12 +25,12 @@ public:
 	void set_records(std::vector<ExpansionRecord> records) { records_ = std::move(records); }
 	const std::vector<ExpansionRecord> &records() const { return records_; }
 
-	// The list `id` filled anew: the base game's row first (kModListBaseKey through the list's
-	// string table), selected; then a row per record, its name, in the scan's order; the record
+	// The list `id` filled anew: the base game's row first (`base_key`, the title's
+	// Title::mod_list_base, through the list's string table; null: blank), selected; then a row per record, its name, in the scan's order; the record
 	// whose directory names `current` (the expansion running, "" the base game; no case) has its
 	// row selected instead and its description shown. With the base game running the
 	// descriptions keep what they hold.
-	void populate(MenuRuntime &menu, int id, const std::string &current) const;
+	void populate(MenuRuntime &menu, int id, const std::string &current, const char *base_key) const;
 	// A row picked (the list's select, not its double click): the descriptions show its record's
 	// description, nothing for the base game's row.
 	void select(MenuRuntime &menu, int id, int row) const;

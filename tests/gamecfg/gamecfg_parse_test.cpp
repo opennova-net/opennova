@@ -467,6 +467,49 @@ int dfx2_player_cap_defaults() {
 	return 0;
 }
 
+// dfx2.exe's defaults store seven words otherwise (DFX2-100): lock_framerate 0, enable_slotmachine 1,
+// the four volumes 255 and mpchangeteam 1, where Jointops.exe's store 1, 0, 192 and 0
+// [orig: Config_SetDefaults @0x54D030 - @0x54D12F, @0x54D165, @0x54D10F..0x54D17A, @0x54D390]
+// [orig: Config_SetDefaults @0x54a2c0 - @0x54a3c1, @0x54a3f3, @0x54a392..0x54a40b, @0x54a613
+//  (dfx2.exe)].
+int dfx2_set_defaults_words() {
+	const GameCfg jo = defaults();
+	const GameCfg dfx2 = defaults({}, 0, 0, ConfigTable::Dfx2);
+	TEST_EXPECT(jo.lock_framerate == 1 && dfx2.lock_framerate == 0);
+	TEST_EXPECT(jo.enable_slotmachine == 0 && dfx2.enable_slotmachine == 1);
+	TEST_EXPECT(jo.music_volume == 192 && jo.sfx_level == 192 && jo.dialogue_level == 192 &&
+			jo.rotor_volume == 192);
+	TEST_EXPECT(dfx2.music_volume == 255 && dfx2.sfx_level == 255 && dfx2.dialogue_level == 255 &&
+			dfx2.rotor_volume == 255);
+	TEST_EXPECT(jo.mpchangeteam == 0 && dfx2.mpchangeteam == 1);
+	// The words the two share stay shared.
+	TEST_EXPECT(dfx2.windows_volume == 255 && dfx2.force_vsync == 0 && dfx2.reduce_mouselag == 1 &&
+			dfx2.mpchangeteam_interval == 300 && dfx2.mpchangeteam_penalty == 60);
+	return 0;
+}
+
+// dfx2.exe's save writes enable_slotmachine after audio_rate, Jointops.exe's never (DFX2-101); the
+// word reads back under either table [orig: Game_SaveConfig @0x54C490 - audio_rate then NoBlood
+// @0x54C75E..0x54C770] [orig: Game_SaveConfig @0x549710 - @0x5499de, @0x5499f0, @0x549a05
+// (dfx2.exe)].
+int dfx2_save_writes_slotmachine() {
+	GameCfg dfx2 = defaults({}, 0, 0, ConfigTable::Dfx2);
+	dfx2.enable_slotmachine = 0;
+	const std::string text = write(dfx2, {});
+	const size_t rate = text.find("audio_rate           = 44100\r\n");
+	const size_t slot = text.find("enable_slotmachine   = 0\r\n");
+	const size_t blood = text.find("NoBlood              = ");
+	TEST_EXPECT(rate != std::string::npos && slot != std::string::npos && blood != std::string::npos);
+	TEST_EXPECT(rate < slot && slot < blood);
+	TEST_EXPECT(text.find("enable_slotmachine", slot + 1) == std::string::npos);
+	TEST_EXPECT(write(defaults(), {}).find("enable_slotmachine") == std::string::npos);
+	LoadOptions dfx2_options;
+	dfx2_options.table = ConfigTable::Dfx2;
+	TEST_EXPECT(load_text(text, dfx2_options).cfg.enable_slotmachine == 0);
+	TEST_EXPECT(load_text(with_version("enable_slotmachine = 1\r\n")).cfg.enable_slotmachine == 1);
+	return 0;
+}
+
 } // namespace
 
 // The settings schema's availability names over the host screen's words: a weapon's MISSION word
@@ -519,29 +562,33 @@ int server_settings_availability() {
 
 // The schema offers what the session reads: the team lives and the difficulty word ride to every
 // joiner (runtime/inmatch/host_config.cpp), so both are offered, with their defaults; a patch sets
-// them, the difficulty within its one byte.
+// them, the difficulty as the reader takes it, whole (-1 among the words the game tests:
+// [orig: Entity_GetMaxHealthWithDifficulty @0x43B8D1]).
 int server_settings_session_rows() {
 	const opennova::io::JsonValue schema = server_settings_schema(kJoSettings, true);
-	bool lives = false, difficulty = false;
+	bool lives = false, difficulty = false, continuity = false;
 	for (const auto &row : schema.array) {
 		lives = lives || (row.get_string("key", "") == "max_team_lives" && row.get_int("default", 0) == 100);
-		difficulty = difficulty || (row.get_string("key", "") == "difficulty" && row.get_int("max", 0) == 255);
+		difficulty = difficulty || (row.get_string("key", "") == "difficulty" && row.get_int("max", 0) == INT32_MAX);
+		// The mission start reads it again (runtime/inmatch/host_boot.h kept_mission_clock).
+		continuity = continuity || (row.get_string("key", "") == "time_of_day_continuity" &&
+				row.get_string("kind", "") == "boolean" && !row.get_bool("default", true));
 	}
-	TEST_EXPECT(lives && difficulty);
+	TEST_EXPECT(lives && difficulty && continuity);
 	GameCfg cfg = defaults();
 	opennova::io::JsonValue patch;
 	std::string field, error;
 	TEST_EXPECT(opennova::io::json_parse(R"({"max_team_lives":5,"difficulty":2})", patch, error));
 	TEST_EXPECT(apply_server_settings(cfg, patch, true, {}, kJoSettings, field, error));
 	TEST_EXPECT(cfg.max_team_lives == 5 && cfg.mp_difficulty == 2);
-	TEST_EXPECT(opennova::io::json_parse(R"({"difficulty":256})", patch, error));
-	TEST_EXPECT(!apply_server_settings(cfg, patch, true, {}, kJoSettings, field, error) && cfg.mp_difficulty == 2);
+	TEST_EXPECT(opennova::io::json_parse(R"({"difficulty":-1})", patch, error));
+	TEST_EXPECT(apply_server_settings(cfg, patch, true, {}, kJoSettings, field, error) && cfg.mp_difficulty == -1);
 	return 0;
 }
 
 // The schema's limits are the reader's: a text row keeps the bytes a game.cfg line of it keeps
 // (text_limit: the cfg table's size less its NUL, else the switch key's limit), the packet size the
-// defaults' fold, the LAN mode the reader's; the core rows are named, not counted.
+// network init's fold, the LAN mode the reader's; the core rows are named, not counted.
 int server_settings_limits() {
 	TEST_EXPECT(text_limit(&GameCfg::game_name) == 31 && text_limit(&GameCfg::servermsg) == 127);
 	TEST_EXPECT(text_limit(&GameCfg::mp_host_game_password) == 16 &&
@@ -557,6 +604,10 @@ int server_settings_limits() {
 	TEST_EXPECT(row("country").get_int("max", 0) == 7);
 	TEST_EXPECT(row("max_packet_size").get_int("min", 0) == 100 && row("max_packet_size").get_int("max", 0) == 0x4000);
 	TEST_EXPECT(row("lan_mode").get_int("min", 0) == 1 && row("lan_mode").get_int("max", 0) == 4);
+	// The rows whose word the reader and the session take whole name no range of their own.
+	for (const char *whole : { "spectator_slots", "lineup_queue_size", "farp_timer" })
+		TEST_EXPECT(row(whole).get_int("min", 0) == INT32_MIN && row(whole).get_int("max", 0) == INT32_MAX);
+	TEST_EXPECT(row("respawn").get_int("min", -1) == 0);
 	TEST_EXPECT(row("max_players").get_int("max", 0) == 64 &&
 			server_settings_schema(kDfx2Settings, false).array.size() > 0);
 	int core = 0;
@@ -570,6 +621,8 @@ int main() {
 	if (defaults_match_config_set_defaults() != 0) return 1;
 	if (dfx2_table_row() != 0) return 1;
 	if (dfx2_player_cap_defaults() != 0) return 1;
+	if (dfx2_set_defaults_words() != 0) return 1;
+	if (dfx2_save_writes_slotmachine() != 0) return 1;
 	if (comments_and_quoting() != 0) return 1;
 	if (value_is_token_two() != 0) return 1;
 	if (unknown_and_dead_keys() != 0) return 1;

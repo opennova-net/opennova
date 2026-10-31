@@ -217,7 +217,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// [orig: Server_DeployPlayer @0x517803/@0x517812; slot+0x164 = 0 @0x517900]
 	// [orig: Server_DeployPlayer @0x514a55 (dfx2.exe)]
 	conn.link.preround_loadout_latch = world.preround_delay_seconds != 0 ||
-			protocol_in_match(protocol).join_state_fixed;
+			protocol_in_match(protocol).slot_state.join_state_fixed;
 	conn.reply.frontier_hint_pending = false; // bits 0x04/0x08 of the same byte
 	conn.reply.capture_nag_held = false;
 	// Bit 0x01 of the byte, which both values set, re-arms the slot's persistent pool-2

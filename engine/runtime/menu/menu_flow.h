@@ -2,7 +2,12 @@
 
 #include "menu_runtime.h"
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/mission/campaign.h>
 #include <runtime/mission/mission_catalog.h>
+
+namespace opennova {
+struct Title;
+}
 
 namespace opennova::menu {
 
@@ -10,10 +15,13 @@ namespace opennova::menu {
 struct MissionChoice {
 	std::string file, text, briefing;
 	uint32_t game_type = 0;
+	mission_catalog::CampaignWords campaign; // the table entry's (mission_catalog.h)
+	std::string title; // the entry's title alone ("" none): the campaign mission list's text
+	uint8_t mission_type = 0; // the header's mission type (mission_catalog::Row::mission_type)
 };
 
-// A catalog row's choice: its file, its list text (mission_catalog::display_text), its briefing and
-// its session game type (mission_catalog::game_type_of).
+// A catalog row's choice: its file, its list text (mission_catalog::display_text), its briefing,
+// its session game type (mission_catalog::game_type_of), its campaign words and its mission type.
 MissionChoice mission_choice(const mission_catalog::Row &row);
 
 // The SP list's model and deferred expansion request survive screen switches
@@ -27,7 +35,41 @@ public:
 	void select_mission(MenuRuntime &menu, int id, int row, const std::string &fallback);
 	void activate_mission(int id, int row);
 	const std::string &selected_mission() const { return selected_mission_; }
-	void clear_selected_mission() { selected_mission_.clear(); }
+	// The picked mission's campaign words: SinglePlayer_StartMission records its campaign in the
+	// profile (+60) and the round end writes its completion byte from both [orig:
+	// SinglePlayer_StartMission @0x561b93..0x561b99; PlayerProfile_SaveRoundEndProgress @0x54d6c6..
+	// 0x54d712]. A fallback pick, none or a list without a row has none (-1).
+	const mission_catalog::CampaignWords &selected_campaign() const { return selected_campaign_; }
+	void clear_selected_mission() {
+		selected_mission_.clear();
+		selected_campaign_ = {};
+	}
+
+	// The executable whose single-player screen this is (null: Jointops.exe's):
+	// Title::sp_campaign_tabs selects dfx2.exe's campaign and instant-action tabs.
+	void set_title(const Title *title) { title_ = title; }
+	// The campaign reader's inputs (DFX2-60): campaign.def's bytes (empty: the mount has none),
+	// the menu text table (g_TextMenuUi, Game.bin, not menutxt.bin; borrowed, null none) and the
+	// current profile's completion bytes. Read at each populate.
+	// [orig: Menu_InitShellResources @0x54f76c..0x54f779 loads game.bin into g_TextMenuUi
+	//  (dfx2.exe)]
+	void set_campaign_source(std::string def_text, const rtxt::File *menu_text,
+			const campaign::CompletionTable &progress);
+	// A CA_LIST pick under the campaign tabs, `row` the list's row: the campaign's briefing,
+	// mission list and overlay, ACCEPT off; false for any other list or title.
+	// [orig: sub_55FAD0 @0x55fad0, registered on CA_LIST @0x560f25 (dfx2.exe)]
+	bool select_campaign(MenuRuntime &menu, int id, int row);
+	// A tab radio's activation under the campaign tabs: ACCEPT on when its tab's list
+	// (RADIO_TAB_CAMPAIGN's CA_MISSION_LIST, RADIO_TAB_INSTANTACTION's IA_LIST) has a row
+	// selected, else off; false for any other control or title.
+	// [orig: SinglePlayer_RefreshAcceptOnActivate @0x560710, registered on the two radios with
+	//  0 / 1 @0x560ee9 / @0x560f07 (dfx2.exe); Jointops.exe's twin @0x561a20 has no caller]
+	bool activate_tab(MenuRuntime &menu, const std::string &name);
+	// The campaign list as the last populate read it (DFX2-60).
+	const campaign::CampaignList &campaigns() const { return campaigns_; }
+	// The image the campaign tab's CAMPAIGN_IMAGE last named: the shown campaign's image, or a
+	// picked mission's <name>.tga ("" none).
+	const std::string &campaign_image() const { return campaign_image_; }
 
 	// ACCEPT's pick of the Mods list (ModList::pick): `name` the expansion, "" the base game,
 	// against `current`, the one running ("" the base game). The same name, without case, takes
@@ -41,12 +83,35 @@ public:
 
 private:
 	bool is_sp_list(const std::string &name) const;
+	bool campaign_tabs() const;
 	const MissionChoice *mission_row(int id, int row) const;
-	void apply_sp_selection(MenuRuntime &menu, const std::string &briefing, bool enabled);
+	void apply_sp_selection(MenuRuntime &menu, const std::vector<std::string> &briefings,
+			const std::string &briefing, bool enabled);
+	void set_accept(MenuRuntime &menu, bool enabled);
+	void seed_campaign_tabs(MenuRuntime &menu, int id, const std::vector<MissionChoice> &rows);
+	void read_campaigns(MenuRuntime &menu);
+	void show_campaign(MenuRuntime &menu, size_t campaign);
+	void show_overlay(MenuRuntime &menu, bool complete);
+	void set_campaign_image(MenuRuntime &menu);
 	std::vector<std::string> sp_lists_, briefings_, accepts_;
 	std::unordered_map<int, std::vector<MissionChoice>> mission_rows_;
 	std::string selected_mission_, expansion_request_;
+	mission_catalog::CampaignWords selected_campaign_;
 	bool expansion_pending_ = false;
+	const Title *title_ = nullptr;
+	// The campaign tabs' state (DFX2-60): the reader's inputs; the mission table as the populate
+	// was handed it, its campaign words kept across populates of the same table (retail's
+	// entries keep theirs until the table is built again); the list the reader made; the
+	// CA_LIST rows' campaigns and its picked row (the list's own selection, kept as the widget
+	// keeps it); the image CAMPAIGN_IMAGE names.
+	std::string campaign_def_;
+	const rtxt::File *menu_text_ = nullptr;
+	campaign::CompletionTable progress_{};
+	std::vector<MissionChoice> catalog_;
+	campaign::CampaignList campaigns_;
+	std::vector<size_t> campaign_rows_;
+	int campaign_pick_ = -1;
+	std::string campaign_image_;
 };
 
 // The armory's PLAYER_CLASS spin: its rows 0..4 each enabled by the host's class mask, bits 5..9 in
@@ -58,7 +123,9 @@ void enable_class_rows(MenuRuntime &menu, int spin, uint32_t class_allow_mask);
 // in inmatch/host_settings; this model consumes catalog values and menu state.
 class HostDialog {
 public:
-	void seed(MenuRuntime &menu, const std::vector<MissionChoice> &rows);
+	// The dialog's init over the catalog's rows, for `title`'s screen (its combat-vehicle filter
+	// and ADD Switch default, Title::host_vehicle_missions / host_switch_starts_off).
+	void seed(MenuRuntime &menu, const std::vector<MissionChoice> &rows, const Title &title);
 	void filter(MenuRuntime &menu);
 	void add_selected(MenuRuntime &menu, const hud::GameTextLookup &text);
 	void remove_selected(MenuRuntime &menu);
@@ -84,7 +151,17 @@ public:
 
 private:
 	void sync_start(MenuRuntime &menu) const;
+	// MISSION_LIST from the rows' shown flags (each the list row retail enables or disables),
+	// in the pool's order, nothing picked.
+	void publish_(MenuRuntime &menu);
+	// The game-type value a row lists under: its own (game_type::host_filter_category), and
+	// for a combat-vehicle row under the title's filter 254 (kHostFilterVehicle) as well.
+	bool listed_under_(const MissionChoice &row, int value, bool removed) const;
 	std::vector<MissionChoice> pool_;
+	std::vector<bool> shown_; // per pool row: its MISSION_LIST row enabled
+	int filter_value_ = 255;  // the last GAME_TYPE value filtered by [orig: dword_25C76EC]
+	bool vehicle_missions_ = false;
+	bool switch_starts_off_ = false;
 	std::vector<int> visible_, selected_;
 	std::vector<int32_t> launch_options_; // one per selected row
 	bool any_class_ = true; // some class word set (the block's ten, set_class_words)

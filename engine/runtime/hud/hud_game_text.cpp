@@ -5,6 +5,8 @@
 
 #include <runtime/hud/hud_frame.h> // HudSessionText
 
+#include <base/gameprofile/game_type.h>
+
 #include <base/io/strutil.h>
 
 #include <algorithm>
@@ -78,7 +80,7 @@ std::string waypoint_label_text(const std::string &name, const WaypointNameKey &
 	return label;
 }
 
-void hud_session_text(const GameTextLookup &gametext, HudSessionText &out) {
+void hud_session_text(const GameTextLookup &gametext, uint32_t game_type, HudSessionText &out) {
 	out.timer = game_text(gametext, "Overlays", "STROVER50", "");            // @0x593E00
 	out.players_remaining = game_text(gametext, "Client", "STRCLI25", "");  // @0x593ED9
 	out.players = game_text(gametext, "Client", "STRCLI04", "");            // @0x593F04
@@ -90,6 +92,19 @@ void hud_session_text(const GameTextLookup &gametext, HudSessionText &out) {
 		out.team_names[i] = game_text(gametext, "client", kTeamKeys[i], "");
 	out.attacking = game_text(gametext, "client", "strcli20", ""); // @0x59AC86
 	out.defending = game_text(gametext, "client", "strcli21", ""); // @0x59AC96
+	// [orig: HUD_GetGameTypeOverlayLabel @0x5B75D0 (dfx2.exe), Jointops.exe's @0x5B8680 rung for
+	//  rung]
+	const char *label_key = game_type::overlay_label_key(game_type);
+	out.game_type_label = label_key[0] != 0 ? game_text(gametext, "Overlays", label_key, "")
+											 : std::string();
+	out.of_team_a = game_text(gametext, "Client", "STRCLI07", ""); // @0x59B263 (dfx2.exe)
+	out.of_team_b = game_text(gametext, "Client", "STRCLI08", ""); // @0x59B467 (dfx2.exe)
+}
+
+void hud_vehicle_rider_text(const GameTextLookup &gametext, std::vector<HudVehicleRider> &riders) {
+	for (HudVehicleRider &r : riders)
+		r.weapon_text = r.has_weapon ? game_text(gametext, "Overlays", r.weapon_key.c_str(), "")
+									 : std::string();
 }
 
 std::string subgoal_message(bool lost, int header_id, const GameTextLookup &mission) {

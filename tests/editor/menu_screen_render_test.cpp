@@ -364,7 +364,7 @@ void sweep_menu(const std::string &label, const std::string &path, const opennov
 	for (const auto &row : document.rows()) {
 		++totals.screens;
 		MenuScreenRender render;
-		if (render.configure(document, row->id, files, vars) != MenuScreenStatus::Ready) {
+		if (render.configure(document, row->id, files, vars, 1.0f) != MenuScreenStatus::Ready) {
 			std::printf("  FAIL %s %s: %s\n", label.c_str(), row->name().c_str(), render.detail().c_str());
 			++totals.failures;
 			continue;

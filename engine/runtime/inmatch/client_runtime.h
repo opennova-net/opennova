@@ -95,6 +95,10 @@ struct ClientProcessState {
 	// (the client runtime points its replica's store here: use_vehicle_spawn_store).
 	// [orig: g_VehicleSpawnAvailabilityReceived 0xA81BB0, the table 0xA81BC0]
 	replication::ClientVehicleSpawnAvailability vehicle_spawn_availability;
+	// The S2C 0x82 score tracker's entries, which only the 0x82 writes (replication::
+	// ClientScoreTracker carries the witness): they outlive every session; the tracker's words
+	// are the session's.
+	std::vector<replication::ClientScoreTrackerEntry> score_tracker_entries;
 	// The process's file-transfer session words (file_transfer_session.h): the id each S2C 0x02
 	// probe carries and its step countdown, stepped by every authority mission start (HostRole's
 	// bring-ups, a map change's and a single player's included) and by the server tick's head,
@@ -222,6 +226,7 @@ public:
 		// The joiner's leave callback writes the process latch (D-NET-823).
 		if (joiner_) joiner_->use_disconnect_latch(&process_state().disconnect_latch);
 		view_.use_vehicle_spawn_store(&process_state().vehicle_spawn_availability);
+		view_.use_score_tracker_store(&process_state().score_tracker_entries);
 	}
 	enum class Role : uint8_t { Joiner, HostClient };
 	// The process's _connectlog.txt (punt_log.h ConnectLog; null: off): every S2C 0x61
@@ -950,6 +955,11 @@ public:
 	// The rules the title runs, whose joiner-side knobs its view's folds follow
 	// (ClientReplicaPipeline::set_rules).
 	void set_rules(const world::TitleRules *rules) { view_.set_rules(rules); }
+	// The title the session runs as, whose fresh profile the joiner's kitless 0x2F sends
+	// (JoinerConnection::set_title).
+	void set_title(const Title *title) {
+		if (joiner_) joiner_->set_title(title);
+	}
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN. Joiner only.
 	void set_join_cd_cookie(std::vector<uint8_t> cookie) {
 		if (joiner_) joiner_->set_cd_cookie(std::move(cookie));

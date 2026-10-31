@@ -105,10 +105,12 @@ public:
 	// ERR_CANT_CREATE (a host that could not bind its socket); `r_sim` is cleared on a failure.
 	static int stage_simulation(Ref<Simulation> &r_sim, const Ref<MissionData> &p_mission,
 			const Ref<MissionSetupOptions> &p_options);
-	// The failed setup's session create ended the process on the cfg block's
-	// mpreset word (Simulation.session_create_ended_process): the embedder
-	// exits with code 0 instead of reporting a load failure.
+	// The failed setup ended the process (Simulation.load_ended_process: the
+	// session create on the cfg block's mpreset word, or a load warning box's
+	// Cancel): the embedder exits with process_exit_code() instead of reporting
+	// a load failure.
 	bool is_process_exit() const { return process_exit_; }
+	int32_t process_exit_code() const { return process_exit_code_; }
 
 	// Full attached-effect transform for fx2ssn. Simulation owns the LIVE
 	// registry lookup and frame data; presentation applies the single
@@ -361,6 +363,7 @@ private:
 	String mission_name_;
 	int setup_error_ = OK;
 	bool process_exit_ = false;
+	int32_t process_exit_code_ = 0;
 	// The current authoritative present tick (-1 = none yet). Attachment-pose
 	// lookups are Simulation's generation-bound native index — the one path;
 	// test sims implement the same compact API.

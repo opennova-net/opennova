@@ -104,6 +104,9 @@ var _world_load_pending := false
 # The mission a `--mission` launch starts in, until its load ends: one that fails is named on a
 # line of the log the editor's Play reads back (ResourceRoot.launch_mission_failed_marker()).
 var _launch_mission := ""
+# The started mission's campaign words (campaign, its place; -1 none), the menu pick's, which
+# the round end hands the profile (MenuShell.start_requested).
+var _mission_campaign := Vector2i(-1, 0)
 var _end_flow := MissionEndFlow.new()  # the SP end-of-mission flow (round_end -> the cine's screen)
 var _sp_restart_info: LoadingScreenInfo = null  # the last SP load: the restart's entry
 var _sp_restart_loader := Callable()
@@ -376,6 +379,10 @@ func _ready() -> void:
 			_leave_screen.bind(State.DEPLOY))
 	# DEATH's exit confirmation YES runs input action 3, a menu screen's confirmation.
 	_deploy_presenter.exit_confirmed.connect(_on_screen_exit_confirmed)
+	# A DEATH screen's RESTART_LEVEL restarts the mission as the in-game RESTART does.
+	_deploy_presenter.restart_requested.connect(_on_restart_requested)
+	# A title whose DEATH screen picks the loadout fills and applies the armory's class pages.
+	_deploy_presenter.set_armory(_armory_presenter)
 	_world.join_deploy_pick_required.connect(_on_join_deploy_pick_required)
 	# The process's cfg block every mission's session create reads, and the
 	# create's mpreset exit (docs/net/novaworld-net-re.md D-NET-385).
@@ -722,7 +729,11 @@ func is_gameplay_input_active() -> bool:
 func _on_shell_mission_effects(effects: Array) -> void:
 	for e_v in effects:
 		var e := e_v as MissionEffect
-		if e != null and e.kind == "round_end":
+		if e != null and e.kind == "high_score":
+			# The win screen's new best into the mission table's row, which the menu's
+			# next teardown saves to hiscore.txt (engine EpilogCine carries the witness).
+			MissionCatalog.set_high_score(e.text, e.a)
+		elif e != null and e.kind == "round_end":
 			var sim: Simulation = _world.get_sim() if _world != null else null
 			var armed_before := _end_flow.is_round_ended()
 			_end_flow.begin(sim)
@@ -990,8 +1001,9 @@ func _is_use_item_key(keycode: Key) -> bool:
 
 # --- Menu <-> world transitions ----------------------------------------------
 
-func _on_start_requested(bms_name: String) -> void:
-	_save_profile_for_single_player()
+func _on_start_requested(bms_name: String, campaign := -1, campaign_mission := 0) -> void:
+	_mission_campaign = Vector2i(campaign, campaign_mission)
+	_save_profile_for_single_player(campaign)
 	# Single-player: the loading screen is the sidecar image alone — no session
 	# text [orig: the not-in-session path draws only the background @ 0x521ebe].
 	start_world_load(
@@ -1000,12 +1012,13 @@ func _on_start_requested(bms_name: String) -> void:
 
 
 # The single-player start's profile legs: the started mission's campaign index
-# into the current record (the catalog's, -1 on every row), then the profile
-# and game.cfg saved ahead of the session, whose create reads the cfg block's
-# mpreset word (engine: PlayerProfiles.record_mission_start;
-# docs/gamecfg/game-cfg-re.md, the save points).
-func _save_profile_for_single_player() -> void:
-	PlayerProfile.store().record_mission_start(-1)
+# into the current record (the menu's pick's, -1 for none: a launch that names a
+# file, or a mission no campaign holds), then the profile and game.cfg saved
+# ahead of the session, whose create reads the cfg block's mpreset word (engine:
+# PlayerProfiles.record_mission_start; docs/gamecfg/game-cfg-re.md, the save
+# points).
+func _save_profile_for_single_player(campaign := -1) -> void:
+	PlayerProfile.store().record_mission_start(campaign)
 	PlayerProfile.save()
 	GameCfgStore.save()
 	# Then the start's block write after the save: the attribute word's
@@ -1018,6 +1031,7 @@ func _save_profile_for_single_player() -> void:
 ## Boot an exact loose mission through the same loading
 ## presentation and GameWorld lifecycle as menu play.
 func start_loose_mission(bms_name: String) -> void:
+	_mission_campaign = Vector2i(-1, 0)
 	_save_profile_for_single_player()
 	start_world_load(
 		LoadingScreenInfo.for_mission(bms_name),
@@ -1042,6 +1056,7 @@ func start_saved_mission(saved_path: String, bms_name: String, profile: Dictiona
 		return ERR_FILE_CANT_OPEN
 	if not profile.is_empty():
 		set_local_player_profile(profile)
+	_mission_campaign = Vector2i(-1, 0)
 	_save_profile_for_single_player()
 	start_world_load(LoadingScreenInfo.for_mission(bms_name),
 			_world.load_mission_data.bind(mission, bms_name))
@@ -1081,6 +1096,8 @@ func request_quit() -> void:
 	# its cookie jar to nw_cdata.coo (NovaWorldClient.save_cookie_jar).
 	GameCfgStore.save()
 	NovaWorldClient.save_cookie_jar()
+	# And the high scores (engine: runtime/mission/mission_catalog.h HighScoreTable).
+	MissionCatalog.save_high_scores(String(LaunchFlags.working_dir()))
 	var load_operation := begin_runtime_shutdown()
 	# The subsystems' shutdown, after the cursor's show: Scroll Lock off, Num Lock
 	# as the start found it, Caps Lock off (engine controls::kVkNumLock carries the
@@ -1092,7 +1109,8 @@ func request_quit() -> void:
 ## The process exit on the cfg block's mpreset word: a read of game.cfg that
 ## sets it (a mount's; the start's is GameRuntimeRoot.begin_game's) or a session
 ## create that reads it
-## (GameWorld.process_exit_requested). The process ends with `code` 0 there:
+## (GameWorld.process_exit_requested), and on a mission load's warning box
+## answered Cancel (the same signal, `code` -1). The process ends with `code` there:
 ## nothing is saved (neither game.cfg nor the profile), the NovaWorld session
 ## the shell holds sends its goodbye burst alone, and the runtime comes down
 ## (docs/net/novaworld-net-re.md D-NET-385). Out of the tree only the latch
@@ -1100,7 +1118,7 @@ func request_quit() -> void:
 func exit_process(code := 0) -> void:
 	if _process_exit_pending:
 		return
-	push_warning("MainGame: game.cfg's mpreset ends the process (exit code %d)" % code)
+	push_warning("MainGame: the process ends (exit code %d)" % code)
 	_process_exit_pending = true
 	_quit_requested = true
 	var client: NovaWorldClient = null
@@ -1488,7 +1506,11 @@ func _maybe_open_death_menu() -> void:
 	var sim: Simulation = _world.get_sim()
 	if sim == null:
 		return
-	if not bool(sim.take_death_menu_open(_state != State.WORLD or _world_load_pending)):
+	var opening := bool(sim.take_death_menu_open(_state != State.WORLD or _world_load_pending))
+	# The clear's close leg, a title's own call ahead of the screens' close.
+	if bool(sim.take_death_menu_close()):
+		_deploy_presenter.on_death_menu_close()
+	if not opening:
 		return
 	_deploy_presenter.open()
 
@@ -2141,15 +2163,18 @@ func _teardown_presenters() -> void:
 
 
 # The mission teardown's profile step (and the SP restart's): outside a session
-# it runs only once the round is over, then the profile's +1460 word goes back
-# and the profile is saved. No catalog row carries a campaign, so no
-# completion byte is written (engine: PlayerProfiles.record_round_end).
+# it runs only once the round is over; a won round (the 0x1D's winner team 1)
+# of a campaign mission writes its completion byte, then the profile's +1460
+# word goes back and the profile is saved (engine: PlayerProfiles.record_round_end;
+# the started mission's campaign words, _mission_campaign).
 func _record_round_end() -> void:
 	var sim: Simulation = _world.get_sim() if _world != null else null
 	if sim == null:
 		return
 	var in_session := sim.is_host_listening() or sim.is_joiner()
-	if PlayerProfile.store().record_round_end(in_session, sim.is_round_over(), -1, -1, false):
+	var won := sim.get_end_round_winner_team() == 1
+	if PlayerProfile.store().record_round_end(in_session, sim.is_round_over(),
+			_mission_campaign.x, _mission_campaign.y, won):
 		PlayerProfile.save()
 
 

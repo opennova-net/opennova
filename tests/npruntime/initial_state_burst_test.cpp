@@ -24,6 +24,7 @@
 #include <net/npwire/ingame_decode.h> // decode_organic_spawn_batch / decode_pool3_sync_batch
 #include <net/npwire/ingame_encode.h> // encode_pool_spawn_batch
 #include <net/npwire/ingame_message_id.h> // s2c::WORLD_STATE_LOAD
+#include <net/protocol/protocol.h>          // title_protocol (the joiner fold reads its protocol)
 #include <net/npwire/protocol_message.h> // make_protocol_message (the C2S 0x0B)
 #include <runtime/replication/client_replica_pipeline.h> // the joiner's 0x0F apply
 #include <runtime/replication/entity_wire_bridge.h> // build_pool1_spawn_batch
@@ -1228,6 +1229,7 @@ int location_names_by_name_index_impl() {
 		return 1;
 	auto joiner_storage = std::make_unique<ns::ClientReplicaPipeline>();
 	ns::ClientReplicaPipeline &joiner = *joiner_storage;
+	joiner.set_protocol(opennova::title_protocol("jo")); // the 0x0F fold reads its protocol
 	joiner.apply(opennova::s2c::WORLD_STATE_LOAD, *body);
 	std::vector<std::string> kept = want;
 	kept[2] = long_name.substr(0, 63);

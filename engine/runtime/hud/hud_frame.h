@@ -14,6 +14,7 @@
 #include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_declutter.h>
 #include <runtime/hud/hud_elements.h> // which element of the walk drew each run
+#include <runtime/hud/hud_exp_points.h> // DFX2-36's EXPPOINTS element
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/hud_scoreboard.h>
 #include <runtime/hud/hud_minimap.h>
@@ -32,6 +33,9 @@
 #include <runtime/hud/hud_vehicle_panel.h> // the seat-marker policy
 #include <vector>
 
+namespace opennova {
+struct Title; // base/title/title.h
+} // namespace opennova
 namespace opennova::world {
 enum class SeatType : uint8_t; // world/entity.h
 }
@@ -130,6 +134,12 @@ enum HudTexture : int32_t {
 	kHudTexLogoHelo,
 	kHudTexLogoHumm,
 	kHudTexLogoBoat,
+	// scopexh.tga (hud_texture_names.h kHudScopeCrosshairTexture), loaded in alpha mode into its
+	// record by both titles; dfx2.exe's weapon Inset draws it over the aperture (DFX2-45)
+	// [orig: HUD_LoadAllTextures @0x59E127..0x59E133 -> g_HUDScopeCrosshairTexInfo, the texture at
+	// +4] [orig: HUD_LoadAllTextures @0x59CBE7..0x59CBF3 -> g_HUDScopeCrosshairTexInfo, the texture
+	//  at +4 0x2724E2C (dfx2.exe)].
+	kHudTexScopeCrosshair,
 	// The HUDLS weapon slot bar: the bracket and the more-available marker
 	// (hudpos-named, loaded alpha mode 0) and one icon per weapon category
 	// 0..9 — the category's first def's hud_loadout_select texture
@@ -366,6 +376,8 @@ struct HudLayout {
 	HudPosRecord player_count;
 	HudPosRecord team_xy;
 	HudPosRecord zone_info;
+	// EXPPOINTS: x, y, hidden and the pulse percent (hud_exp_points.h), unauthored the BSS zero.
+	HudExpPointsRecord exp_points;
 	HudSlotBarLayout hudls;
 	HudPosRecord chat_text;
 	// The chat box's x1/x2 columns — g_HUDChatBoxCoords rows 1 and 2, the
@@ -514,11 +526,10 @@ struct HudLayout {
 	uint32_t weapon_text = 0xFFFAD605u;
 	uint32_t stance_tint = 0xFFFFFFFFu;
 	uint32_t heat_border = 0xFFFFFFFFu;
-	// The stance colour TRIPLE. Only `bad` was pulled into the layout before,
-	// because the stance bar is the only element that needed it; the vehicle
-	// panel bands its seats with the same three [orig: the good/middle/bad arms
-	//  of the seat loop @0x5A4FD0], so all three are carried now. The def has
-	// parsed all three all along.
+	// The stance colour TRIPLE (hudpos stancecolor_good / _middle / _bad): the health
+	// bar's fill bands with it [orig: HUD_DrawHealthBar @0x5a2f88 / @0x5a2f90 / @0x5a2f34],
+	// the vehicle panel its seats [orig: the good/middle/bad arms of the seat loop
+	// @0x5A4FD0], the heat bar fills with `bad` [orig: HUD_DrawWeaponHeatBar @0x59976d].
 	uint32_t stance_good = 0xFF05FA0Du;
 	uint32_t stance_middle = 0xFFFAA608u;
 	uint32_t stance_bad = 0xFFB00A0Au;
@@ -689,6 +700,11 @@ struct HudFriendlyTag {
 	// Map-column click [orig: CMap_EntityWidgetHandler @0x5485E4 — (idx + 1) % 14],
 	// ported as menu::command_map_team_list_click (D-HUD-19).
 	uint8_t squad_color_index = 0;
+	// dfx2.exe's FULL-mode reach (Title::hud_tag_ranges, DFX2-87): the tag is the HUD target
+	// cursor's entity, and a player's slot +0x3C word equals the local player's slot's
+	// (world::FriendlyTagSource carries the witness).
+	bool cursor_target = false;
+	bool same_account = false;
 };
 
 // THE SQUAD COLOUR TABLE [orig: g_SquadColors @0x83B450, 14 dwords]: entry 0
@@ -853,6 +869,23 @@ struct HudVehiclePanelState {
 	std::vector<HudVehicleSeat> seats;
 };
 
+// DFX2-82, dfx2.exe's rider lines under the vehicle panel (Title::hud_vehicle_panel_riders):
+// the driver's "<name>  <i>(Driver)<-i>", then up to two gunners' "<name>  <i>(<weapon>)<-i>",
+// "(Gunner)" without a weapon text, left-aligned in the bold slot from the silhouette's
+// bottom-left corner one bold 'W' height apart, half-bright tagcolor_good, tags on. The role
+// feed names each (inmatch::fill_vehicle_panel_riders, HUD_GetEntityDisplayName) and gives the
+// gun weapon's attachtextid; the embedder resolves it through Overlays (hud_vehicle_rider_text).
+// [orig: HUD_DrawVehicleHealthBars @0x5A3DF0 - the anchor @0x5A3F1B..0x5A3F23, the pitch
+//  GameFont_MeasureCharHeight('W') @0x5A4700, the lines @0x5A4711..0x5A4871, g_HudposTagcolorGood
+//  (tagcolor_good, HUD_ParseHudposToken @0x59FB0B) (dfx2.exe)]
+struct HudVehicleRider {
+	std::string name;
+	bool gunner = false;
+	bool has_weapon = false;
+	std::string weapon_key;
+	std::string weapon_text;
+};
+
 // The panel's anchor from the layout: the HUDVEHSTANCEPOS pair and the HUDSTANCE
 // offset of the rider's stance, the same tables the stance icon reads (the producer
 // yields stance 0..5; the index is clamped to the tables' six rows)
@@ -920,6 +953,11 @@ struct HudSessionText {
 	std::array<std::string, 6> team_names;
 	std::string attacking;         // client/strcli20
 	std::string defending;         // client/strcli21
+	// dfx2.exe's GAMEINFO board (DFX2-114): the session game type's Overlays label
+	// (HUD_GetGameTypeOverlayLabel) and the "(of" pair Client/STRCLI07 / STRCLI08.
+	std::string game_type_label;
+	std::string of_team_a;
+	std::string of_team_b;
 };
 
 // THE MP SESSION LINES' per-frame facts: the CLOCK timer and player count,
@@ -934,13 +972,28 @@ struct HudSessionState {
 	int remaining_count = 0;             // g_ScoreboardDeadRowCount (the live count)
 	int row_count = 0;                   // g_ScoreboardRowCount
 	int spectator_count = 0;             // g_ScoreboardSpectatorCount
-	// T: g_KothLimitMinutes on the authority, the S2C 0x64 copy dword_A821C0
+	// T: g_KothLimitMinutes on the authority, the S2C 0x64 copy g_JoinerTimeLimitMinutes
 	// on a joiner [orig: HUD_DrawGameTimerOverlay @0x59CCDB..0x59CCEB].
 	int32_t time_limit_minutes = 0;
-	// Teams 1 and 2 of the 0x16 team table: score1 (movsx) and the KOTH hold
-	// byte [orig: dword_A85AFC / dword_A85B08, dword_A85B0C / dword_A85B18].
-	std::array<int32_t, 2> team_score1{};
-	std::array<int32_t, 2> team_koth{};
+	// The 0x16 team table by team byte 0..4: score1 (movsx), the KOTH hold byte and the CTF
+	// byte [orig: the rows 0xA85AEC + 16t - team 1 dword_A85AFC / dword_A85B08, team 2
+	// dword_A85B0C / dword_A85B18], and its count byte [orig: g_ScoreboardTeamCount @0x42fdda].
+	std::array<ScoreboardTeamScore, 5> teams{};
+	int team_count = 0;
+	// dfx2.exe's GAMEINFO board's further facts (Title::hud_game_info_board, DFX2-114): the
+	// session record's mission name (at most 63 characters: the authority's own report, a
+	// joiner's S2C 0x58 copy, "" before one), the mounted expansion, the 0x16 rows (the record's
+	// name, score1, slot id and bit 0), the timed flag (g_ScoreboardFlags & 2) and the local
+	// player entity's slot byte (+0x154; 0xFF while destroyed, -1 with no runtime).
+	// [orig: HUD_DrawGameTimerOverlay @0x59ABF0 - g_ServerMissionName / g_ExpansionName
+	//  @0x59AE4E..0x59AE84, the rows dword_A7BB30 + 56r @0x59B4E4..0x59B527, g_ScoreboardFlags
+	//  @0x59B575, entity+0x154 @0x59B54B (dfx2.exe); Server_BuildStatusReport @0x530A60 (the
+	//  authority's name @0x530AA1)]
+	std::string mission_name;
+	std::string expansion;
+	std::vector<ScoreboardEntry> rows;
+	bool timed = false;
+	int local_slot = -1;
 	// CaptureZone_FindMaxProximityCoverage(local) [orig: @0x5BF4D0].
 	int32_t zone_coverage = 0;
 	int team = 0;                        // byte_27234FE (hudInfo+0x176)
@@ -963,6 +1016,16 @@ struct HudSessionState {
 	HudSessionText text;
 };
 
+// dfx2.exe's GAMEINFO leader lines for game types 0, 1 and 8 (DFX2-114): four places, each
+// non-spectator row taking the FIRST place whose score it beats and replacing that place's
+// row (no shift: a row a later one displaces drops out), then the places in order; when no
+// placed row is the local player's (its slot byte), the first non-spectator row of that slot
+// follows them. Each is "%3i %s" (score1, name), or under the timed flag "%2i:%02i %s" of
+// 60 * T less score1. The 0x8000000 debug arm is dead.
+// [orig: HUD_DrawGameTimerOverlay @0x59ABF0 - the places @0x59B4B3..0x59B527, the lines
+//  @0x59B530..0x59B617, the local row @0x59B61D..0x59B70F (dfx2.exe)]
+std::vector<std::string> game_info_leader_lines(const HudSessionState &session);
+
 // One weapon category's slot-bar scan result (world/hud_slot_bar_feed.h owns
 // the witnessed scan). The icon is the device's texture at
 // kHudTexSlotBarIcon0 + category.
@@ -974,7 +1037,7 @@ struct HudSlotBarSlot {
 	int icon_h = 0;       // def+0x1C4
 	// KeyBinding_FormatDisplayString of binding record 200 + the def's
 	// category (0x81AE08 + 108*def[0]): after the start-up re-lay that is the
-	// catalog row dispatching 200 + category (controls action_for_code), the
+	// catalog row dispatching 200 + category (controls Catalog::for_code), the
 	// zero record's "" where none does; the embedder resolves it from the live
 	// bindings [orig: HUD_DrawWeaponSlotBar @0x599e8c..0x599e9f;
 	// KeyBinding_SortBySequentialId @0x498260].
@@ -1068,6 +1131,15 @@ struct HudFrameState {
 	HudFrameRateOverlay frame_rate; // element_frame_rate_overlay
 	HudConnectStatus connect_status; // element_connect_status
 	HudStartTimer start_timer;       // element_start_timer
+	HudExpPointsState exp_points;    // element_exp_points (DFX2-36)
+	// The title the session runs as (inmatch::RoleView::title; before a session's role facts, and
+	// in the editor's HUD preview, its root's title): the HUD's own variants by its hud_* fields
+	// (Title::hud_lone_gunner_panel, ...). Null draws Jointops.exe's variants but none of a title's
+	// own tables: the map legend (Title::hud_map_legend) draws its box alone.
+	const Title *title = nullptr;
+	// The local player is a lone gunner (world::local_rides_solo_turret): the lone-gunner panel's
+	// fact (element_lone_gunner_panel, DFX2-91).
+	bool lone_gunner = false;
 	// An in-game .mnu screen is open (the in-game menu, the armory, the
 	// deploy screen, the end-round board, the command map): the preround
 	// armory line yields to it (element_service_prompt). [orig: dword_255110C,
@@ -1132,16 +1204,22 @@ struct HudFrameState {
 	// the item's VEHICLE_HUD block and the live seat occupancy, because both
 	// need tables the compiler does not own.
 	HudVehiclePanelState vehicle_panel;
+	// dfx2.exe's rider lines under it (HudVehicleRider; the role facts' each frame).
+	std::vector<HudVehicleRider> vehicle_riders;
 	// The Tab board (hud/hud_scoreboard.h owns its policy).
 	HudScoreboardState scoreboard;
 	// The open chat capture's input line.
 	HudChatInputState chat_input;
-	// The key-toggled windows HUD_DrawGameplayOverlays draws after the
-	// objectives (hud/hud_overlay_windows.h): the F1 key-binding help, the
-	// F12 map legend (it wins over the help list), the I briefing panel.
+	// The key-toggled windows HUD_DrawGameplayOverlays draws (hud/hud_overlay_windows.h): the
+	// F1 key-binding help, the F12 map legend (it wins over the help list), the I window out of
+	// a session (the briefing panel, dfx2.exe's how-to) and the briefing panel's own window,
+	// after the objectives (DFX2-96, hud_toggles.h hud_briefing_window).
 	HudHelpScreenState help_screen;
 	HudMapLegendState map_legend;
 	HudBriefingState briefing;
+	HudBriefingState briefing_panel;
+	// The I window in a session: the end-game screen (hud_overlay_windows.h).
+	HudEndGameScreenState end_game;
 	// The overlay-panel pass's voice-macro menus (hud_overlay_windows.h).
 	HudVoiceMacroMenuState emotes_menu;
 	HudVoiceMacroMenuState radio_menu;
@@ -1260,6 +1338,10 @@ struct HudFrameState {
 	// replica runtime keeps.
 	HudNetQualityState net_quality;
 };
+
+// The HUD info's 16.16 health ratio, the health bar's fill and colour band (and dfx2.exe's stance
+// tint, DFX2-85): the local player's, or on the death screen the spectate target's, capped at 1.0.
+int32_t hud_info_health_ratio_fp16(const HudFrameState &state);
 
 struct HudDrawList {
 	std::vector<HudQuad> quads;
@@ -1676,6 +1758,10 @@ private:
 	void element_frame_rate_overlay(const HudFrameState &state, float w, float h);
 	void element_connect_status(const HudFrameState &state, float w, float h);
 	void element_start_timer(const HudFrameState &state, float w, float h);
+	// DFX2-36: a new 0x81 fanfare arm starts the EXPPOINTS fade at the pass's head, as the
+	// receive starts it ahead of the frame's draw (hud_exp_points.h); the element draws it.
+	void start_exp_points_fade(const HudFrameState &state);
+	void element_exp_points(const HudFrameState &state, float w, float h);
 	void element_breath_bar(const HudFrameState &state, float w, float h);
 	void element_waypoint(const HudFrameState &state, float w, float h);
 	void element_spinmap(const HudFrameState &state, float w, float h);
@@ -1697,6 +1783,8 @@ private:
 	// The MP session lines (hud_frame_session_lines.cpp) and the HUDLS bar
 	// (hud_frame_slot_bar.cpp).
 	void element_game_info(const HudFrameState &state, float w, float h);
+	// dfx2.exe's GAMEINFO board below the zone line (DFX2-114); true when it drew a line.
+	bool game_info_board(const HudFrameState &state, float w, float h);
 	void element_clock(const HudFrameState &state, float w, float h);
 	void element_team_id_line(const HudFrameState &state, float w, float h);
 	void element_weapon_slot_bar(const HudFrameState &state, float w, float h);
@@ -1709,11 +1797,15 @@ private:
 	void element_voice_macro_menu(const HudFrameState &state, const HudVoiceMacroMenuState &menu,
 			int context_row, float w, float h);
 	void element_paused_text(const HudFrameState &state, float w, float h);
+	// DFX2-91's lone-gunner panel (hud_frame_overlay_windows.cpp).
+	void element_lone_gunner_panel(const HudFrameState &state, float w, float h);
 	// The tip panel (hud_frame_tip.cpp); `alternate` picks MRCLIPPYALTERNATE.
 	void element_tip(const HudFrameState &state, bool alternate, float w, float h);
 	// HUD_DrawOverlayPanels' legs, over HUD_DrawGameplayOverlays' (hud_frame.cpp).
 	void compile_overlay_panels(const HudFrameState &state, float w, float h);
-	void element_briefing(const HudFrameState &state, float w, float h);
+	// One briefing box: the I window's out of a session, or the briefing panel's own window.
+	void element_briefing(const HudBriefingState &briefing, float w, float h);
+	void element_end_game_screen(const HudFrameState &state, float w, float h);
 	void element_help_screen(const HudFrameState &state, float w, float h);
 	void element_map_legend(const HudFrameState &state, float w, float h);
 	// HUD_DrawLabelBox over design corners: the stdbox, and a non-empty title
@@ -1736,7 +1828,9 @@ private:
 	// y 608, the status page 480.
 	void element_chat_input(const HudFrameState &state, float w, float h, float y = 608.0f);
 	void element_quit_dialog(const HudFrameState &state, float w, float h);
-	void element_server_console_lines(const ServerStatusPageState &page, float w, float h);
+	// `title`: the session's (HudFrameState::title), its CHAT lines' tags (DFX2-88).
+	void element_server_console_lines(const ServerStatusPageState &page, const Title *title,
+			float w, float h);
 	void element_player_score_list(const ServerStatusPageState &page, float w, float h);
 	void element_end_round_overlay(const HudFrameState &state, float w, float h);
 	void element_kill_announcement(const HudFrameState &state, float w, float h);
@@ -1755,11 +1849,12 @@ private:
 	// drawer's types 8/9 [orig: Render_CapturePointLabels @0x5a2840 ->
 	// HUD_DrawEntityMarker @0x593140, HUD_DrawProgressBar @0x59B340].
 	void element_capture_point_labels(const HudFrameState &state, float w, float h);
-	// HUD_DrawTexturedQuadCentered over an alpha-mode-0 shader: design centre
-	// and extent, two textured triangles (hud_optical_cues.cpp carries the
-	// witness) [orig: HUD_DrawTexturedQuadCentered @0x5909E0].
+	// HUD_DrawTexturedQuadCentered: design centre and extent, two textured
+	// triangles, clip_to_screen its last argument (hud_centered_rect);
+	// hud_optical_cues.cpp carries the witness [orig: HUD_DrawTexturedQuadCentered
+	// @0x5909E0].
 	void emit_textured_quad_centered(int32_t cx, int32_t cy, int32_t qw, int32_t qh,
-			int32_t texture, uint32_t diffuse, float w, float h);
+			int32_t texture, uint32_t diffuse, float w, float h, bool clip_to_screen);
 	// The connection indicators (hud_frame_net_quality.cpp): the HUD's call,
 	// last in the frame and only at hud_detail level 0 [orig:
 	// Render_ProcessMainSceneFrame @0x5cae4d..0x5cae5d]; the drawer is public
@@ -1823,6 +1918,11 @@ private:
 	MapWindowDraw death_map_draw_;
 	MapWindowDraw command_map_draw_;
 	StanceFade stance_;
+	// The EXPPOINTS fade (DFX2-36) and the 0x81 fanfare arms it has seen: the HUD's first pass
+	// adopts the count, an arm folded before this HUD existed being an earlier mission's.
+	HudExpPointsFade exp_fade_;
+	uint32_t exp_fade_arms_seen_ = 0;
+	bool exp_fade_primed_ = false;
 	// The clip-indicator flash latch: the (bucket, reserve, class byte) key
 	// and the stamp, BSS-zero like retail's [orig: g_HUDAmmoKeyBucket / g_HUDAmmoKeyReserve
 	// / g_HUDAmmoKeyClass, stamp g_HUDAmmoFadeStamp; HUD_DrawAmmoIndicator @0x599A96..0x599ACA].
@@ -1922,8 +2022,12 @@ int chat_wrap_text(const GameFont &font, float scale, std::string &text,
 // advance @0x580d59..0x580d64. Returns 0 at the text's end @0x580e44 /
 // @0x580e84, else the index of the first line that does not fit above
 // `y_limit` (unless y_start == y_limit) @0x580e4a..0x580e60 / @0x580e9c.
+// The run's measure is the font's own with no state, so a tab advances to the
+// font's tab width (this+0x168, `tab_width` here; 0 measures it as the SPACE
+// glyph) [orig: CGameFont_GetTextExtent(.., 0) @0x580d0e; CGameFont_MeasureText
+// @0x674e70 - the tab arm reads this+0x168 @0x674ff8].
 int wrapped_text_layout(const GameFont &font, float scale_x, float scale_y,
 		const std::string &text, int x_start, int y_start, int x_end, int y_limit,
-		int skip_lines, std::vector<HudWrappedLine> &out);
+		int skip_lines, std::vector<HudWrappedLine> &out, int tab_width = 0);
 
 } // namespace opennova::hud

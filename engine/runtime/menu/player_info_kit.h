@@ -68,6 +68,10 @@ inline constexpr int32_t kMedicPlayerClass = 5;
 // row i is catalog row i + 1 [orig: WeaponDef_LoadAll @0x54dd3b (count 1),
 // @0x54dd45 strcpy(g_WeaponDefTable, "None")].
 inline constexpr const char *kCatalogNoneName = "None";
+// The weapon table's entry 0, the name AnimDef_InitAll gives the first free entry before any
+// definition loads: the catalog's "None" row as the AdmDef lookups read it
+// [orig: AnimDef_InitAll @0x540830 - @0x540885 (dfx2.exe)].
+inline constexpr const char *kAdmDefNullName = "null";
 // The catalog row of a weapon.def row (0-based, the parse's order); a negative
 // row, NONE, is catalog row 0.
 inline constexpr int32_t catalog_index_of_row(int32_t row) { return row < 0 ? 0 : row + 1; }
@@ -81,6 +85,8 @@ struct KitSlotPick {
 	int32_t ammo_primary = kKitFiller;
 	int32_t ammo_secondary = kKitFiller;
 	int32_t flags = kKitFiller;
+	// False for a category the screen holds no list of: the page writes no entry for it.
+	bool listed = true;
 };
 
 struct PlayerInfoKitSelection {
@@ -101,7 +107,10 @@ using WeaponNameLookup = std::function<std::string(int32_t row)>;
 //  the blade off g_PlayerInfoTeamMask: the BLUE mask 2, and the defensive
 //  mask-zero leg, take WPN_KNIFE, the RED mask 1 WPN_KNIFE2), the class-5
 //  medpack block (@0x55e624), the PRIMARY/SECONDARY/ACCESSORY selections
-//  (@0x55e6bb), then the fixed g_PlayerInfoGrenadeSlots[0..2] walk (@0x55e7e0,
+//  (@0x55e6bb; a category whose list the screen lacks writes no entry, the find's
+//  test @0x55e6d0..0x55e6d7, as dfx2.exe's twin @0x55c780 does @0x55c9a0..0x55c9a7, whose
+//  player.mnu lists none of the three), then the fixed g_PlayerInfoGrenadeSlots[0..2]
+//  walk (@0x55e7e0,
 //  bounded by g_PlayerInfoAmmoPriCounts @ 0x25DC560); each entry's name is
 //  g_WeaponDefTable + 192 * its catalog row (@0x55e6f0, @0x55e7ee), so NONE
 //  and an empty grenade slot, zeroed before the ammo fill (@ 0x55e8d0-0x55e8da

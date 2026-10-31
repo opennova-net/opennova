@@ -5,8 +5,10 @@
 #include "mnu/menu_draw_list_stats.h"
 #include "util/string_convert.h"
 
+#include <base/title/title.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_state_frame.h>
+#include <runtime/menu/menu_texture_header.h>
 #include <runtime/menu/options_policy.h>
 #include <runtime/renderer/texture_load_rules.h>
 
@@ -243,6 +245,18 @@ bool MenuFrameTextures::decode(const std::string &p_key, opennova::menu::MenuTex
 	if (image->has_mipmaps()) {
 		image->clear_mipmaps();
 	}
+	// Read back at the sides the game keeps (engine menu_image_readback_size): a DDS's own, out
+	// of the larger texture D3DX made of it.
+	int readback_w = 0;
+	int readback_h = 0;
+	if (opennova::menu::menu_image_readback_size(p_format, p_bytes, &readback_w, &readback_h) &&
+			readback_w <= image->get_width() && readback_h <= image->get_height() &&
+			(readback_w != image->get_width() || readback_h != image->get_height())) {
+		image = image->get_region(Rect2i(0, 0, readback_w, readback_h));
+		if (image.is_null() || image->is_empty()) {
+			return false;
+		}
+	}
 	Entry entry;
 	entry.image = image;
 	entry.texture = ImageTexture::create_from_image(image);
@@ -333,7 +347,8 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 		}
 	}
 	return configure_screen(&doc, screen, root_files_, vars,
-			override_text_.is_valid() ? &override_text_->get_native() : nullptr);
+			override_text_.is_valid() ? &override_text_->get_native() : nullptr,
+			ResourceRoot::session_title(p_root).menu_font_scale);
 }
 
 // What the screen reads, through the engine's loader (the witnesses live at the engine
@@ -344,7 +359,7 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 bool MenuFrame::configure_screen(const opennova::mnu::Document *p_document,
 		const opennova::mnu::Screen *p_screen, const opennova::FileSource &p_files,
 		const std::map<std::string, std::string> &p_vars,
-		const opennova::rtxt::File *p_override_text) {
+		const opennova::rtxt::File *p_override_text, float p_font_scale) {
 	files_ = &p_files;
 	configured_ = false;
 	state_ = opennova::menu::MenuFrameState{};
@@ -355,6 +370,7 @@ bool MenuFrame::configure_screen(const opennova::mnu::Document *p_document,
 		clear_screen();
 		return false;
 	}
+	compiler_.set_font_scale(p_font_scale);
 	assets_.configure(compiler_, p_document, p_screen, p_files, texture_store_, p_vars,
 			p_override_text);
 	adopt_slots_();
@@ -571,6 +587,8 @@ void MenuFrame::set_widget_shown_override(int p_index, bool p_shown) {
 
 void MenuFrame::set_native_state(const opennova::menu::MenuFrameState &p_state) {
 	state_ = p_state;
+	for (const opennova::menu::MenuWidgetState &row : state_.widgets)
+		if (row.has_image) load_runtime_image_(row.image);
 	queue_redraw();
 }
 
@@ -601,6 +619,18 @@ void MenuFrame::set_widget_text(int p_index, const String &p_text, int p_hotkey_
 void MenuFrame::set_widget_text_bytes(int p_index, const std::string &p_text, int p_hotkey_pos) {
 	opennova::menu::frame_set_text(state_, p_index, p_text, p_hotkey_pos);
 	queue_redraw();
+}
+
+void MenuFrame::set_widget_image(int p_index, uint32_t p_states, const std::string &p_file) {
+	opennova::menu::frame_set_image(state_, p_index, p_states, p_file);
+	load_runtime_image_(p_file);
+	queue_redraw();
+}
+
+void MenuFrame::load_runtime_image_(const std::string &p_file) {
+	if (files_ != nullptr && compiler_.add_runtime_texture(p_file) >= 0 &&
+			assets_.load_added_textures(compiler_, *files_, texture_store_) > 0)
+		adopt_slots_();
 }
 
 void MenuFrame::set_widget_rect(int p_index, const Rect2i &p_rect) {
@@ -693,6 +723,11 @@ void MenuFrame::set_widget_table_cells(int p_index, const Array &p_rows) {
 void MenuFrame::set_table_cell_painter(int p_index,
 		opennova::menu::MenuTableCellPainter p_painter) {
 	compiler_.set_table_cell_painter(p_index, std::move(p_painter));
+	queue_redraw();
+}
+
+void MenuFrame::set_hud_label_face(bool p_on) {
+	hud_label_face_ = p_on;
 	queue_redraw();
 }
 
@@ -1117,6 +1152,10 @@ void MenuFrame::_draw() {
 		return;
 	}
 	const auto draw_start = std::chrono::steady_clock::now();
+	if (hud_label_face_ && files_ != nullptr && root_files_.root().is_valid()) {
+		assets_.set_hud_label_face(compiler_, ResourceRoot::session_title(root_files_.root()),
+				static_cast<int>(get_size().x), *files_);
+	}
 	const Vector2 scale = design_scale_();
 	const opennova::menu::MenuDrawList &list =
 			compiler_.compile(state_, scale.x, scale.y);

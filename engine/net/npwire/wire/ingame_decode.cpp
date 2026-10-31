@@ -1210,10 +1210,13 @@ bool decode_spawn_wave_status(const uint8_t *body, size_t len, SpawnWaveStatus &
 
 bool decode_score_delta_sound(const uint8_t *body, size_t len,
 		ScoreDeltaSound &out) {
+	// The first four bytes, a short body 0 [orig: NapiNPClientMsg_ScoreDeltaSound @0x42A0B0 -
+	//  @0x42A0BA..0x42A0CD; the declaration carries the witness].
 	out = ScoreDeltaSound{};
-	Cursor c{body, body + len, true};
+	if (body == nullptr || len < 4) return true;
+	Cursor c{body, body + 4, true};
 	out.score = c.i32();
-	return c.ok && c.p == c.end;
+	return true;
 }
 
 // S2C 0x7B full player info. [orig: NapiNPClientMsg_HandlePlayerInfoFull @ 0x429BB0]

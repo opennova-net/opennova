@@ -264,6 +264,43 @@ func test_selected_primary_mounts_and_clears_its_weapon_icon() -> void:
 	DirAccess.remove_absolute(temp_dir)
 
 
+# The DEATH screen's icon mounts ride that screen's frame, which its presenter frees at each
+# mission's teardown while the companion lives on: a mount freed under the companion is mounted
+# afresh by the next refresh, its texture the selected weapon's.
+func test_screen_icon_remounts_after_its_mount_is_freed() -> void:
+	var temp_dir := OS.get_temp_dir().path_join(
+			"opennova_armory_screen_icon_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(temp_dir), OK)
+	_write_solid_tga(temp_dir.path_join("M_4.tga"))
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(temp_dir), OK)
+
+	var companion := ArmoryMenuCompanion.new()
+	companion.set_weapon_database(_load_weapons())
+	companion.set_player_class(8)
+	companion.set_stage_sources(_page_profiles([{"name": "WPN_M4AUTO"}]), [])
+	var driver := _make_weapon_driver(true)
+	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", root)
+	companion.refresh_screen(driver, root)
+	var frame := driver.get_frame()
+	var icon := frame.find_child("PRIMARYDeathIcon", true, false) as TextureRect
+	assert_not_null(icon, "the screen's refresh mounts a texture over PRIMARY_ICON")
+	if icon != null:
+		icon.free()
+	companion.refresh_screen(driver, root)
+	var again := frame.find_child("PRIMARYDeathIcon", true, false) as TextureRect
+	assert_not_null(again, "the refresh past the freed mount mounts a fresh one")
+	if again != null:
+		assert_not_null(again.texture, "the fresh mount shows the selected M4's icon")
+	# The release frees and forgets the mounts; the next refresh mounts fresh ones again.
+	companion.release_screen_icon_mounts()
+	if again != null:
+		assert_true(again.is_queued_for_deletion(), "the release frees the screen's mounts")
+
+	DirAccess.remove_absolute(temp_dir.path_join("M_4.tga"))
+	DirAccess.remove_absolute(temp_dir)
+
+
 func test_class_change_refilters_slots() -> void:
 	var companion := ArmoryMenuCompanion.new()
 	companion.set_weapon_database(_load_weapons())

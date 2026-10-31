@@ -1,6 +1,8 @@
 #include "vehicle_motor_detail.h"
 #include "world.h"
 
+#include <runtime/terrain_query/surface_type_map.h>
+
 namespace opennova::world::detail {
 namespace {
 void clear_lane(Entity &e, const VehicleTraits &traits, uint8_t lane) {
@@ -30,7 +32,22 @@ void vehicle_update_trail_lane(
 	if (definition.effect.empty() || definition.mask == 0)
 		return;
 	const uint16_t previous = lane <= 2 ? e.veh.trails.effect_state[lane - 1] : 0;
-	if (intensity == 0 || (!definition.secondary_effect.empty() && previous != 0 && previous != 1))
+	const bool has_alternate = !definition.secondary_effect.empty();
+	// The state the lane runs in: 1, or under a title whose trails follow the ground (DFX2-46) the
+	// surface type under the vehicle, its points spawning with the alternate effect on snow (3).
+	// Lanes 3 and 4 have no alternate (their def lines take no third token).
+	// [orig: Entity_UpdateBoneTrailEffects @0x4589C0 - 1 @0x458A2D / @0x458A5A]
+	// [orig: @0x458A86..0x458AB3 in its twin @0x4589A0 (dfx2.exe)]
+	uint16_t state = 1;
+	bool alternate = false;
+	if (has_alternate && intensity != 0 && world.rules.title().trail_surface_alternate) {
+		state = static_cast<uint16_t>(terrain::surface_type_at_fixed(
+				world.tables.surface_map, e.position.x.q16, e.position.y.q16));
+		alternate = state == 3;
+	}
+	// A lane with an alternate restarts its points when its state changes.
+	// [orig: @0x458ACE] [orig: @0x458AD2 (dfx2.exe)]
+	if (intensity == 0 || (has_alternate && previous != 0 && previous != state))
 		clear_lane(e, traits, lane);
 	if (intensity == 0 || !world.out.fire_sounds.listener_valid())
 		return;
@@ -51,15 +68,18 @@ void vehicle_update_trail_lane(
 		frame.rotate_point(traits.trail_points[i].direction, dir);
 		if ((e.flags & 0x8000u) != 0)
 			pos[2] = world.env.water_z;
-		if (point.definition == 0)
+		if (point.definition == 0) {
 			point.definition = lane;
+			point.alternate = alternate;
+		}
 		point.position = vector_from_fixed(pos);
 		point.direction = vector_from_fixed(dir);
 		point.magnitude_q16 = magnitude;
 		point.source_tick = world.logic_tick;
 	}
+	// [orig: @0x458DA8 / @0x458DC2] [orig: @0x458DB9 / @0x458DD2 (dfx2.exe)]
 	if (lane <= 2)
-		e.veh.trails.effect_state[lane - 1] = 1;
+		e.veh.trails.effect_state[lane - 1] = state;
 }
 
 // The contact solve releases the outgoing medium's masks at the crossing.

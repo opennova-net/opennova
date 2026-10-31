@@ -1732,7 +1732,7 @@ static int test_menu_clock() {
 	// The device's frame at two clocks: its caret drawn in the blink's shown half alone, with no
 	// configure between (one compile of the screen, its state's clock set).
 	MenuScreenRender render;
-	TEST_EXPECT(render.configure(*menu, shown->screen_row(), *view.findings.assets, shown->style_vars()) ==
+	TEST_EXPECT(render.configure(*menu, shown->screen_row(), *view.findings.assets, shown->style_vars(), 1.0f) ==
 			MenuScreenStatus::Ready);
 	opennova::menu::MenuFrameState state = render.state();
 	apply_menu_options(shown->options(), shown->forced_index(), render.compiler(), state);
@@ -1885,7 +1885,7 @@ static int test_packed_animated_menu() {
 		for (const auto &row : document.rows()) {
 			++screens;
 			MenuScreenRender render;
-			if (render.configure(document, row->id, files, vars) != MenuScreenStatus::Ready) continue;
+			if (render.configure(document, row->id, files, vars, 1.0f) != MenuScreenStatus::Ready) continue;
 			const opennova::menu::MenuFrameCompiler &compiler = render.compiler();
 			for (int index = 0; index < compiler.widget_count(); ++index) {
 				const int type = compiler.widget_kind(index);

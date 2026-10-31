@@ -9,6 +9,8 @@
 // Witness record: docs/interface/hud-re.md. The NVG image under the mask is
 // the terminal FrameFX pass's (runtime/renderer/frame_fx_effects.h).
 
+#include <base/title/title.h>
+
 namespace opennova::hud {
 
 // The binocular crosshair overlay rect (BinoCH.tga stretched into it), drawn
@@ -34,14 +36,22 @@ inline constexpr int kViewDigitCell = 16;
 // The NVG gain scale indicator rect (Nvgscale.tga row = gain * cell), drawn
 // at half brightness (kNvgScaleModulate/255 per channel) after the NVG.tga
 // mask over the whole overlay rect; the composite draws both except under the
-// death screen.
+// death screen. The rect is the title's (Title::nvg_gain_rect, DFX2-44):
+// Jointops.exe's 48 x 32 at (960, 32), dfx2.exe's 64 x 20 at (480, 682).
 // [orig: NVG_DrawMaskAndGain @0x5cffab..0x5cfff1 (the mask), @0x5d0005..0x5d001d (the
 //  rect), @0x5d003e (the gain row), @0x5d004a (modulate 0xFF7F7F7F);
-//  NVG_Composite @0x5d107e..0x5d1080]
-inline constexpr int kNvgScaleX = 960;
-inline constexpr int kNvgScaleY = 32;
-inline constexpr int kNvgScaleW = 48;
-inline constexpr int kNvgScaleH = 32;
+//  NVG_Composite @0x5d107e..0x5d1080] [orig: the twin of NVG_DrawMaskAndGain
+//  @0x5ceee0 - the rect @0x5cef75..0x5cef8d (dfx2.exe)]
+struct NvgScaleRect {
+	int x = 0;
+	int y = 0;
+	int w = 0;
+	int h = 0;
+};
+inline NvgScaleRect nvg_scale_rect(const Title &title) {
+	const TitleRect &r = title.nvg_gain_rect;
+	return { r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0 };
+}
 inline constexpr int kNvgScaleModulate = 127;
 
 // Retail's persistent rangefinder easing

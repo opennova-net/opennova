@@ -5,13 +5,16 @@
 // elements riding the draw list's top layer even at the blank level
 // [orig: HUD_DrawGameplayOverlays @0x5BDE60; HelpScreen_Draw @0x497800;
 // HUD_DrawHelpScreenIcons @0x497480].
+#include <base/title/title.h>
 #include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_elements.h>
 #include <runtime/hud/hud_frame.h>
+#include <runtime/hud/hud_math.h>
 #include <runtime/hud/hud_overlay_windows.h>
 
 #include "common/test_font.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -149,18 +152,56 @@ void test_windows_ride_the_top_layer(const fnt_font_t *font) {
 	// entry, the medic entry as the three cross rects.
 	state.map_legend.shown = true;
 	state.map_legend.title = "Map Legend";
-	state.map_legend.labels.assign(kHudMapLegendIconCount, "label");
-	{
+	// The table and its row step are the title's (DFX2-89): Jointops.exe's 26 entries 40 a row,
+	// the medic one the cross [orig: HUD_DrawHelpScreenIcons @0x497480 - @0x497524]; dfx2.exe's 20,
+	// no medic, 52 a row [orig: HUD_DrawHelpScreenIcons @0x497490 - @0x497534 (dfx2.exe)].
+	const opennova::Title *jo = opennova::title_by_code("jo");
+	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+	CHECK(jo != nullptr && jo->hud_map_legend != nullptr && jo->hud_map_legend->count == 26 &&
+			jo->hud_map_legend->row_step == 40);
+	CHECK(dfx2 != nullptr && dfx2->hud_map_legend != nullptr && dfx2->hud_map_legend->count == 20 &&
+			dfx2->hud_map_legend->row_step == 52);
+	// The label rows' y: the even entries' (left column) labels, top to bottom.
+	const auto legend_rows = [&](const opennova::Title *title, size_t *icon_tris, size_t *red) {
+		state.title = title;
+		state.map_legend.labels.assign(
+				title != nullptr && title->hud_map_legend ? title->hud_map_legend->count : 0, "L");
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
-		size_t icon_tris = 0;
+		*icon_tris = 0;
 		for (size_t i = list.top_begin.tris; i < list.tris.size(); ++i)
-			if (list.tris[i].texture == kHudTexMapIcons) ++icon_tris;
-		CHECK(icon_tris == static_cast<size_t>(2 * (kHudMapLegendIconCount - 1)));
-		size_t red = 0;
+			if (list.tris[i].texture == kHudTexMapIcons) ++*icon_tris;
+		*red = 0;
 		for (size_t i = list.top_begin.quads; i < list.quads.size(); ++i)
-			if (list.quads[i].color == 0xFFFF0000u) ++red;
+			if (list.quads[i].color == 0xFFFF0000u) ++*red;
+		std::vector<float> ys;
+		for (size_t i = list.top_begin.glyphs; i < list.glyphs.size(); ++i) {
+			const float y = list.glyphs[i].y_top;
+			if (list.glyphs[i].x_top_left < 300.0f && y > 120.0f &&
+					(ys.empty() || ys.back() != y))
+				ys.push_back(y);
+		}
+		return ys;
+	};
+	{
+		size_t icon_tris = 0, red = 0;
+		const std::vector<float> ys = legend_rows(jo, &icon_tris, &red);
+		CHECK(icon_tris == static_cast<size_t>(2 * (26 - 1)));
 		CHECK(red == 2); // the cross's two bars
+		CHECK(ys.size() == 13 && ys[1] - ys[0] == 40.0f);
 	}
+	{
+		size_t icon_tris = 0, red = 0;
+		const std::vector<float> ys = legend_rows(dfx2, &icon_tris, &red);
+		CHECK(icon_tris == static_cast<size_t>(2 * 20));
+		CHECK(red == 0); // no medic entry
+		CHECK(ys.size() == 10 && ys[1] - ys[0] == 52.0f);
+	}
+	{
+		// A title with no legend draws the box alone.
+		size_t icon_tris = 0, red = 0;
+		CHECK(legend_rows(nullptr, &icon_tris, &red).empty() && icon_tris == 0);
+	}
+	state.title = nullptr;
 	state.map_legend.shown = false;
 	state.help_screen.shown = false;
 	// The briefing: a text taller than the panel overflows into page 1.
@@ -202,6 +243,182 @@ void test_briefing_markup_draws_plain(const fnt_font_t *font) {
 	CHECK(list.underlines.size() == list.top_begin.underlines);
 	for (size_t i = list.top_begin.glyphs; i < list.glyphs.size(); ++i)
 		CHECK(list.glyphs[i].color == 0xFF7F7F7Fu);
+}
+
+// The I window in a session, the end-game screen: it stands in for the briefing panel at the
+// window's slot; its box alone while the status record is not valid; its page wrapped in the
+// bold slot with the 240 tab stop, its tags inert unless the residue reads 0, an overflow
+// written as the next page's start; Jointops.exe's footer centred at (512, 700) / (512, 720),
+// dfx2.exe's in the text box's bottom corners, each corner scaled twice (DFX2-95)
+// [orig: HUD_DrawGameplayOverlays @0x5be135..0x5be145; HUD_DrawEndGameScreen @0x5bd070 -
+//  the gate @0x5bd10f, the tab width @0x5bd12d..0x5bd14a, the wrap @0x5bdd36 and its store
+//  @0x5bdd4b, the footer @0x5bdd7d..0x5bde31] [orig: HUD_DrawEndGameScreen @0x5BCC3D..0x5BCCF0
+//   (dfx2.exe)].
+void test_end_game_screen(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	configure(compiler, font);
+	HudFrameState state;
+	state.end_game.shown = true;
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(box_quads_from(list, list.top_begin.quads) > 0);
+		CHECK(list.glyphs.size() == list.top_begin.glyphs); // the box alone, no page
+	}
+	state.end_game.valid = true;
+	// A tab steps to the next 240 from the text's left edge, 212.
+	state.end_game.text = "A\tB";
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(list.glyphs.size() - list.top_begin.glyphs == 2);
+		if (list.glyphs.size() - list.top_begin.glyphs == 2) {
+			CHECK(std::fabs(list.glyphs[list.top_begin.glyphs].x_top_left - 211.5f) < 1.0f);
+			CHECK(std::fabs(list.glyphs[list.top_begin.glyphs + 1].x_top_left - 451.5f) < 1.0f);
+		}
+	}
+	// Inert tags draw plain; a live residue draws <b> bold, a second strike per glyph.
+	state.end_game.text = "<b>A<-b>";
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.size() -
+					compiler.last_draw_list().top_begin.glyphs == 1);
+	state.end_game.tags_live = true;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.size() -
+					compiler.last_draw_list().top_begin.glyphs == 2);
+	state.end_game.tags_live = false;
+	// An overflow is written as the next page's start.
+	std::string tall;
+	for (int i = 0; i < 400; ++i) tall += "line\r\n";
+	state.end_game.text = tall;
+	state.end_game.page = 1;
+	compiler.briefing_pages().reset();
+	compiler.compile(state, 1024.0f, 768.0f);
+	CHECK(compiler.briefing_pages().starts[2] > 0);
+	CHECK(compiler.briefing_pages().starts[1] == 0);
+	// Jointops.exe's footer: both lines centred at x 512, at y 700 and 720.
+	state.end_game.text.clear();
+	state.end_game.page_line = "P";
+	state.end_game.footer = "F";
+	float jo_y = 0.0f;
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(list.glyphs.size() - list.top_begin.glyphs == 2);
+		if (list.glyphs.size() - list.top_begin.glyphs == 2) {
+			const GameFontQuad &page = list.glyphs[list.top_begin.glyphs];
+			const GameFontQuad &hint = list.glyphs[list.top_begin.glyphs + 1];
+			CHECK(std::fabs((page.x_top_left + page.x_top_right) * 0.5f - 512.0f) < 1.5f);
+			CHECK(std::fabs((hint.x_top_left + hint.x_top_right) * 0.5f - 512.0f) < 1.5f);
+			CHECK(std::fabs(hint.y_top - page.y_top - 20.0f) < 0.01f);
+			jo_y = page.y_top;
+		}
+	}
+	// dfx2.exe's: the page line right-aligned at the box's right edge, the hint left-aligned at
+	// its left, both 56 above Jointops.exe's page line, at the bottom 644.
+	opennova::Title dfx2;
+	dfx2.hud_end_game_footer_corners = true;
+	state.title = &dfx2;
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(list.glyphs.size() - list.top_begin.glyphs == 2);
+		if (list.glyphs.size() - list.top_begin.glyphs == 2) {
+			const GameFontQuad &page = list.glyphs[list.top_begin.glyphs];
+			const GameFontQuad &hint = list.glyphs[list.top_begin.glyphs + 1];
+			CHECK(std::fabs(page.x_top_right - 812.0f) < 1.5f);
+			CHECK(std::fabs(hint.x_top_left - 211.5f) < 1.0f);
+			CHECK(std::fabs(page.y_top - hint.y_top) < 0.01f);
+			CHECK(std::fabs(page.y_top - (jo_y - 56.0f)) < 0.01f);
+		}
+	}
+	// Off 1024 wide the corners already scaled are scaled again.
+	{
+		const HudDrawList &list = compiler.compile(state, 800.0f, 600.0f);
+		CHECK(list.glyphs.size() - list.top_begin.glyphs == 2);
+		if (list.glyphs.size() - list.top_begin.glyphs == 2) {
+			const float twice =
+					static_cast<float>(design_to_screen_x(design_to_screen_x(812, 800), 800));
+			const float left =
+					static_cast<float>(design_to_screen_x(design_to_screen_x(212, 800), 800));
+			CHECK(std::fabs(list.glyphs[list.top_begin.glyphs].x_top_right - twice) < 1.5f);
+			const GameFontQuad &hint = list.glyphs[list.top_begin.glyphs + 1];
+			CHECK(std::fabs(hint.x_top_left - (left - 0.5f)) < 1.0f);
+		}
+	}
+}
+
+// The briefing words' windows, each at its own slot (DFX2-96): the I window (in a session the
+// end-game screen, out of one the briefing panel, dfx2.exe's the single-player how-to), the win
+// conditions, then the briefing panel's own window in a session or out of one, then the help
+// screen. Jointops.exe never sets the panel's word, so its walk is the I window, the win
+// conditions and the help screen; dfx2.exe's Objectives window draws the panel over the win
+// conditions, and in a session beside the end-game screen.
+// [orig: HUD_DrawGameplayOverlays @0x5BE12C..0x5BE145, HUD_DrawWinConditions @0x5BE163,
+//  @0x5BE16B..0x5BE174, HelpScreen_Draw @0x5BE179]
+// [orig: HUD_DrawGameplayOverlays @0x5BCF6D..0x5BCF86, sub_5B9890 @0x5BCFA4, @0x5BCFAC..0x5BCFB5,
+//  HelpScreen_Draw @0x5BCFBA (dfx2.exe)]
+void test_briefing_windows_order(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	configure(compiler, font);
+	HudFrameState state;
+	state.objectives.push_back({"AB", false});
+	state.help_screen.shown = true;
+	state.help_screen.title = "Help - Movement";
+	state.help_screen.keys.assign(1, "W");
+	state.help_screen.texts.assign(1, "Forward");
+	const auto order = [](const HudDrawList &list, HudElement element) {
+		for (size_t i = 0; i < list.element_spans.size(); ++i)
+			if (list.element_spans[i].element == element) return static_cast<int>(i);
+		return -1;
+	};
+	const auto glyphs_of = [](const HudDrawList &list, HudElement element) {
+		for (const HudElementSpan &span : list.element_spans)
+			if (span.element == element) return span.end.glyphs - span.begin.glyphs;
+		return size_t{0};
+	};
+	// Jointops.exe out of a session: the I window's briefing panel, the win conditions, the help.
+	state.briefing.shown = true;
+	state.briefing.text = "brief";
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		const int window = order(list, HudElement::Briefing);
+		const int objectives = order(list, HudElement::Objectives);
+		CHECK(window >= 0 && window < objectives &&
+				objectives < order(list, HudElement::HelpScreen));
+		CHECK(order(list, HudElement::BriefingPanel) < 0);
+		CHECK(glyphs_of(list, HudElement::Briefing) == 5);
+	}
+	// dfx2.exe out of a session with I and O open: the how-to, the win conditions, then the
+	// briefing panel over them, then the help.
+	state.briefing.how_to = true;
+	state.briefing.text = "how";
+	state.briefing_panel.shown = true;
+	state.briefing_panel.text = "brief";
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		const int window = order(list, HudElement::Briefing);
+		const int objectives = order(list, HudElement::Objectives);
+		const int panel = order(list, HudElement::BriefingPanel);
+		CHECK(window >= 0 && window < objectives && objectives < panel &&
+				panel < order(list, HudElement::HelpScreen));
+		CHECK(glyphs_of(list, HudElement::Briefing) == 3);
+		CHECK(glyphs_of(list, HudElement::BriefingPanel) == 5);
+	}
+	// In a session the I window draws the end-game screen and the panel still draws, at its slot.
+	state.briefing = HudBriefingState();
+	state.end_game.shown = true;
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		const int window = order(list, HudElement::Briefing);
+		const int objectives = order(list, HudElement::Objectives);
+		const int panel = order(list, HudElement::BriefingPanel);
+		CHECK(window >= 0 && window < objectives && objectives < panel &&
+				panel < order(list, HudElement::HelpScreen));
+		CHECK(glyphs_of(list, HudElement::Briefing) == 0); // the box alone (no valid status)
+		CHECK(glyphs_of(list, HudElement::BriefingPanel) == 5);
+	}
+	// The panel's word alone: nothing at the I window's slot.
+	state.end_game.shown = false;
+	{
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		CHECK(order(list, HudElement::Briefing) < 0);
+		CHECK(order(list, HudElement::Objectives) < order(list, HudElement::BriefingPanel));
+	}
 }
 
 // The view veil's place in the lists (D-NET-1384): the main HUD (the gameplay overlay pass, its
@@ -318,6 +535,8 @@ int main() {
 	test_briefing_pages();
 	test_windows_ride_the_top_layer(&font);
 	test_briefing_markup_draws_plain(&font);
+	test_end_game_screen(&font);
+	test_briefing_windows_order(&font);
 	test_view_veil_layer(&font);
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

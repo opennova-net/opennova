@@ -7,9 +7,11 @@
 #include <godot_cpp/core/object.hpp>
 #include "simulation/environment_snapshot.h" // the F3 Environment record as a typed read
 #include "simulation/hud_view_records.h" // RoundOutcome
+#include "simulation/load_warning_box.h"
 #include "simulation/present_event_records.h" // SoundEmitterRow (the bound emitter drain)
 
 #include "env/weather.h"
+#include "mission/mission_catalog.h" // the process mission table (the end screens' entry)
 #include "network/novaworld_identity.h" // primary_desktop_size (the HUD fonts' display width)
 #include "resource_index/resource_root.h" // session_title (a listen host's caps)
 #include "util/string_convert.h"
@@ -21,6 +23,7 @@
 
 #include <runtime/inmatch/host_settings.h> // host_player_slot_limit (the BMS admission limit)
 #include <runtime/inmatch/slot_staging.h> // stage_slot_position (the parity runner's slot staging)
+#include <runtime/mission/mission_catalog.h> // Row (the end screens' entry)
 #include <runtime/mission/mission_sidecars.h> // mission_base_name
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
 #include <runtime/terrain_query/terrain_field_build.h> // the ONE cpt/trn(+charmap) field builder (ADR 0042 d4)
@@ -57,7 +60,7 @@ void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
 	options.player_limit = host_listening
 			? static_cast<int32_t>(opennova::inmatch::host_player_slot_limit(
 					static_cast<int32_t>(net.host_max_players), net.host_serve_and_play,
-					host_title))
+					net.host_session_config.network_connect_type, host_title))
 			: static_cast<int32_t>(net.host_session_config.player_slot_limit());
 	options.team_count = net.host_session_config.num_teams;
 	if (!options.joiner || joined == nullptr) return;
@@ -70,7 +73,7 @@ void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
 // The bring-up's session create refused on the mpreset word
 // (inmatch::HostRole::session_create): the in-memory loads fail as the file
 // boot's phase A does (inmatch::HostBoot::session_create), and
-// session_create_ended_process() tells the embedder, which ends the process
+// load_ended_process() tells the embedder, which ends the process
 // with exit code 0 (the game shell's GameWorld.process_exit_requested).
 bool session_create_refused(const opennova::inmatch::HostRole *p_role, std::string &r_error) {
 	if (p_role == nullptr ||
@@ -80,11 +83,44 @@ bool session_create_refused(const opennova::inmatch::HostRole *p_role, std::stri
 	return true;
 }
 
+// The end screens' mission (engine world::EpilogMission carries the witnesses), stamped at each
+// boot: the title's screens; the menu's current entry, the process mission table's row for the
+// mission's file (none for an in-memory or unlisted mission), with its high score; and the
+// session status's mission name, the header's, cut to its field.
+void stamp_epilog_mission(opennova::world::EpilogCine &r_epilog, const opennova::Title &p_title,
+		const std::string &p_mission_file, const opennova::bms::File &p_mission) {
+	opennova::world::EpilogMission mission;
+	mission.debriefing_screens = p_title.epilog_debriefing_screens;
+	// The table lists a mission by its file name, without its folder.
+	const std::string file = p_mission_file.substr(p_mission_file.find_last_of("/\\") + 1);
+	if (const opennova::mission_catalog::Row *row =
+					file.empty() ? nullptr : godot::MissionCatalog::process_row(file)) {
+		mission.entry = true;
+		mission.file = row->file;
+		mission.title = row->title;
+		mission.win_debriefing = row->win_debriefing;
+		mission.lose_debriefing = row->lose_debriefing;
+		mission.high_score = godot::MissionCatalog::process_high_score(row->file);
+	}
+	mission.server_mission_name =
+			p_mission.get_mission_name().substr(0, opennova::world::kServerMissionNameChars);
+	r_epilog.mission = std::move(mission);
+}
+
 } // namespace
 
-bool Simulation::session_create_ended_process() const {
-	return host_role_ != nullptr &&
-			host_role_->session_create() == opennova::inmatch::CreateSessionResult::ProcessExit;
+bool Simulation::load_ended_process(int32_t &r_code) const {
+	if (host_role_ != nullptr &&
+			host_role_->session_create() == opennova::inmatch::CreateSessionResult::ProcessExit) {
+		r_code = 0;
+		return true;
+	}
+	// The engine's MissionKernel::load_warning_quit carries the exit code's witness.
+	if (kernel_ != nullptr && kernel_->load_warning_quit()) {
+		r_code = -1;
+		return true;
+	}
+	return false;
 }
 
 Simulation::Simulation() {
@@ -138,6 +174,9 @@ void Simulation::reset_world() {
 	// Game_StartMission], as the spawn buffer is process-scoped (the role binds the
 	// ClientProcessState's); every peer's mission start re-copies its side's page.
 	player_.weapon.seeded_side = -1;
+	// With no profile installed it is a fresh profile's, the mounted game's (engine
+	// inmatch::SessionWeaponProfile::use_fresh).
+	player_.weapon.use_fresh(session_title(net_, assets_.root));
 	// Round init clears the map mode and the zooms return to the spawn
 	// defaults (witness at hud::HudMapControl — Game_InitNewRound /
 	// Player_InitPlayer lifecycle).
@@ -413,6 +452,11 @@ void Simulation::apply_character_traits_to_world() {
 	kernel_->world.tables.character_traits.clear();
 	for (const CharacterSexRow &row : assets_.character_sex_rows)
 		kernel_->world.tables.character_traits.set(row.character_id, row.female);
+	// The session title's avatar pick, whose sex the profile sounds take (engine
+	// inmatch::install_viewer_side_pick, DFX2-53).
+	opennova::inmatch::install_viewer_side_pick(kernel_->world.tables.character_traits,
+			&session_title(net_, assets_.root),
+			assets_.character_registry_mounted ? &assets_.character_registry : nullptr);
 }
 
 void Simulation::set_water_z(double p_water_y) {
@@ -622,6 +666,8 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 	// profile word and intro cine and keeps the first start's UP-TIME stamp (D-PWR-8; the
 	// engine's KernelBootOptions::restart carries the witness).
 	options.restart = restart_boot_ && !options.mp_session;
+	// The load's warning box, over the game's window (engine KernelBootOptions::load_warning).
+	options.load_warning = load_warning_box;
 	// The shell owns the terrain field's parsed-document entry (the store the
 	// seam below builds, or none): the kernel never loads one from files here.
 	options.terrain = false;
@@ -656,6 +702,8 @@ int64_t Simulation::boot_mission(const Ref<MissionData> &p_mission,
 		fail_session_load(boot_error.c_str());
 		return ERR_CANT_OPEN;
 	}
+	stamp_epilog_mission(kernel_->world.epilog, session_title(net_, p_resource_root), mission_file,
+			kernel_->mission);
 	// What the boot read, retained for the binding's own reads and the next
 	// fresh kernel: the mission text (the HUD's people names), the .til, the
 	// water plane (apply_sound_state_to_world re-stamps it) and, on a host,
@@ -749,6 +797,8 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 		return false;
 	}
 	finish_kernel_boot();
+	stamp_epilog_mission(kernel_->world.epilog, session_title(net_, assets_.root), std::string(),
+			kernel_->mission);
 	if (pending_item_db.is_valid()) resolve_item_traits(pending_item_db);
 	complete_session_load();
 	return true;

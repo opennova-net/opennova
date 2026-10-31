@@ -712,7 +712,13 @@ bool update_item_destroy_fade(World &world, Entity &entity) {
     const std::array<int32_t, 6> phases_before = entity.destroy_phases_q16;
     const double progress_before = entity.destroy_progress;
     const size_t swaps_before = world.out.destruction.husk_swaps.size();
-    if ((entity.engine_flags & kEntityFlagHusk) == 0) {
+    // The draw's Flags & 4 is the one word the upfx row's tick reads too: a husk's bit, and a
+    // person's NVG bit (kEntityFlagNVGWorn, kept in `flags`), which takes the husked arm and,
+    // holding no final husk, keeps the phases its upfx row published, as retail's draw writes
+    // nothing for it. [orig: Render_SectorEntity @0x5C4190 - `test al, 4` @0x5C41F5 over
+    //  Flags +0x24 @0x5C4196; Entity_UpdateWaterPhysicsAndEffects @0x4A92E0 - Flags & 4
+    //  @0x4A92FD]
+    if (((entity.flags | entity.engine_flags) & kEntityFlagHusk) == 0) {
         // An entity back intact (an emplaced gun's revive; a vehicle respawn clears the
         // word itself) carries no fade and draws no pending final husk.
         entity.destroy_phases_q16.fill(0);

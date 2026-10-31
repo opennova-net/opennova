@@ -11,6 +11,7 @@
 #include <base/io/tick_rate.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/world/deploy_screen_feed.h>
 #include <runtime/world/world.h>
 
 using namespace godot;
@@ -115,10 +116,15 @@ opennova::hud::MapViewRect MapViewWindow::device_rect_(const Vector2 &p_surface)
 }
 
 void MapViewWindow::screen_load() {
+	// The session's title's view (opennova::hud::CommandMapView / DeathMapView::apply_title).
+	const opennova::Title *title = nullptr;
+	if (Simulation *sim = sim_()) title = sim->role_view().title;
 	if (view_kind_ == VIEW_COMMAND) {
+		if (title != nullptr) state_->command.apply_title(*title);
 		state_->command.on_load();
 		return;
 	}
+	if (title != nullptr) state_->death.apply_title(*title);
 	state_->death.on_load();
 }
 
@@ -163,10 +169,11 @@ void MapViewWindow::push_map_event(int p_event, const Vector2i &p_position, int 
 		queue_redraw();
 		return;
 	}
-	// The move leg's SPAWNPOINTS_TABLE deselect finds no such control on
-	// death.mnu (its list is SPAWNPOINTS_LIST), so the return is unused.
-	state_->death.on_event(static_cast<MapViewEvent>(p_event), p_position.x, p_position.y,
-			static_cast<uint32_t>(p_buttons), p_wheel);
+	// The move leg's SPAWNPOINTS_TABLE deselect is the menu's: the presenter takes the signal
+	// (opennova::world::deploy_map_moved).
+	if (state_->death.on_event(static_cast<MapViewEvent>(p_event), p_position.x, p_position.y,
+				static_cast<uint32_t>(p_buttons), p_wheel))
+		emit_signal("death_map_moved");
 	queue_redraw();
 }
 
@@ -270,6 +277,18 @@ void MapViewWindow::hover_test_(const Vector2i &p_design_point) {
 			opennova::hud::kCommandMapWaypointSlots, p_design_point.x, p_design_point.y, sx, sy,
 			close_width_);
 	for (size_t i = 0; i < anchors.size(); ++i) table.entries[i].hover = hover[i];
+}
+
+bool MapViewWindow::pan_to_spawn_zone(int p_index) {
+	Simulation *sim = sim_();
+	if (view_kind_ != VIEW_DEATH || sim == nullptr || !sim->kernel_) return false;
+	int32_t dx = 0, dy = 0;
+	if (!opennova::world::deploy_table_pan_target(sim->kernel_->world,
+				sim->deploy_zone_registry(), p_index, dx, dy))
+		return false;
+	state_->death.table_pan(dx, dy);
+	queue_redraw();
+	return true;
 }
 
 void MapViewWindow::advance_frame() {
@@ -432,6 +451,7 @@ void MapViewWindow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("push_map_event", "event", "position", "buttons", "wheel"),
 			&MapViewWindow::push_map_event);
 	ClassDB::bind_method(D_METHOD("advance_frame"), &MapViewWindow::advance_frame);
+	ClassDB::bind_method(D_METHOD("pan_to_spawn_zone", "index"), &MapViewWindow::pan_to_spawn_zone);
 	ClassDB::bind_method(D_METHOD("store_waypoint_click", "design_point"),
 			&MapViewWindow::store_waypoint_click);
 	ClassDB::bind_method(D_METHOD("confirm_waypoint", "name"), &MapViewWindow::confirm_waypoint);
@@ -449,6 +469,7 @@ void MapViewWindow::_bind_methods() {
 			&MapViewWindow::waypoint_dialog_rect);
 	ADD_SIGNAL(MethodInfo("waypoint_dialog_requested",
 			PropertyInfo(Variant::VECTOR2I, "design_point")));
+	ADD_SIGNAL(MethodInfo("death_map_moved"));
 	ClassDB::bind_method(D_METHOD("get_zoom"), &MapViewWindow::get_zoom);
 	ClassDB::bind_method(D_METHOD("get_pan"), &MapViewWindow::get_pan);
 	ClassDB::bind_method(D_METHOD("get_pan_target"), &MapViewWindow::get_pan_target);

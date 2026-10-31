@@ -1767,6 +1767,11 @@ void GameWorld::render_material_frame() {
 			occlusion_->apply_inset_frame(inset, inset_width, mission_forces_indoors(),
 					object_detail_,
 					scope != nullptr && terrain_ != nullptr ? &mirror_block : nullptr);
+			// The Inset's collects (its mirror's and its own) ran the draw's husk leg for the
+			// rows they admit; what they changed draws in this frame's Inset, as the main
+			// view's does (apply_occlusion_frame): each of retail's passes publishes, then
+			// draws, in one call (engine world::run_draw_husk_leg carries the witness).
+			occlusion_->apply_draw_husk_leg();
 			// The Inset's mirror (its water pass as the Inset's collect just
 			// latched it): its collect over the view block it reflects, the
 			// Inset's horizontal field.

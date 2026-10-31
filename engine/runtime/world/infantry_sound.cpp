@@ -47,6 +47,11 @@ void emit_stance_change_sound(World &world, uint16_t source, const int32_t pos[3
     world.out.slot_sounds.push_back(sound);
 }
 
+uint16_t player_blip_character(const World &world, uint16_t net_id, uint8_t team) {
+    const Entity *viewer = world.registry.get(world.cached.local_player);
+    return world.tables.character_traits.drawn_character(net_id, viewer != nullptr, team,
+            viewer != nullptr ? viewer->team : uint8_t{0});
+}
 
 void AiSystem::emit_slot_sound(World &world, const AiEntity &e, int slot, const int32_t pos[3]) {
     if (slot < 0 || slot >= audio::kSoundProfileSlotCount) return;
@@ -60,10 +65,12 @@ void AiSystem::emit_slot_sound(World &world, const AiEntity &e, int slot, const 
     const Entity *source = world.registry.get(e.handle);
     // Only player entities carry the packed avatar identity. NPC women author
     // their own primary item profile and must not be reinterpreted through a
-    // coincident minimap/net id. Unknown character ids keep the primary.
+    // coincident minimap/net id. Unknown character ids keep the primary. The sex is
+    // the one the player's avatar blip names, the title's viewer-side pick (DFX2-53).
     // [orig: Entity_GetProfileSlotSound @0x528300, female byte @0x52831c]
     if (source != nullptr && source->player_class != 0 &&
-        world.tables.character_traits.is_female(source->minimap_net_id))
+        world.tables.character_traits.is_female(
+                player_blip_character(world, source->minimap_net_id, source->team)))
         profile_index = e.profile.sound_profile_female;
     const audio::SoundProfile *p =
         (profile_index >= 0 && static_cast<size_t>(profile_index) < entries.size())

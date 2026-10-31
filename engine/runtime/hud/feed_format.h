@@ -86,6 +86,12 @@ bool feed_event_verbose_only(uint8_t event_type);
 //   * camp 59/60: blue or red by the team byte [orig: @0x4272D7/@0x4273DC]
 uint32_t feed_event_color(uint8_t event_type, bool own, uint8_t team);
 
+// The single-`%s` fill of retail's sprintf-composed lines, bounds-safe: the
+// first `%s` takes `arg`, everything else is copied through. Retail hands the
+// game-data template straight to sprintf; the templates carry exactly one
+// `%s`, so the visible result is identical.
+std::string sprintf_first_s(const std::string &tmpl, const std::string &arg);
+
 // Substitute the actor names into a "Canned Msg" template — the ported
 // Chat_FormatMessage [orig: @0x422C60]. When `extra` (the aux actor's name,
 // filled only when that actor is the local player) and `bonus_tmpl` (the

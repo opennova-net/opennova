@@ -11,6 +11,7 @@
 #include <runtime/hud/feed_format.h>
 #include <runtime/replication/client_replica_pipeline.h>
 #include <net/npwire/ingame_message_id.h>
+#include <net/protocol/protocol.h> // title_protocol (the folds read their protocol)
 
 using namespace opennova;
 using namespace opennova::replication;
@@ -39,6 +40,8 @@ int main() {
 	// stack (the same trap #515 fixed in ai_test).
 	auto view_owned = std::make_unique<ClientReplicaPipeline>();
 	ClientReplicaPipeline &view = *view_owned;
+	// The session's protocol, which the 0x25 fold reads (ProtocolInMatch::s2c_25).
+	view.set_protocol(opennova::title_protocol("jo"));
 
 	// Two lines fold in order with the witnessed byte roles: body[0] is the
 	// channel, body[1] the sender slot (distinct values, so a re-swap fails).

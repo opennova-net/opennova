@@ -359,6 +359,17 @@ std::vector<uint8_t> join_cd_cookie(const CookieJar &jar) {
 	return cd;
 }
 
+bool consume_activation(CookieJar &jar, cdkey::KeyInfo &info, const cdkey::KeyChains *chains,
+		std::string_view fingerprint, const cdkey::KeyStore &store) {
+	constexpr std::size_t kNwactRead = 0x7FF; // the screen's read size [orig: @0x55752c (dfx2.exe)]
+	const std::string *nwact = chains != nullptr ? jar.find("NWACT") : nullptr;
+	if (nwact == nullptr || nwact->empty())
+		return false;
+	(void)cdkey::write_activation(info, *chains, nwact->substr(0, kNwactRead), fingerprint, store);
+	jar.set("NWACT", "");
+	return true;
+}
+
 std::vector<std::string> CookieJar::cookie_header_lines() const {
 	std::vector<std::string> lines;
 	lines.reserve(entries_.size());

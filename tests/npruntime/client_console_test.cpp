@@ -9,6 +9,7 @@
 //  NapiNPClientMsg_HandleConsoleEcho @0x432BC0; Client_ProcessLocalCommand @0x520BF0]
 #include <runtime/inmatch/client_console.h>
 
+#include <base/title/title.h>
 #include <base/vfs/vfs.h> // vfs_version_crc (CRC_ComputeCustomTable)
 #include <net/npwire/ingame_message_id.h>
 
@@ -231,11 +232,25 @@ int main() {
 	{
 		// The CRC compare reads the token's first four bytes as a dword (a zero record's
 		// zeros): "Crou" is code 169's; 0 meets the first code no row carries (5).
-		check(client_binding_by_crc(text_dword("Crou")) == 169,
+		check(client_binding_by_crc(opennova::controls::default_catalog(), text_dword("Crou")) == 169,
 				"the CRC compare reads the token's text");
-		check(client_binding_by_crc(0) == 5, "a zero record's dword is 0");
-		check(client_binding_by_token("NULL") == 0 && client_binding_by_token("nothing") == -1,
+		check(client_binding_by_crc(opennova::controls::default_catalog(), 0) == 5, "a zero record's dword is 0");
+		check(client_binding_by_token(opennova::controls::default_catalog(), "NULL") == 0 && client_binding_by_token(opennova::controls::default_catalog(), "nothing") == -1,
 				"by token: case-insensitive");
+		// DFX2-110: the walks read the title's catalog. dfx2.exe's cheat rows carry their own
+		// command CRCs (code 120's dword 0xAFEF269F where Jointops.exe's is 0x520BEC55), and its
+		// Objectives row (58) a name Jointops.exe's table has no record of.
+		// [orig: rows 113 @0x81784C, 53 @0x815EFC (dfx2.exe); row 113 @0x818954]
+		const opennova::controls::Catalog &dfx2 =
+				opennova::controls::title_catalog(*opennova::title_by_code("dfx2"));
+		check(client_binding_by_crc(dfx2, static_cast<int32_t>(0xAFEF269Fu)) == 120 &&
+						client_binding_by_crc(opennova::controls::default_catalog(),
+								static_cast<int32_t>(0xAFEF269Fu)) == -1 &&
+						client_binding_by_crc(dfx2, static_cast<int32_t>(0x520BEC55u)) == -1,
+				"each title's cheat CRCs");
+		check(client_binding_by_token(dfx2, "objectives") == 58 &&
+						client_binding_by_token(opennova::controls::default_catalog(), "objectives") == -1,
+				"dfx2.exe's Objectives row");
 	}
 	{
 		// Client_ProcessLocalCommand's arms: `pb_` behind a leading slash, SAVEKEYS,

@@ -238,6 +238,7 @@ add_library(opennova_bindings OBJECT
     simulation/entity_row.cpp
     simulation/end_round_state.cpp
     simulation/inmatch_session_values.cpp
+    simulation/load_warning_box.cpp
     simulation/simulation.cpp
     simulation/simulation_assets.cpp
     simulation/simulation_bind.cpp

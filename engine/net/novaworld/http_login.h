@@ -1,11 +1,13 @@
 #pragma once
 
+#include <net/novacrypto/cdkey.h> // cdkey::KeyInfo / KeyStore (consume_activation)
 #include <net/novacrypto/epask.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -288,5 +290,19 @@ inline constexpr std::size_t kJoinCdCookieMax = 0x7FE;
 // the prefix matched without case), or none when the whole set is longer than kJoinCdCookieMax,
 // as retail's announce builder sends a set only of 1..0x7FE bytes (D-NET-1387).
 std::vector<uint8_t> join_cd_cookie(const CookieJar &jar);
+
+// The NovaWorld screen's update over the jar's NWACT, the activation a page's Set-Cookie hands
+// the client: a value there (its first 0x7FF characters) is written as this machine's activation
+// (cdkey::write_activation into `info` and `store`, decoded under `fingerprint`, the machine's
+// NWPSSK), then the jar's NWACT is cleared, whatever the write did. Only a protocol with a CD key
+// runs it (`chains`; Jointops.exe's screen has no such leg). The leg also tests a word that the
+// connect's first state clears and nothing sets, so it runs whenever the jar holds an NWACT.
+// True when it ran.
+// [orig: UI_ProcessLANSessionStateMachine @0x556ff0 (dfx2.exe) - the NWACT read (0x7FF pushed
+//  @0x55752c, the call @0x55753e), the empty test @0x557547, the word g_NovaWorldActivationHold
+//  tested @0x557551 (its one store, 0, @0x557047), CDKey_WriteActivationFromNWACT called @0x557569,
+//  the jar's NWACT set to "" (@0x7bf886) @0x55757e]
+bool consume_activation(CookieJar &jar, cdkey::KeyInfo &info, const cdkey::KeyChains *chains,
+		std::string_view fingerprint, const cdkey::KeyStore &store);
 
 } // namespace opennova

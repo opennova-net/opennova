@@ -245,6 +245,7 @@ private:
 	void pose_all_();
 
 	std::shared_ptr<const ProjectAssetSource> source_;
+	std::string game_; // the project's target game, whose rules the floors' world runs (MissionFiles::game)
 	std::shared_ptr<StampedFiles> files_; // what the clips read, by the stamp they read it at
 	std::shared_ptr<MissionFiles> floor_files_; // what the floors' world read, kept while it stands
 	// The floors' world as last made, its people's bodies by row, and the key of what it holds

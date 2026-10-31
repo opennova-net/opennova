@@ -5,33 +5,9 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <iterator>
 
 namespace opennova::controls {
 namespace {
-
-// Each catalog record's help order, the dword at +0x10 the sort reads
-// second (0 sorts last as 999999) [orig: KeyBinding_CompareEntries @0x4965f0;
-// the static table word_8159A8, 108-byte records].
-constexpr int kHelpOrder[] = {
-	0, 0, 1001, 1003, 1005, 1007, 1009, 1011, 1013, 1015,                     // 0-9
-	1017, 1019, 1021, 1022, 1023, 1024, 1025, 2031, 2032, 2033,               // 10-19
-	2034, 2035, 2036, 2037, 2038, 2039, 2040, 0, 2001, 2002,                  // 20-29
-	2003, 2004, 2005, 2006, 2007, 2008, 2009, 2025, 2021, 2017,               // 30-39
-	2016, 0, 0, 2013, 2031, 5014, 5015, 2012, 4003, 4002,                     // 40-49
-	4004, 4005, 4006, 2023, 5000, 5001, 5003, 5004, 5005, 5006,               // 50-59
-	5007, 5008, 5009, 5012, 5010, 0, 0, 10005, 5013, 10010,                   // 60-69
-	10000, 10001, 10002, 10004, 10011, 10012, 10013, 10014, 10007, 10015,     // 70-79
-	10006, 10016, 10017, 0, 6012, 6002, 6003, 6001, 6006, 6007,               // 80-89
-	6008, 6009, 6010, 6005, 6011, 6013, 6014, 0, 4001, 10009,                 // 90-99
-	5011, 5013, 5014, 2019, 2020, 2015, 10003, 3001, 3002, 3003,              // 100-109
-	80001, 80002, 80003,                                                      // 110-112
-};
-
-int help_order(int id) {
-	const int order = id >= 0 && id < static_cast<int>(std::size(kHelpOrder)) ? kHelpOrder[id] : 0;
-	return order != 0 ? order : 999999; // [orig: @0x4965f0 — 0 -> 999999]
-}
 
 // The page title key per class [orig: KeyBinding_BuildCategoryPages
 // @0x4966c0 — KeyHelp_GetStringWithFallback("Text", key, "!Name") per case;
@@ -64,8 +40,9 @@ std::string format_printf(const std::string &format, const std::string &arg) {
 } // namespace
 
 void HelpScreen::build(const BindingSet &bindings) {
-	std::size_t count = 0;
-	const ActionDef *cat = catalog(&count);
+	catalog_ = &bindings.catalog();
+	const std::size_t count = catalog_->count;
+	const ActionDef *cat = catalog_->rows;
 	// The prune: a record with no key, no second key and no mouse button, or
 	// of class Cheat (9) or Debug (11), leaves the table (its class byte
 	// zeroed, so it sorts ahead of every page) [orig: BMS_PruneEmptyEntities
@@ -81,14 +58,18 @@ void HelpScreen::build(const BindingSet &bindings) {
 		if (r.primary == 0 && r.secondary == 0 && r.mouse_mask == 0) continue;
 		sorted_.push_back(static_cast<int>(i));
 	}
-	// Class, then help order. Retail's qsort leaves equal keys in an
-	// implementation order; the stable sort keeps them in catalog order
-	// [orig: qsort(.., 0x300, 0x6C, KeyBinding_CompareEntries) @0x497364].
+	// Class, then the record's own help order, the dword at +0x10 (0 sorts last as 999999).
+	// Retail's qsort leaves equal keys in an implementation order; the stable sort keeps them
+	// in catalog order [orig: qsort(.., 0x300, 0x6C, KeyBinding_CompareEntries) @0x497364,
+	// KeyBinding_CompareEntries @0x4965f0] [orig: qsort @0x49737f, KeyBinding_CompareEntries
+	// @0x496600 (0 -> 999999 @0x49661e..0x496629) (dfx2.exe)].
 	std::stable_sort(sorted_.begin(), sorted_.end(), [cat](int a, int b) {
 		const int ca = static_cast<int>(cat[a].cls);
 		const int cb = static_cast<int>(cat[b].cls);
 		if (ca != cb) return ca < cb;
-		return help_order(cat[a].id) < help_order(cat[b].id);
+		const int ha = cat[a].help != 0 ? static_cast<int>(cat[a].help) : 999999;
+		const int hb = cat[b].help != 0 ? static_cast<int>(cat[b].help) : 999999;
+		return ha < hb;
 	});
 	// The pages: a new one opens past 23 rows or on a class change, the
 	// previous one closing on the row before; the last closes on the table's
@@ -144,8 +125,7 @@ void HelpScreen::build_page() {
 	std::snprintf(line, sizeof(line), key_help_string("Text", "PAGE", "!Page %i of %i").c_str(),
 			current_ + 1, page_count());
 	page_line_ = line;
-	std::size_t count = 0;
-	const ActionDef *cat = catalog(&count);
+	const ActionDef *cat = catalog_->rows;
 	for (int row = 0; row < kHelpScreenRowsPerPage; ++row) {
 		const int index = page.first + row;
 		if (index > page.last) break;

@@ -49,7 +49,7 @@ int armory_selected_clips(const MenuRuntime &menu, const std::string &control) {
 
 LoadoutSlotRows loadout_fill_slot(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 		const std::string &control, int slot, int class_mask, int team_mask,
-		const WeaponAvailability &availability, const std::string &none_label,
+		const WeaponAvailability &availability, const std::string *none_label,
 		const hud::GameTextLookup &gametext) {
 	const int combo = menu.widget_id(control);
 	if (combo < 0) return {};
@@ -64,8 +64,12 @@ LoadoutSlotRows loadout_fill_slot(MenuRuntime &menu, const def::DefWeaponsFile &
 		listed.push_back(index);
 		labels.push_back(weapon_label(*w, gametext));
 	}
-	LoadoutSlotRows rows{ -1 };
-	std::vector<std::string> items{ none_label };
+	LoadoutSlotRows rows;
+	std::vector<std::string> items;
+	if (none_label != nullptr) {
+		rows.push_back(-1);
+		items.push_back(*none_label);
+	}
 	for (const int i : armory_slot_order(labels)) {
 		items.push_back(labels[static_cast<size_t>(i)]);
 		rows.push_back(listed[static_cast<size_t>(i)]);
@@ -356,9 +360,9 @@ void armory_fill_ammo(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 	}
 }
 
-void armory_populate_page(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
-		const LoadoutSlotRows (&rows)[3], const playersav::KitPage &page,
-		ArmoryScreenPairs &pairs, const hud::GameTextLookup &text) {
+std::vector<int> armory_populate_page(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
+		const LoadoutSlotRows (&rows)[3], const playersav::KitPage &page, ArmoryScreenPairs &pairs,
+		const hud::GameTextLookup &text) {
 	for (const char *list : kParents) {
 		const int id = menu.widget_id(list);
 		if (id >= 0) menu.select_row(id, 0, false);
@@ -375,6 +379,10 @@ void armory_populate_page(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 		const int parent = loadout_selected_weapon(menu, kParents[i], rows[i]);
 		armory_fill_ammo(menu, weapons, kParents[i], parent, pairs, text);
 	}
+	std::vector<int> positions;
+	for (const int32_t slot : walk.grenade_slots)
+		positions.push_back(slot - 1);
+	return positions;
 }
 
 std::vector<int> armory_fill_grenades(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
@@ -399,7 +407,7 @@ std::vector<int> armory_fill_grenades(MenuRuntime &menu, const def::DefWeaponsFi
 playersav::KitPage armory_serialize_page(const MenuRuntime &menu,
 		const def::DefWeaponsFile &weapons, const LoadoutSlotRows (&rows)[3],
 		const std::vector<int> &grenades, const ArmoryScreenPairs &pairs, int entity_team,
-		int selected_class) {
+		int selected_class, bool every_position) {
 	playersav::KitPage out;
 	const auto add = [&out](const std::string &name, int32_t primary, int32_t secondary,
 							 int32_t flags) {
@@ -425,11 +433,19 @@ playersav::KitPage armory_serialize_page(const MenuRuntime &menu,
 	}
 	for (size_t i = 0; i < std::size(kGrenades); ++i) {
 		const int combo = menu.widget_id(kGrenades[i]);
-		if (combo < 0 || !menu.is_widget_shown(combo)) continue;
-		const auto *w = i < grenades.size() ? weapon(weapons, grenades[i]) : nullptr;
-		if (w == nullptr) continue;
-		const int32_t count = pairs.clips_of(catalog_index_of_row(grenades[i]));
-		add(w->weapon_name, count, kKitFiller, kKitFiller);
+		if (!every_position && (combo < 0 || !menu.is_widget_shown(combo)))
+			continue;
+		const int row = i < grenades.size() ? grenades[i] : -1;
+		const auto *w = weapon(weapons, row);
+		// A zeroed position (the "None" catalog row) is AdmDef entry 0, the "null" entry the
+		// table's init names, which resolves: only dfx2.exe's serializer reaches it, Jointops.exe's
+		// fill showing only the positions it fills.
+		// [orig: AnimDef_InitAll @0x540830 - the first free entry named "null" @0x540885;
+		//  AdmDef_GetEntryByIndex @0x53cef0 - only 0xFF and an unnamed entry refused (dfx2.exe)]
+		if (w == nullptr && !(every_position && row < 0))
+			continue;
+		const int32_t count = pairs.clips_of(catalog_index_of_row(row));
+		add(w != nullptr ? w->weapon_name : kAdmDefNullName, count, kKitFiller, kKitFiller);
 	}
 	return out;
 }

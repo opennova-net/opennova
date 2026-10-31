@@ -12,6 +12,7 @@
 
 #include "env/water.h"
 #include "render/world_environment_lookup.h"
+#include "resource_index/resource_root.h" // session_title (the cube eye's clearance)
 
 namespace godot {
 namespace {
@@ -260,7 +261,8 @@ void EnvironmentCubeCapture::_request_capture(
 					Vector3(p_player_position.x, 0.0f, p_player_position.z)) :
 			0.0f;
 	capture_origin_.y = opennova::renderer::environment_cube_eye_height(
-			p_player_position.y, has_terrain, terrain_y);
+			ResourceRoot::session_title(Ref<ResourceRoot>()), p_player_position.y,
+			has_terrain, terrain_y);
 
 	for (int i = 0; i < kFaceCount; ++i) {
 		cameras_[i]->look_at_from_position(capture_origin_,

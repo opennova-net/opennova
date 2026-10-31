@@ -516,6 +516,7 @@ VehicleSeatOccupancy vehicle_seat_occupancy(
     result.occupied = seat.occupant.valid();
     if (const Entity *rider = world.registry.get(seat.occupant)) {
         result.rider_resolved = true;
+        result.rider = seat.occupant;
         result.player = (rider->flags & kEntityFlagPlayer) != 0;
         result.own_seat = seat.occupant == requester;
         result.health = rider->health;

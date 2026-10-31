@@ -90,6 +90,10 @@ std::vector<ExpansionRecord> records() {
 	};
 }
 
+// The titles' base-row keys (DFX2-61): Jointops.exe's literal and dfx2.exe's [orig:
+// Options_PopulateModList @ 0x559fe2; @0x5582d2 (dfx2.exe)].
+constexpr const char *kJoBase = "Joint Operations: Typhoon Rising";
+
 ModList mods() {
 	ModList list;
 	list.set_descriptions({ "MOD_DESC", "MOD_DESCRIPTION" });
@@ -107,38 +111,45 @@ void test_rows() {
 
 	// No table loaded for the screen's TEXT_RSRC: the key shows. The base game runs: its row selected,
 	// the description as authored.
-	modlist.populate(run.rt, list, "");
+	modlist.populate(run.rt, list, "", kJoBase);
 	const std::vector<std::string> rows = run.rt.get_widget_items(list);
 	CHECK(rows.size() == 3);
 	if (rows.size() == 3) {
-		CHECK(rows[0] == kModListBaseKey);
+		CHECK(rows[0] == kJoBase);
 		CHECK(rows[1] == "Joint Operations: Escalation" && rows[2] == "OP: Nifty Package");
 	}
 	CHECK(run.rt.selected_row(list) == 0);
 	CHECK(run.rt.get_widget_text(desc) == "AUTHORED");
 
 	// The running expansion, named without case: its row selected, its description shown.
-	modlist.populate(run.rt, list, "NIFTY");
+	modlist.populate(run.rt, list, "NIFTY", kJoBase);
 	CHECK(run.rt.selected_row(list) == 2);
 	CHECK(run.rt.get_widget_text(desc) == "A storm.");
 
 	// A name no record has: the base row stays selected.
-	modlist.populate(run.rt, list, "absent");
+	modlist.populate(run.rt, list, "absent", kJoBase);
+	CHECK(run.rt.selected_row(list) == 0);
+	// dfx2.exe's base row is "NONE"; a title that names none leaves it blank.
+	modlist.populate(run.rt, list, "", "NONE");
+	CHECK(run.rt.item_text(list, 0) == "NONE");
+	modlist.populate(run.rt, list, "", nullptr);
+	CHECK(run.rt.item_text(list, 0).empty());
+	modlist.populate(run.rt, list, "absent", kJoBase);
 	CHECK(run.rt.selected_row(list) == 0);
 }
 
 void test_base_row_from_the_string_table() {
 	Run run;
-	run.tables.set_table("menutxt.bin", menu_table(kModListBaseKey, "OpenNova"));
+	run.tables.set_table("menutxt.bin", menu_table(kJoBase, "OpenNova"));
 	CHECK(run.open(kOptions));
 	const int list = run.id("AVAIL_LIST");
-	mods().populate(run.rt, list, "");
+	mods().populate(run.rt, list, "", kJoBase);
 	CHECK(run.rt.item_text(list, 0) == "OpenNova");
 	CHECK(run.rt.widget_string(list, "NOT_A_KEY") == "NOT_A_KEY");
 	// The override table is tried first, through the window's own table.
-	auto override_table = menu_table(kModListBaseKey, "Override");
+	auto override_table = menu_table(kJoBase, "Override");
 	run.tables.set_override(override_table.get());
-	CHECK(run.rt.widget_string(list, kModListBaseKey) == "Override");
+	CHECK(run.rt.widget_string(list, kJoBase) == "Override");
 	run.tables.set_override(nullptr);
 }
 
@@ -148,7 +159,7 @@ void test_select_and_pick() {
 	const int list = run.id("AVAIL_LIST");
 	const int desc = run.id("MOD_DESC");
 	const ModList modlist = mods();
-	modlist.populate(run.rt, list, "");
+	modlist.populate(run.rt, list, "", kJoBase);
 
 	modlist.select(run.rt, list, 1);
 	CHECK(run.rt.get_widget_text(desc) == "Kendari island.");

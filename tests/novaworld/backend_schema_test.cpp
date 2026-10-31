@@ -110,6 +110,10 @@ int test_migrations_create_expected_tables() {
 				"9b589654d7497f4f0e2e1d7324075c576c617a8c3c6da9e701ee3f9e406176fd" },
 		{ "0013_program_samples_build.sql",
 				"bebbdc1dc7205382f7b8cf1ca277a68321fd191edd3542976bb34b1b893e1f34" },
+		{ "0014_console_refused_command.sql",
+				"d8f06d51e1c899863541c14fbe805dc03ec232ae3671f17689941626c3331f79" },
+		{ "0015_reissue_cd_key_activations.sql",
+				"974b9ebb1fcc50d3ad42bda10fd7a78154f5a3220613f38e7b19892ebf3c4bd8" },
 	};
 	for (size_t i = 0; i < std::size(recorded_files); ++i) {
 		const std::string text =

@@ -11,6 +11,7 @@
 #include <editor/preview/option_reads.h>
 #include <editor/preview/orbit_canvas.h>
 #include <editor/preview/sound_preview.h>
+#include <editor/project/project_document.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
 #include <formats/threedi/threedi_3di3.h>
@@ -225,6 +226,7 @@ bool DefinitionWeapon::refresh(const SessionView &view, const std::string &catal
 	// The range: the project's weapon table and ammo, the shots in the view the picture shows.
 	WeaponRangeSetup setup;
 	setup.files = files;
+	setup.game = view.project.document ? view.project.document->target_game : std::string();
 	setup.catalog = io::utf8_file_name(catalog);
 	setup.weapon = record_;
 	setup.view = first ? WeaponShotView::Own : options.shooter;
@@ -269,6 +271,7 @@ bool DefinitionWeapon::refresh_ammo(const SessionView &view, const std::string &
 		planned_runs_ = UINT64_MAX;
 	WeaponRangeSetup setup;
 	setup.files = view.findings.assets;
+	setup.game = view.project.document ? view.project.document->target_game : std::string();
 	// A soldier's shots (DI-24's range): weapon.def and ammo.def as the load reads them, each by its name.
 	setup.catalog = "weapon.def";
 	setup.ammo = ammo;

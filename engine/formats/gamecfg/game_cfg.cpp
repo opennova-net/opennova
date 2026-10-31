@@ -525,24 +525,33 @@ GameCfg defaults(const DefaultTexts &texts, int32_t player_index, int32_t hw3d_d
 	cfg.hw3d_deviceno = hw3d_deviceno; // dword_B4C22C is not in the block
 
 	// [orig: Config_SetDefaults @0x54D0C4..0x54D48B, in its store order]
+	// dfx2.exe's table stores seven of them otherwise (DFX2-100): lock_framerate 0 where
+	// Jointops.exe stores 1 [orig: @0x54D12F, esi], enable_slotmachine 1 for 0 [orig: @0x54D165,
+	// ebx], the music, SFX, dialogue and rotor volumes 255 for 192 [orig: `mov eax, 0C0h`
+	// @0x54D10F, the stores @0x54D16B..0x54D17A] and mpchangeteam 1 for 0 [orig: @0x54D390, ebx]
+	// [orig: Config_SetDefaults @0x54a2c0 - `mov dword_254ECF4, ebx` (0) @0x54a3c1, `mov
+	//  dword_254EE5C, esi` (1) @0x54a3f3, `mov ebp, 0FFh` @0x54a392 into the four volumes
+	//  @0x54a3f9..0x54a40b, `mov dword_254F15C, esi` (1) @0x54a613 (dfx2.exe)].
+	const bool dfx2 = table == ConfigTable::Dfx2;
+	const int32_t volume = dfx2 ? 255 : 192;
 	cfg.version = kConfigVersion;
 	cfg.preempt_pff = 0;
 	cfg.windowed = 0;
 	cfg.no_anim = 0;
 	cfg.gamma = 1.0f;
 	cfg.force_vsync = 0;
-	cfg.lock_framerate = 1;
+	cfg.lock_framerate = dfx2 ? 0 : 1;
 	cfg.reduce_mouselag = 1;
 	cfg.enable_keyboardtips = 1;
 	cfg.enable_gameplaytips = 1;
 	cfg.windows_volume = 255;
 	cfg.audio_channels = 2;
 	cfg.audio_rate = 44100;
-	cfg.enable_slotmachine = 0;
-	cfg.music_volume = 192;
-	cfg.sfx_level = 192;
-	cfg.dialogue_level = 192;
-	cfg.rotor_volume = 192;
+	cfg.enable_slotmachine = dfx2 ? 1 : 0;
+	cfg.music_volume = volume;
+	cfg.sfx_level = volume;
+	cfg.dialogue_level = volume;
+	cfg.rotor_volume = volume;
 	cfg.crosshairs = 1;
 	cfg.crosshairs_color = 1;
 	cfg.hitfeedback = 1;
@@ -605,7 +614,7 @@ GameCfg defaults(const DefaultTexts &texts, int32_t player_index, int32_t hw3d_d
 	cfg.mpvoting = 0;
 	cfg.mpvoting_min_players = 6;
 	cfg.mpvoting_period = 180;
-	cfg.mpchangeteam = 0;
+	cfg.mpchangeteam = dfx2 ? 1 : 0;
 	cfg.mpchangeteam_interval = 300;
 	cfg.mpchangeteam_penalty = 60;
 	cfg.map_infrared = 1;
@@ -618,7 +627,9 @@ GameCfg defaults(const DefaultTexts &texts, int32_t player_index, int32_t hw3d_d
 	cfg.alt_lock_type = 1;
 	cfg.play_exit_credits = -1;
 	cfg.mpattrib = 14850;
-	// Every weapon the mission's word, the title's (DFX2-10): Jointops.exe's 3, dfx2.exe's 2
+	// Every weapon the mission's word, the title's (DFX2-10): Jointops.exe's 3, dfx2.exe's 2. It is
+	// the word of the protocol the title speaks (ProtocolInMatch::s2c_66, which this library cannot
+	// read), which games_test pins each title's config table to.
 	// [orig: Config_SetDefaults @0x54D030 - memset32(3, 0xFF) @0x54D410]
 	// [orig: Config_SetDefaults @0x54a2c0 - memset32(dword_254F25C, 2, 0xFF) (dfx2.exe)]
 	const int32_t mission_word = table == ConfigTable::Dfx2 ? 2 : 3;

@@ -68,7 +68,7 @@ func test_the_record_reads_every_named_word() -> void:
 	PlayerProfile.load_for(null)
 	var profiles := PlayerProfile.store()
 	var words := PlayerProfiles.word_names()
-	assert_eq(words.size(), 40)
+	assert_eq(words.size(), 41)
 	assert_eq(words[0], "last_campaign", "in offset order")
 	assert_eq(profiles.get_word("mouse_sensitivity"), 128)
 	assert_eq(profiles.get_word("sp_gps_icons"), 1)

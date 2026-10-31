@@ -61,7 +61,9 @@ func _load_db() -> AvatarDatabase:
 # table under the name the engine binds [orig: CAvatarDefs_Init @ 0x57b180], so the
 # fixture is staged under that name in the cache dir (ResourceRoot.set_root_dir
 # rejects user://). Null when the fixture cannot be staged.
-func _staged_avatars_root() -> ResourceRoot:
+# `game_code` names the title a session over the root runs as (dfx2's for dfx2.exe's
+# screen; empty, the launch's).
+func _staged_avatars_root(game_code := "") -> ResourceRoot:
 	var bytes := FileAccess.get_file_as_bytes(AVATARS_FIXTURE)
 	if bytes.is_empty():
 		return null
@@ -73,7 +75,20 @@ func _staged_avatars_root() -> ResourceRoot:
 	f.store_buffer(bytes)
 	f.close()
 	var root := ResourceRoot.new()
-	return root if root.set_root_dir(dir) == OK else null
+	return root if root.set_root_dir(dir, game_code) == OK else null
+
+
+# dfx2.exe's screen shape opened over a root mounted as dfx2, the companion built on it.
+func _built_dfx2_spin_screen(companion: PlayerInfoMenuCompanion, voice := false) -> MenuDriver:
+	var root := _staged_avatars_root("dfx2")
+	assert_not_null(root, "the minted table stages under a dfx2 root")
+	if root == null:
+		return null
+	var driver := MenuDriver.new()
+	assert_true(driver.open_document(_spin_screen_doc(voice), root, null, null, "player.mnu"),
+			"the document opens over the dfx2 root")
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
+	return driver
 
 
 # --- Driver harness (the compiled-menu seam) ----------------------------------
@@ -255,11 +270,17 @@ func test_join_profile_carries_an_unresolved_sides_record_word() -> void:
 func test_owns_menu_detects_player_info() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	assert_true(companion.owns_menu(_make_avatar_driver()),
-			"a menu carrying NATIONALITY + COMBO_LIST is the PLAYER_INFO screen")
-	var plain := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, MenuDriverFixture.screen_xml("PLAIN",
-			MenuDriverFixture.wnd("button", "OK", 10))), "plain.mnu")
-	assert_false(companion.owns_menu(plain),
-			"a plain menu is left to the shell / other companions")
+			"a menu holding the PLAYER_INFO screen is the character screen")
+	# dfx2.exe's player.mnu: no NATIONALITY or DIVISION, COMBO_LIST a spin list; the screen's
+	# name claims it all the same.
+	var spin := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self,
+			MenuDriverFixture.screen_xml("PLAYER_INFO", MenuDriverFixture.wnd("spinlist", "COMBO_LIST", 10)
+			+ MenuDriverFixture.wnd("button", "ACCEPT", 40))), "player.mnu")
+	assert_true(companion.owns_menu(spin), "the PLAYER_INFO screen without its nationality lists")
+	var elsewhere := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self,
+			MenuDriverFixture.screen_xml("PLAIN", _avatar_body())), "plain.mnu")
+	assert_false(companion.owns_menu(elsewhere),
+			"the character controls on a screen of another name are left to the shell")
 
 
 func test_populates_avatar_lists_and_combo_label() -> void:
@@ -409,6 +430,30 @@ func test_mounts_3d_preview_when_widget_present() -> void:
 				"%s under the portrait is mouse-transparent too" % child.name)
 
 
+# DFX2-76: the mounted portrait hovers under Jointops.exe's title and never under dfx2.exe's
+# (engine Title::player_info_preview_hover).
+func test_the_portrait_hovers_as_its_title_does() -> void:
+	for game_code in ["", "dfx2"]:
+		var root := _staged_avatars_root(game_code)
+		assert_not_null(root, "the minted table stages")
+		if root == null:
+			return
+		var frame := MenuFrame.new()
+		frame.size = Vector2(800, 600)
+		add_child_autofree(frame)
+		var driver := MenuDriver.new()
+		driver.attach(frame, null)
+		assert_true(driver.open_document(MenuDriverFixture.doc_from_xml(self, _avatar_screen_xml(true)),
+				root if game_code != "" else null, null, null, "player.mnu"), "the document opens")
+		var companion := PlayerInfoMenuCompanion.new()
+		companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
+		var preview := frame.find_child("PlayerInfoAvatarPreview", true, false) as AvatarPreview
+		assert_not_null(preview, "the portrait is mounted")
+		if preview != null:
+			assert_eq(preview.hovers, game_code == "", "%s's portrait hovers" % [game_code if game_code != "" else "the launch title"])
+		companion.on_menu_released()
+
+
 func test_preview_render_activity_follows_visibility() -> void:
 	# A hidden portrait must not keep paying for a 3D pass or its animation
 	# (the reflection-viewport rule): UPDATE_ALWAYS and _process follow
@@ -536,6 +581,111 @@ func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 	var saved_sides: Array = companion.snapshot().get("side_profiles", [])
 	assert_eq(int((saved_sides[0] as Dictionary).get("avatar_packed", -1)), 0x0400)
 	assert_eq(int((saved_sides[1] as Dictionary).get("avatar_packed", -1)), 0x8407)
+
+
+# dfx2.exe's player.mnu shape: a COMBO_LIST spin list, the name edit and ACCEPT, no
+# NATIONALITY or DIVISION. `voice` adds a PLAYERVOICE combo box, which dfx2.exe's screen
+# lacks, so a combo handler's voice refill shows.
+func _spin_screen_doc(voice := false) -> MnuDocument:
+	return MenuDriverFixture.doc_from_xml(self, MenuDriverFixture.screen_xml("PLAYER_INFO",
+			MenuDriverFixture.wnd("spinlist", "COMBO_LIST", 10)
+			+ MenuDriverFixture.wnd("edit", "PLAYERNAME", 40)
+			+ MenuDriverFixture.wnd("button", "ACCEPT", 70)
+			+ (MenuDriverFixture.wnd("combobox", "PLAYERVOICE", 100) if voice else "")))
+
+
+# The combos are the record's nationality and division's, the record's combo selected, and
+# the save keeps the record's nationality and division (engine PlayerInfoAvatars::seed_record).
+func test_a_screen_without_nationality_lists_fills_the_records_combos() -> void:
+	var db := _load_db()
+	var blue := db.resolve_character_id(0x0400, 0)
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_persisted_profile({
+		"team": 0,
+		"side_profiles": [
+			{
+				"team": 0,
+				"nationality": blue.nationality_index,
+				"division": blue.division_index,
+				"combo": blue.combo_index,
+				"player_class": 8,
+				"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0400,
+			},
+			{},
+		],
+	})
+	companion.set_database(db)
+	var driver := MenuDriverFixture.driver_over(self, _spin_screen_doc(), "player.mnu")
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	var combos := driver.widget_id("COMBO_LIST")
+	assert_eq(driver.item_count(combos),
+			db.get_combo_count(blue.nationality_index, blue.division_index),
+			"the record's division's combos")
+	assert_eq(driver.selected_row(combos), blue.combo_index, "the record's combo")
+	var snap := companion.snapshot()
+	assert_eq(int(snap.get("nationality", -1)), blue.nationality_index, "the record's nationality kept")
+	assert_eq(int(snap.get("division", -1)), blue.division_index, "the record's division kept")
+	assert_eq(int(snap.get("combo", -1)), blue.combo_index)
+
+
+# dfx2.exe's screen lists none of the loadout categories: its save writes no entry for them
+# and stages no pick (engine PlayerInfoLoadout::kit_selection), the knife and the three
+# grenade slots alone on the page.
+func test_a_screen_without_category_lists_saves_no_category_entry() -> void:
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	var driver := MenuDriverFixture.driver_over(self, _spin_screen_doc(), "player.mnu")
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	companion.set_weapon_database(_load_weapons())
+	var snap := companion.snapshot()
+	for key in ["primary", "primary_clips", "primary_ammo_type", "secondary", "accessory"]:
+		assert_false(snap.has(key), "no %s pick staged" % key)
+	var kit: Array = snap.get("kit", [])
+	var names: Array[String] = []
+	for entry in kit:
+		names.append(String((entry as Dictionary).get("name", "")))
+	assert_eq(names.size(), 4 if names.find("WPN_MEDPACK") < 0 else 5,
+			"the knife, the medic's medpack and the three grenade slots: %s" % [names])
+	assert_true(names[0].begins_with("WPN_KNIFE"), "the knife leads the page")
+
+
+# DFX2-74: dfx2.exe's combo rows carry no text, one row per combo all the same (engine
+# Title::player_info_combo_names).
+func test_dfx2_combo_rows_carry_no_text() -> void:
+	var companion := PlayerInfoMenuCompanion.new()
+	var driver := _built_dfx2_spin_screen(companion)
+	if driver == null:
+		return
+	var combos := driver.widget_id("COMBO_LIST")
+	assert_gt(driver.item_count(combos), 0, "the record's combos are listed")
+	for row in driver.item_count(combos):
+		assert_eq(driver.item_text(combos, row), "", "row %d has no text" % row)
+
+
+# DFX2-75: dfx2.exe's COMBO_LIST callback hears its spin list's step and not a combo box's
+# select; Jointops.exe's the other way round (engine player_info_combo_list_event). The
+# handler's voice refill drops a voice the combo cannot offer.
+func test_combo_list_handler_hears_its_titles_control() -> void:
+	var companion := PlayerInfoMenuCompanion.new()
+	var driver := _built_dfx2_spin_screen(companion, true)
+	if driver == null:
+		return
+	assert_eq(driver.player_info_combo_list_event(), "spinlist")
+	PlayerProfile.store().set_voice(0, 99)
+	driver.widget_value_changed.emit("COMBO_LIST", "combo", 0, "")
+	assert_eq(PlayerProfile.store().get_voice(0), 99, "a combo box's select is not dfx2.exe's event")
+	driver.spin_cycle(driver.widget_id("COMBO_LIST"), 1)
+	assert_eq(PlayerProfile.store().get_voice(0), 0, "the spin's step runs the handler")
+	var jo := PlayerInfoMenuCompanion.new()
+	jo.set_database(_load_db())
+	var jo_driver := _make_avatar_driver()
+	jo.on_menu_built(jo_driver, "player.mnu", "PLAYER_INFO", null)
+	assert_eq(jo_driver.player_info_combo_list_event(), "combo")
+	PlayerProfile.store().set_voice(0, 99)
+	jo_driver.widget_value_changed.emit("COMBO_LIST", "spinlist", 0, "")
+	assert_eq(PlayerProfile.store().get_voice(0), 99, "a spin list's step is not Jointops.exe's event")
+	jo_driver.widget_value_changed.emit("COMBO_LIST", "combo", 0, "")
+	assert_eq(PlayerProfile.store().get_voice(0), 0, "its combo box's select runs the handler")
 
 
 func test_accept_emits_avatar_chosen() -> void:

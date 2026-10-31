@@ -41,6 +41,10 @@ constexpr Written kWritten[] = {
 	{"hello2.bin", "the chunk file test's output", "[orig: ChunkFile_TestWriteAndReload @ 0x56f810]"},
 	{"activesrvr.txt", "a hosted session's marker",
 	 "[orig: Game_HostMultiplayerSession @ 0x4a65a0; deleted by Game_Run @ 0x4a7fb0]"},
+	// OpenNova's stand-in for DFX2's registry value CDKIID where the platform has none
+	// (Protocol::cd_key's stand_in_file, net/novacrypto/cdkey.h machine_key_store).
+	{"cdkiid.dat", "this machine's CD-key activation",
+	 "[orig: CDKey_WriteActivationFromNWACT @0x411e30 (dfx2.exe)]"},
 };
 
 // "SS" and five digits, then a dot: a screenshot [orig: Screenshot_CaptureToFile @ 0x5221a0, "SS%0.5d.%s"].

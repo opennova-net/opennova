@@ -19,6 +19,7 @@
 #include "network/host_session_options.h" // the hosted-session request record
 #include "network/join_target.h" // the join request the discovered session comes from
 #include "network/lan_session.h" // drain_process_enumerator (the session reset's drain)
+#include "network/novaworld_identity.h" // machine_activation_cd_keys (the JOIN's, the host's)
 #include "world/loading_screen_info.h" // the joiner's S2C 0x60 session block
 #include "util/string_convert.h"
 #include "resource_index/launch_flags.h" // the /NOPUNT switch the host session reads
@@ -143,6 +144,9 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type,
 	// keeps the 120000 ms / 1200-record template.
 	cfg.game_root = host_game_root_;
 	if (net_.local_character_vars_set) cfg.local_character_vars = net_.local_character_vars;
+	// The host's own CD-key ids, this machine's activation: a DFX2 LAN host refuses a joiner
+	// sending them (code 12; engine NapiNPServerCtx::host_cd_keys carries the witness).
+	cfg.host_cd_keys = machine_activation_cd_keys(cfg.protocol);
 	return cfg;
 }
 
@@ -476,6 +480,8 @@ opennova::inmatch::AdminConsole::Seams Simulation::remote_admin_seams(
 	// A host's command walk queues its binding records on the role's input event queue (engine
 	// inmatch/admin_console.h Seams::input_events carries the witness).
 	seams.input_events = host_role_ != nullptr ? &host_role_->input_events() : nullptr;
+	// Its walks read the session title's binding catalog (the role's).
+	seams.catalog = &opennova::controls::title_catalog(session_title(net_, assets_.root));
 	// The status report's gametext is the process's: GameWorld::remote_admin_seams sets it for
 	// every console (engine inmatch/remote_admin.h process_game_text).
 	// CMD VERSION's line: the launch's versions, as the STARTUP label shows them.
@@ -487,6 +493,8 @@ void Simulation::install_console_seams() {
 	namespace inmatch = opennova::inmatch;
 	if (runtime_ == nullptr) return;
 	inmatch::ClientLocalCommandSeams seams;
+	// The CRC arm walks the session title's binding catalog (engine inmatch/client_console.h).
+	seams.catalog = &opennova::controls::title_catalog(session_title(net_, assets_.root));
 	// VERSION's line: the launch's versions, as the STARTUP label shows them.
 	seams.versions = opennova::to_std(LaunchFlags::version_line());
 	// SAVENFO: debug.nfo in text mode, each '\n' a CR LF on the disk (engine
@@ -775,8 +783,10 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	if (!install_role(std::make_unique<opennova::inmatch::JoinerRole>(joiner_kit_seams())))
 		return false;
 	joiner_role_->set_protocol(protocol);
-	// The rules the joiner's World and its replica run, the mounted game's (session_title).
+	// The rules the joiner's World and its replica run, and the title whose fresh profile its
+	// kitless 0x2F sends: the mounted game's (session_title).
 	joiner_role_->set_rules(opennova::world::title_rules(session_title(net_, assets_.root).code));
+	joiner_role_->set_title(session_title(net_, assets_.root));
 	// The process's 0x4C report count runs on across joins (ClientProcessState).
 	joiner_role_->use_process_state(net_.client_process);
 	// The process's log devices: a session destroy's stop of a held server writes its
@@ -873,6 +883,12 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	install_app_id();
 	install_join_cd_cookie();
 	install_join_glsvss_request();
+	// The JOIN's CD-key ids, this machine's activation as the join reads it: what a LAN JOIN
+	// leads with, where a DFX2 LAN host refuses one without a key it can decode (codes 10, 11).
+	// No activation, no CDKIID: such a join is refused 10, as a stock DFX2 without one is
+	// (engine JoinerConnection::set_cd_key_ids carries the witness).
+	net_.join_cd_key_ids = machine_activation_cd_keys(protocol);
+	runtime_->set_cd_key_ids(net_.join_cd_key_ids);
 	install_join_mission_start();
 	runtime_->set_discovered_session(net_.join_discovered_session); // the browse row's 0x81
 	install_item_catalog();
@@ -1372,6 +1388,10 @@ bool Simulation::take_death_menu_open(bool p_menu_open) {
 	// death_menu_open_latch); this is the typed seam for the shell's frame.
 	return runtime_ && runtime_->state().take_death_menu_open(
 			opennova::inmatch::death_menu_triggered(role_view()), p_menu_open);
+}
+
+bool Simulation::take_death_menu_close() {
+	return runtime_ && runtime_->state().take_death_menu_close();
 }
 
 bool Simulation::is_death_menu_held() const {

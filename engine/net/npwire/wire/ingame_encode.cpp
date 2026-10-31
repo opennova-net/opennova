@@ -766,7 +766,9 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint1
 	Writer w{out};
 	w.u8(ctx.player_slot);
 	w.u16(field_flags);
-	w.u8(static_cast<uint8_t>(ctx.entity_handle & 0x00FFu)); // pool-0 entity index [orig: Pool_GetIndexFromPtr @0x505f40]
+	// The pool-0 entity index's byte [orig: NetPacket_SerializePlayerSync0x46 @0x505E80 -
+	//  Pool_GetIndexFromPtr @0x505F40].
+	w.u8(static_cast<uint8_t>(ctx.entity_handle & 0x00FFu));
 	if (field_flags & kPlayerSyncHasName)
 		w.cstr_capped(ctx.player_name, 32); // name (variable-length, [orig: slot+40 @0x505f9b])
 	if (field_flags & kPlayerSyncHasTeamString)

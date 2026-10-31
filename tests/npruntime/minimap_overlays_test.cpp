@@ -274,7 +274,27 @@ void test_joiner_rows_feed_loop_one() {
 
 } // namespace
 
+// DFX2-49 / DFX2-50 / DFX2-115: the session's title names the map's under-layer capture rings, the
+// DEATH map's zone markers and its unnamed labels; no title none.
+static void test_title_map_legs() {
+    inmatch::MinimapOverlayInputs in;
+    hud::HudMinimapOverlays out;
+    inmatch::build_minimap_overlays(in, out);
+    CHECK(!out.capture_rings_under_layers && !out.death_map_zone_markers && !out.death_map_no_names);
+    in.title = title_by_code("jo");
+    inmatch::build_minimap_overlays(in, out);
+    CHECK(!out.capture_rings_under_layers && !out.death_map_zone_markers && !out.death_map_no_names);
+    in.title = title_by_code("dfx2");
+    inmatch::build_minimap_overlays(in, out);
+    CHECK(out.capture_rings_under_layers && out.death_map_zone_markers && out.death_map_no_names);
+    // Acid Gambit's DEATH map is Jointops.exe's (DFX2-115).
+    in.title = title_by_code("acidgambit");
+    inmatch::build_minimap_overlays(in, out);
+    CHECK(!out.death_map_no_names);
+}
+
 int main() {
+    test_title_map_legs();
     test_entity_facts_are_stamped();
     test_overlays_gather();
     test_player_slot_table_feeds_loop_one();

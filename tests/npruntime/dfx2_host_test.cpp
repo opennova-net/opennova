@@ -27,6 +27,7 @@
 #include <net/npwire/session_hello.h>
 #include <net/protocol/protocol.h>
 #include <runtime/inmatch/admin_console.h>
+#include <runtime/inmatch/host_session.h> // start_host_session (the host's own CD-key ids)
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_chat.h>
@@ -210,6 +211,21 @@ void lan_cd_key_check() {
 	expect(join_code(ctx, "") == 0, "a JO LAN host has no CD-key leg");
 }
 
+// The host's own CD-key ids reach its context at the session start (HostConfig::host_cd_keys),
+// where its LAN join check compares a joiner's (code 12, lan_cd_key_check).
+// [orig: Server_ValidatePlayerJoinRequest @0x50f449..0x50f464 (dfx2.exe), g_CDKeyInfo +16]
+void host_start_installs_cd_keys() {
+	const std::string key = cdkey::make_wire_key(dfx2_chains(), "OPENNOVA-0003");
+	inmatch::HostOwner owner;
+	inmatch::HostConfig host;
+	host.protocol = dfx2();
+	host.socket_mode = inmatch::SocketMode::Socketless;
+	host.host_cd_keys.cdkiid = key;
+	(void)inmatch::start_host_session(owner, host);
+	expect(owner.ctx.host_cd_keys.cdkiid == key, "the session start installs the host's CDKIID");
+	expect(owner.ctx.host_cd_keys.exp1.empty(), "and no CDKIIDEXP1");
+}
+
 // The 0x42 build gates read the title's values: the same four for JO and DFX2.
 void join_build_values() {
 	for (const Protocol *protocol : {jo(), dfx2()}) {
@@ -220,10 +236,11 @@ void join_build_values() {
 }
 
 void chat_squad_tag() {
-	expect(inmatch::chat_squad_tag_text("OPN", protocol_in_match(jo()).chat_squad_tag_wrapped) == "OPN",
+	expect(inmatch::chat_squad_tag_text("OPN",
+	               protocol_in_match(jo()).s2c_14.chat_squad_tag_wrapped) == "OPN",
 	       "JO's relay appends the squad tag bare");
-	expect(inmatch::chat_squad_tag_text("OPN", protocol_in_match(dfx2()).chat_squad_tag_wrapped) ==
-	               "<ch>OPN<co>",
+	expect(inmatch::chat_squad_tag_text("OPN",
+	               protocol_in_match(dfx2()).s2c_14.chat_squad_tag_wrapped) == "<ch>OPN<co>",
 	       "DFX2-14: DFX2's wraps it in <ch> and <co>");
 }
 
@@ -247,6 +264,7 @@ int main() {
 	world_state_flags_and_join_state();
 	admin_weapon_armory();
 	lan_cd_key_check();
+	host_start_installs_cd_keys();
 	join_build_values();
 	chat_squad_tag();
 	rules_word();

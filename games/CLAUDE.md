@@ -17,9 +17,13 @@
   in-match knobs where its executable parts from Jointops.exe, whose behaviour a default
   TitleRules is, and the tables it owns). A title that speaks another's protocol or runs another's
   rules returns that object (`acidgambit_protocol()` is `jo_protocol()`, `acidgambit_rules()`
-  `jo_rules()`), never a copy of its literals. An unwitnessed title has the same files: its Title,
-  its stub Protocol with exactly the values a binary witnessed, so its consumers refuse it by name,
-  and Joint Operations' rules, said so.
+  `jo_rules()`), never a copy of its literals. A protocol of its own is a sheet: it copies JO's row
+  (`Protocol p = jo_protocol();`) and overrides its identity, then its in-match knobs by the message
+  each shapes (`ProtocolInMatch`'s groups, `s2c_0a` .. `c2s_2f`, indexed by `kProtocolDialect`),
+  then its NovaWorld values, each override cited (`dfx2_protocol.cpp`); JO's row is the default
+  sheet. An unwitnessed title has the same files: its Title, its stub Protocol with exactly the
+  values a binary witnessed, so its consumers refuse it by name, and Joint Operations' rules, said
+  so.
 - `games.cpp`'s `games::install()` fills the title and protocol registries, `games_rules.cpp`'s
   `games::install_rules()` the rules registry. Each program calls `install()` at its start; one
   that runs a match (a session, a World, the editor's previews) links `opennova_games_rules` and
@@ -30,9 +34,10 @@
   program that calls `install_rules()` links `opennova_games_rules` (`link_graph_check.py`).
 - Every retail value keeps its `[orig: Name @0xADDR]` cite where it is written (cite_census scopes
   `games/`). A protocol's version (PV2) bumps in its `<code>_protocol.cpp` with any change to its
-  wire bytes or its joiner-side rules (the TitleRules knobs marked joiner-side); games_test's
-  bump-rule row lists each title's ProtocolInMatch and those knobs, so a change to one shows in
-  review. JO's and DFX2's never bump (retail-pinned).
+  wire bytes or its joiner-side rules (the TitleRules knobs marked joiner-side); games_test pins one
+  bump-rule sheet per protocol (its ProtocolInMatch by message, its CD key and those knobs) and
+  checks that the titles speaking one Protocol object run the same joiner-side knobs, so a change to
+  one shows in review. JO's and DFX2's never bump (retail-pinned).
 - The fold-back exception: engine/CLAUDE.md folds a TU under ~100 lines into its one owner; a
   game's files stay one per responsibility (title, protocol, rules) and one directory per title, however
   short, so each game is read in its own place.

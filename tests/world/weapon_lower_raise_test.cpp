@@ -1000,7 +1000,8 @@ void test_a_loadout_apply_mounts_its_selected_slot() {
 		rig->settle();
 		rig->view().view_bias.position_q16[2] = -100;
 		CHECK(local_loadout_apply_accept(rig->world, rig->local().loadout, w, rig->inventory(),
-				rig->local().inventory_valid, rifle_kit(), 0, false));
+				rig->local().inventory_valid, rifle_kit(), 0, false,
+				LoadoutApplySelect::HeldWeapon));
 		CHECK(rig->inventory().equipped_combo == kRifle);
 		CHECK(w.switch_in_flight && rig->inventory().pending_combo == kRifle);
 		CHECK(w.slot.next == weapon_action::kSwitchRank && w.slot.counter == 0);
@@ -1031,7 +1032,8 @@ void test_a_loadout_apply_mounts_its_selected_slot() {
 		CHECK(rig->tick_until_commit() >= 1);
 		CHECK(rig->lower_raise_active()); // the pistol's raise
 		CHECK(local_loadout_apply_accept(rig->world, rig->local().loadout, w, rig->inventory(),
-				rig->local().inventory_valid, rifle_kit(), 0, false));
+				rig->local().inventory_valid, rifle_kit(), 0, false,
+				LoadoutApplySelect::HeldWeapon));
 		CHECK(rig->inventory().equipped_combo == kPistol);
 		CHECK(w.switch_in_flight && rig->inventory().pending_combo == kPistol);
 		CHECK(w.slot.next != weapon_action::kSwitchRank);
@@ -1257,7 +1259,8 @@ void test_a_loadout_apply_writes_its_view_words_at_its_mount() {
 	rig->view().scope_settled = true;
 	CHECK(local_loadout_apply_accept(rig->world, rig->local().loadout, w, rig->inventory(),
 			rig->local().inventory_valid,
-			std::vector<WeaponKitEntry>{WeaponKitEntry{"WPN_OPTIC", -1, -1, -1}}, 0, false));
+			std::vector<WeaponKitEntry>{WeaponKitEntry{"WPN_OPTIC", -1, -1, -1}}, 0, false,
+			LoadoutApplySelect::HeldWeapon));
 	CHECK(rig->inventory().equipped_combo == kOptic);
 	CHECK(w.slot.next == weapon_action::kSwitchRank); // the mount's, on the slot itself
 	CHECK(rig->view().scope_settled);

@@ -15,7 +15,6 @@
 namespace opennova::profile {
 namespace {
 
-constexpr uint32_t kMagic = 0x43425046u;    // "FPBC"
 constexpr uint32_t kVersion = 0x31313230u;  // "0211"
 constexpr uint32_t kDefaultTableFlag = 0x4000000u;
 
@@ -51,25 +50,22 @@ void overlay(std::vector<uint8_t> &image, size_t image_offset, const std::vector
 
 }  // namespace
 
-std::vector<playersav::BindingEntry> default_binding_table() {
-	size_t count = 0;
-	const controls::ActionDef *rows = controls::catalog(&count);
+std::vector<playersav::BindingEntry> default_binding_table(const controls::Catalog &catalog) {
 	std::vector<const controls::ActionDef *> filtered;
-	for (size_t i = 0; i < count; ++i) {
+	for (size_t i = 0; i < catalog.count; ++i) {
 		// [orig: `test edx, 4000000h` @0x54C2DF, its `jz` @0x54C2E5]
-		if ((rows[i].flags & kDefaultTableFlag) != 0 && controls::action_code(rows[i].id) >= 0)
-			filtered.push_back(&rows[i]);
+		if ((catalog.rows[i].flags & kDefaultTableFlag) != 0) filtered.push_back(&catalog.rows[i]);
 	}
 	// The walk runs over the table the boot's sort laid out by action code
 	// [orig: KeyBinding_SortBySequentialId @0x498260].
 	std::sort(filtered.begin(), filtered.end(),
 			[](const controls::ActionDef *a, const controls::ActionDef *b) {
-				return controls::action_code(a->id) < controls::action_code(b->id);
+				return a->code < b->code;
 			});
 	std::vector<playersav::BindingEntry> out;
 	for (const controls::ActionDef *row : filtered) {
 		if (out.size() == playersav::kBindingCapacity) break;  // [orig: @0x54c39b]
-		const int code = controls::action_code(row->id);
+		const int code = row->code;
 		playersav::BindingEntry e;
 		// [orig: @0x54c2eb..0x54c37a — entry +8 the flags (row +4), +12 the
 		//  modes (row +8), +16 the class (row +12), +20 the help (row +16),
@@ -121,8 +117,26 @@ std::array<std::string, playersav::kMacroCount> default_macros(
 	return out;
 }
 
+namespace {
+
+// The kit pages a fresh weapon record takes, the title's: the single-player page and each side's
+// five class pages. An unwitnessed title names no pages (Title::profile_class_kits): none is
+// written.
+void write_kit_pages(playersav::Record &weapons, const Title &title) {
+	if (title.profile_single_player_kit != nullptr)
+		weapons.single_player = playersav::kit_page_of_names(title.profile_single_player_kit);
+	if (title.profile_class_kits == nullptr) return;
+	for (size_t i = 0; i < playersav::kKitPagesPerSide; ++i) {
+		weapons.blue.pages[i] = playersav::kit_page_of_names(title.profile_class_kits[i]);
+		weapons.red.pages[i] = playersav::kit_page_of_names(
+				title.profile_class_kits[playersav::kKitPagesPerSide + i]);
+	}
+}
+
+} // namespace
+
 void init_defaults(playersav::ProfileRecord &record, playersav::Record &weapons,
-		const ProfileDefaults &defaults) {
+		const ProfileDefaults &defaults, const Title &title) {
 	// [orig: memset(profile, 0, 0x3C80) @0x54bb76, then the seeds: the record's
 	//  member defaults are the unconditional ones — +0 "0211" @0x54bb94, +52 = 1
 	//  @0x54bbb7, +1372 = 1 @0x54bbba, +1424 = 128 @0x54bbc0, +1464 = 1
@@ -145,10 +159,15 @@ void init_defaults(playersav::ProfileRecord &record, playersav::Record &weapons,
 		if ((defaults.joystick_caps & 2u) != 0) record.joystick_cap_2 = 1;
 	}
 	record.macros = defaults.macros;  // [orig: @0x54bc9a..0x54bcda]
+	// +1396, the title's seed: dfx2.exe stores 1 among the unconditional seeds
+	// [orig: PlayerProfile_InitDefaults @0x548db0 (@0x548ece) (dfx2.exe)]; Jointops.exe's
+	// run (@0x54bc58 -> @0x54bc64) stores nothing there.
+	record.word_1396 = title.profile_word_1396;
 	// The weapon record: both class bytes 8 [orig: @0x54bbe0, @0x54bbe3], each
 	// side's character [orig: @0x54bbea..0x54bc17], the single-player page
 	// [orig: @0x54bced] and each side's five class pages [orig:
-	// @0x54bcf7..0x54bde4].
+	// @0x54bcf7..0x54bde4], the title's pages where it names its own
+	// (Title::profile_class_kits carries dfx2.exe's witness).
 	weapons.blue.player_class = 8;
 	weapons.red.player_class = 8;
 	weapons.blue.avatar_a = defaults.avatars[0].nationality;
@@ -157,12 +176,15 @@ void init_defaults(playersav::ProfileRecord &record, playersav::Record &weapons,
 	weapons.red.avatar_a = defaults.avatars[1].nationality;
 	weapons.red.avatar_b = defaults.avatars[1].division;
 	weapons.red.avatar_packed = defaults.avatars[1].packed;
-	weapons.single_player = playersav::default_single_player_page();
-	for (size_t i = 0; i < playersav::kKitPagesPerSide; ++i) {
-		const uint8_t klass = static_cast<uint8_t>(playersav::kMinPlayerClass + i);
-		weapons.blue.pages[i] = playersav::default_kit_page(playersav::SideId::Blue, klass);
-		weapons.red.pages[i] = playersav::default_kit_page(playersav::SideId::Red, klass);
-	}
+	write_kit_pages(weapons, title);
+}
+
+playersav::Record fresh_weapon_record(const Title *title) {
+	playersav::Record weapons;
+	weapons.blue.player_class = 8;
+	weapons.red.player_class = 8;
+	if (title != nullptr) write_kit_pages(weapons, *title);
+	return weapons;
 }
 
 std::vector<playersav::BindingEntry> merge_bindings(
@@ -207,7 +229,7 @@ void set_voice_override(playersav::ProfileRecord &record, int side, int value) {
 	record.voice[static_cast<size_t>(side)] = static_cast<uint8_t>(value);
 }
 
-PlayerProfiles::PlayerProfiles() = default;
+PlayerProfiles::PlayerProfiles(const Title &title) : title_(&title) {}
 
 void PlayerProfiles::select_slot(int slot) {
 	slot_ = (slot < 0 || slot >= static_cast<int>(playersav::kProfileSlots)) ? 0 : slot;
@@ -216,20 +238,26 @@ void PlayerProfiles::select_slot(int slot) {
 void PlayerProfiles::load(const LoadInput &in, const ProfileDefaults &defaults) {
 	const int saved_slot = slot_;  // [orig: @0x54f4e9]
 	slot_ = 0;                     // [orig: @0x54f516]
-	init_defaults(player_.slots[0], weapons_.slots[0], defaults);  // [orig: @0x54f51b]
+	init_defaults(player_.slots[0], weapons_.slots[0], defaults, *title_);  // [orig: @0x54f51b]
 	// GetUserNameA(+4, 16) [orig: @0x54f535]: a name that does not fit the
-	// buffer with its NUL fails and leaves the cleared field.
-	if (in.user_name.size() < playersav::kNameMaxChars) player_.slots[0].name = in.user_name;
+	// buffer with its NUL fails and leaves the cleared field. A title that
+	// names record 0 copies its name instead [orig: @0x54c770..0x54c78a (dfx2.exe)].
+	if (title_->profile_first_name != nullptr)
+		player_.slots[0].name = title_->profile_first_name;
+	else if (in.user_name.size() < playersav::kNameMaxChars)
+		player_.slots[0].name = in.user_name;
 	player_.slots[0].flags &= ~playersav::kRecordFlagNoName;  // [orig: @0x54f53b]
 	for (size_t s = 1; s < playersav::kProfileSlots; ++s)     // [orig: @0x54f55b]
-		init_defaults(player_.slots[s], weapons_.slots[s], defaults);
+		init_defaults(player_.slots[s], weapons_.slots[s], defaults, *title_);
 
 	first_run_ = false;  // [orig: @0x54f57c]
 	uint32_t extra = 0;
 	if (in.player_sav != nullptr) {  // [orig: File_CheckExists @0x54f586]
 		const Header h = read_header(*in.player_sav);
 		extra = h.extra;
-		if (h.magic == kMagic && h.version == kVersion) {  // [orig: @0x54f5c6]
+		// The title's magic [orig: @0x54f5b4..0x54f5c6] [orig: @0x54c800..0x54c812
+		//  (dfx2.exe)]
+		if (h.magic == title_->profile_magic && h.version == kVersion) {
 			if ((h.flags & playersav::kHeaderFlagLatched) != 0) header_latched_ = true;
 			for (size_t s = 0; s < playersav::kProfileSlots; ++s) {
 				// [orig: File_Read(record, 0x3C80) @0x54f5ec]
@@ -255,12 +283,13 @@ void PlayerProfiles::load(const LoadInput &in, const ProfileDefaults &defaults) 
 	// records read over the seeded ones.
 	if (in.weapon_sav != nullptr) {
 		const Header h = read_header(*in.weapon_sav);
-		if (h.magic == kMagic && h.version == kVersion) {
-			std::vector<uint8_t> image = playersav::write(weapons_);
+		// [orig: @0x54f6ef..0x54f6fd] [orig: @0x54c93f..0x54c94d (dfx2.exe)]
+		if (h.magic == title_->profile_magic && h.version == kVersion) {
+			std::vector<uint8_t> image = playersav::write(weapons_, title_->profile_magic);
 			overlay(image, playersav::kHeaderBytes, *in.weapon_sav, playersav::kHeaderBytes,
 					playersav::kProfileSlots * playersav::kRecordBytes);
 			playersav::File file;
-			if (playersav::read(image.data(), image.size(), file)) {
+			if (playersav::read(image.data(), image.size(), title_->profile_magic, file)) {
 				// The header words are the image's: the weapon.sav load keeps
 				// neither.
 				file.flags = weapons_.flags;
@@ -273,11 +302,12 @@ void PlayerProfiles::load(const LoadInput &in, const ProfileDefaults &defaults) 
 
 std::vector<uint8_t> PlayerProfiles::player_sav_bytes() const {
 	// [orig: PlayerProfile_SaveToFiles @0x54be00 — "FPBC0211" @0x54be2e, the
-	//  extra word's high byte @0x54be3d, the flags bit @0x54be43]
+	//  extra word's high byte @0x54be3d, the flags bit @0x54be43] [orig:
+	//  PlayerProfile_SaveToFiles @0x549080 - "2XFD0211" @0x5490ae..0x5490b5 (dfx2.exe)]
 	playersav::PlayerSav out = player_;
 	out.flags = header_latched_ ? playersav::kHeaderFlagLatched : 0u;
 	out.extra = static_cast<uint32_t>(header_byte_) << 24;
-	return playersav::write(out);
+	return playersav::write(out, title_->profile_magic);
 }
 
 std::vector<uint8_t> PlayerProfiles::weapon_sav_bytes() const {
@@ -285,7 +315,7 @@ std::vector<uint8_t> PlayerProfiles::weapon_sav_bytes() const {
 	playersav::File out = weapons_;
 	out.flags = header_latched_ ? playersav::kHeaderFlagLatched : 0u;
 	out.extra = static_cast<uint32_t>(header_byte_) << 24;
-	return playersav::write(out);
+	return playersav::write(out, title_->profile_magic);
 }
 
 bool PlayerProfiles::rename(const std::string &text) {
@@ -327,7 +357,7 @@ void PlayerProfiles::commit_name(const std::string &text) {
 void PlayerProfiles::reset_current(const ProfileDefaults &defaults) {
 	// [orig: PlayerInfo_OnDeleteQueryYes — g_curProfileSlot < 5 @0x561412, InitDefaults
 	//  @0x561435, +52 |= 1 @0x561442]
-	init_defaults(current(), current_weapons(), defaults);
+	init_defaults(current(), current_weapons(), defaults, *title_);
 	current().flags |= playersav::kRecordFlagNoName;
 }
 

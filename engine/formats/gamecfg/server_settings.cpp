@@ -123,6 +123,9 @@ const std::vector<ServerSetting> &server_settings() {
 			integer("time_limit", "Round time (minutes)", "Rules", &GameCfg::time_limit, "GameTime"),
 			integer("kill_limit", "Kill limit", "Rules", &GameCfg::max_kills, "KillLimit"),
 			integer("max_score", "Score limit", "Rules", &GameCfg::max_score, "MaxScore"),
+			// The reader takes the word whole (atol), and a death waits 3 seconds for any word
+			// below 3 [orig: GameEvent_PlayerDeath @0x516EB6..0x516EC6 - `g_RespawnTimeout < 3`
+			// stores 3], so 0 up offers every wait the session makes.
 			integer("respawn", "Respawn delay (seconds)", "Rules", &GameCfg::timeout, "", 0),
 			integer("start_delay", "Start delay (seconds)", "Rules", &GameCfg::startdelay,
 					"StartDelay"),
@@ -136,11 +139,11 @@ const std::vector<ServerSetting> &server_settings() {
 			text("spectator_password", "Spectator password", "Players and access",
 					&GameCfg::mp_host_spectator_password, "", true),
 			integer("spectator_slots", "Spectators (0 off, -1 unlimited)", "Players and access",
-					&GameCfg::mp_num_spectators_max, "", -1, 255),
+					&GameCfg::mp_num_spectators_max),
 			toggle("use_lineup_queue", "Use lineup queue", "Players and access",
 					&GameCfg::mp_use_lineup_queue),
 			integer("lineup_queue_size", "Lineup queue size", "Players and access",
-					&GameCfg::mp_lineup_queue_size, "", 0, 65535),
+					&GameCfg::mp_lineup_queue_size),
 			toggle("punt_duplicate_pcids", "Reject duplicate player IDs", "Players and access",
 					&GameCfg::mp_host_punt_same_pcids),
 			toggle("replay", "Repeat rotation", "Rotation", &GameCfg::replay),
@@ -154,7 +157,13 @@ const std::vector<ServerSetting> &server_settings() {
 			// @0x551500 - g_MaxTeamLives @0x551B67, g_SessionDifficulty @0x551E80]
 			// (runtime/inmatch/host_config.cpp, server_initial_state.cpp, server_dispatch_join.cpp).
 			integer("max_team_lives", "Team lives", "Rules", &GameCfg::max_team_lives),
-			integer("difficulty", "Difficulty", "Rules", &GameCfg::mp_difficulty, "", 0, 255),
+			integer("difficulty", "Difficulty", "Rules", &GameCfg::mp_difficulty),
+			// The authority's mission start after a map change runs on the clock the teardown kept
+			// instead of the map's own start time (runtime/inmatch/host_boot.h kept_mission_clock),
+			// which every joiner's clock follows [orig: Game_StartMission @0x524360 - @0x5253A1;
+			//  NetPacket_WritePlayerState @0x4FFB7E -> NapiNPClientMsg_0x00A @0x4302AE].
+			toggle("time_of_day_continuity", "Keep the time of day between maps", "Rules",
+					&GameCfg::mp_tod_continuity),
 			integer("max_friendly_kills", "Allowed friendly kills", "Rules",
 					&GameCfg::numallowablefriendlykills, "MaxFriendlyKills"),
 			integer("capture_duration", "Capture duration (seconds)", "Teams",
@@ -200,7 +209,7 @@ const std::vector<ServerSetting> &server_settings() {
 					"OneShotKill"),
 			integer("armory_timer", "Armory reuse time", "Classes and weapons",
 					&GameCfg::armory_reuse_time, "ArmoryTimer"),
-			integer("farp_timer", "FARP reuse time", "Rules", &GameCfg::farp_reuse_time, "", 0),
+			integer("farp_timer", "FARP reuse time", "Rules", &GameCfg::farp_reuse_time),
 			toggle("destroy_buildings", "Destructible buildings", "Rules", &GameCfg::destroybuild),
 			toggle("death_messages", "Death messages", "Rules", &GameCfg::deathmes),
 			toggle("custom_skins", "Custom skins", "Players and access",
@@ -231,7 +240,11 @@ const std::vector<ServerSetting> &server_settings() {
 			integer("dfx_category", "DFX category", "Server", &GameCfg::mp_dfx_category),
 			toggle("publish_players", "Publish player list", "Server", &GameCfg::sendplayerlist),
 			toggle("listing_ping", "Allow ping in listing", "Server", &GameCfg::ping),
-			// The fold the defaults apply [orig: Config_SetDefaults @0x54D030 - @0x54D060..0x54D090].
+			// The fold the network init applies to the word at use: 0 is 1300, below 100 is
+			// 100, above 0x4000 is 0x4000 [orig: CNapiNetwork_Init @0x4CAA53..0x4CAA76]. The NP
+			// connection's init folds it the same way under a ceiling of 0x10000
+			// [orig: CNapiGameSession_InitNPConnection @0x4D3DF4..0x4D3E17, 0x10000 @0x4D3E10];
+			// the form keeps the network init's 100..0x4000.
 			integer("max_packet_size", "Maximum packet size", "Network",
 					&GameCfg::mp_max_packet_size, "", 100, 0x4000),
 			toggle("extended_metrics", "Extended network metrics", "Network",

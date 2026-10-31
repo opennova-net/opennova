@@ -166,6 +166,14 @@ int main() {
 	// No name lookup: nameless weapon entries; the "None" row needs none.
 	CHECK(player_info_kit_entries(sel, WeaponNameLookup{})[1].name.empty());
 	CHECK(player_info_kit_entries(sel, WeaponNameLookup{})[3].name == "None");
+	// A category the screen lists nothing for writes no entry, dfx2.exe's screen none of the three
+	// [orig: PlayerInfo_SerializeWeaponLoadout @0x55e6d0..0x55e6d7; @0x55c9a0..0x55c9a7 (dfx2.exe)].
+	sel.secondary.listed = false;
+	page = player_info_kit_entries(sel, names);
+	CHECK(page.size() == 6 && page[1].name == "WPN_M4" && page[2].name == "None" && page[3].name == "WPN_FRAG");
+	sel.primary.listed = sel.accessory.listed = false;
+	page = player_info_kit_entries(sel, names);
+	CHECK(page.size() == 4 && page[0].name == "WPN_KNIFE" && page[1].name == "WPN_FRAG");
 
 	test_restore();
 

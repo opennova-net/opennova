@@ -28,8 +28,6 @@
 
 namespace opennova::novaworld_server::hosted {
 
-inline constexpr size_t kGameNameMaxBytes = 31;     // cp1252 bytes
-inline constexpr size_t kGamePasswordMaxBytes = 16;
 // The longest rotation (service policy: retail's rotation regrows as it fills;
 // the default rotation is every multiplayer mission of the base and its
 // expansion, more than 32 for Joint Operations with Escalation).
@@ -40,7 +38,8 @@ inline constexpr SettingRange kSendHoldoffTicksRange{ 0,
 	static_cast<int>(inmatch::kSendHoldoffTicksMax) };
 inline constexpr SettingRange kEntitySendBudgetRange{ inmatch::kEntitySendBudgetMin,
 	inmatch::kEntitySendBudgetMax };
-inline constexpr SettingRange kMaxPacketSizeRange{ 100, 16384 };
+// The packet size's range: the settings schema's max_packet_size row (gamecfg/server_settings.h).
+SettingRange max_packet_size_range();
 
 // The owner's settings, stored in hosted_servers.configuration; text in UTF-8.
 struct HostedSettings {
@@ -100,11 +99,11 @@ struct SettingsRefusal {
 // the bases with a ready current tree), whose title's limits the whole numbers
 // take and whose offered expansions the expansion is one of; the rotation
 // names 1..kMissionsMax missions, each among the base's tree's missions plus
-// the expansion's (by file name, without case). A name is 1..kGameNameMaxBytes
-// bytes once in cp1252 (the host's code page), not blank, with no control byte
-// or undefined cp1252 byte and no double quote (the host file quotes it and has no
-// escape); a password is printable ASCII with no space or double quote; a
-// mission is a .bms file name of letters, digits, '_' and '-'.
+// the expansion's (by file name, without case). A name is 1 to the reader's game_name
+// limit (gamecfg::text_limit) bytes once in cp1252 (the host's code page), not blank, with
+// no control byte or undefined cp1252 byte and no double quote (the host file quotes it and
+// has no escape); a password is at most the reader's limit, printable ASCII with no space or
+// double quote; a mission is a .bms file name of letters, digits, '_' and '-'.
 std::optional<SettingsRefusal> check_settings(
 		const HostedSettings &settings, const std::vector<OfferedProduct> &offered);
 
@@ -224,9 +223,10 @@ std::string render_host_file(const HostedSettings &settings, int64_t server_id);
 // the NovaWorld port range pinned to `plan.game_port` (the slot's: NovaWorld
 // lists a server at its datagrams' source port, so a stock client joins each
 // slot of a machine on its own port), and the remote admin on
-// `plan.admin_port`; written by the format's own writer.
-std::string render_game_cfg(const SlotPlan &plan, const HostedSettings &settings = {},
-        std::string_view title = "jo", const gamecfg::WeaponRoster &weapons = {});
+// `plan.admin_port`; written by the format's own writer, under the server's game `title` (its
+// settings' table and words: inmatch::server_settings_title).
+std::string render_game_cfg(const SlotPlan &plan, const HostedSettings &settings,
+        std::string_view title, const gamecfg::WeaponRoster &weapons = {});
 // admin.cfg: kAdminUser with `admin_password` and kAdminRights, and one
 // ip_restrict line admitting `plan.admin_allowed_ip`.
 std::string render_admin_cfg(const SlotPlan &plan, const std::string &admin_password);

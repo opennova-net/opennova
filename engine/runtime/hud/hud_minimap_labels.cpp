@@ -317,8 +317,11 @@ void draw_entity_labels_and_markers(MapCompile &c) {
 	}
 	if (!names) return;
 	// Loop 2: the transient bank's persons of the HUD team other than the HUD
-	// entity, named by Entity_GetDisplayName when it returns one.
+	// entity, named by Entity_GetDisplayName when it returns one; dfx2.exe's
+	// draws none of them (HudMinimapInput::bank_names, DFX2-81).
 	// [orig: @0x5a4ef5..0x5a4f95; Entity_GetDisplayName @0x59BF70]
+	// [orig: HUD_DrawEntityLabelsAndMarkers @0x5a3850 - @0x5a3dc5..0x5a3dce (dfx2.exe)]
+	if (!c.input.bank_names) return;
 	for (const HudMinimapMarker &m : c.input.markers) {
 		if (static_cast<HudMinimapBank>(m.bank) != HudMinimapBank::kTransient)
 			continue;

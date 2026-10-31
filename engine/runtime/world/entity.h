@@ -63,12 +63,12 @@ inline constexpr PoolCapacities kRetailPoolCapacity = {256, 1200, 1200, 768, 128
 // event's kill feed, medic and capture records, the 0x2D emote, the 0x6D radio call and
 // the 0x33 squad record; and 0x46 PLAYER_SYNC's entity byte, `entity_handle & 0xFF`),
 // so pool 0 holds retail's 256 here. A protocol whose records name more sets its own
-// (ProtocolInMatch::pool0_wire_capacity, D-SIM-52), which the embedder brings in
+// (ProtocolInMatch::person_index.pool0_wire_capacity, D-SIM-52), which the embedder brings in
 // through wire_pool_capacities: world never reads the protocol. The wire's widths are
 // the protocol's, so a scaled pool is capped at them rather than aliasing a row onto
 // another's name.
 inline constexpr PoolCapacities kWirePoolCapacity = {256, 4096, 4096, 4096, 4096};
-// kWirePoolCapacity with pool 0's cap `pool0` (the protocol's pool0_wire_capacity),
+// kWirePoolCapacity with pool 0's cap `pool0` (the protocol's person_index cap),
 // itself capped at 4096, the 12-bit handle slot every pool's handle carries.
 PoolCapacities wire_pool_capacities(std::size_t pool0);
 // Retail's capacities, each times `scale` (1: retail's own), each capped at its
@@ -412,6 +412,9 @@ constexpr uint32_t bms_attributes_from_entity_flags(uint32_t flags) {
 // [orig: Entity_UpdateBoneTrailEffects @0x4589C0, entity+0x408..0x444]
 struct VehicleTrailPoint {
 	uint8_t definition = 0;
+	// The point spawned with its lane's alternate effect (TitleRules::trail_surface_alternate,
+	// DFX2-46): an emitter keeps the effect it spawned with.
+	bool alternate = false;
 	uint32_t magnitude_q16 = 0;
 	uint32_t source_tick = 0;
 	Vec3 position;
@@ -747,6 +750,7 @@ struct Entity {
     // [orig: WeaponSlotTable_LoadAllFromDefs @0x541503..0x5415ba]
     uint32_t carry_flags = 0;
 	std::string hud_image; // item definition sprite, read by the HUD
+	std::string item_ui_name; // the definition's uiname (+0x40): dfx2.exe's DEATH table label
 	// The shooter's hit-feedback latch, modelled as a serial each connection
 	// consumes once. [orig: entity+0x2C |= 0x1000 @0x4E9962; test/clear
 	//  @0x4FF7C5..0x4FF7D9]
@@ -1571,6 +1575,14 @@ struct Entity {
 		int32_t wheel_slip_phase = 0; // +0x46C: signed wheelspin carry
 		bool contact_solved_once = false; // +0x3CE: contact solver has run
 		bool flare_latched = false; // brain+0x318 bit 2
+		// entity+0xB0 on a vehicle row: a joiner's 0x0D copy of the host brain's +0x318
+		// byte, sign-extended (replication::ClientEntityState::spawn_sound_latch); every other
+		// spawn leaves it 0. A joiner's CHel / cpln class init reads it back: its low two bits
+		// into the brain's latch byte and bit 7 as a rotor already turning
+		// (VehicleSystem::run_weapon_slot_class_init).
+		// [orig: NapiNPClientMsg_0x00D @0x4331BA; Entity_SpawnDeployable @0x51C446;
+		//  Entity_InitAircraftWeaponBones @0x490160 - the reads @0x4902D5 / @0x4902E4]
+		int32_t spawn_sound_latch = 0;
 		int32_t view_tilt_bam = 0; // +0x45C, helo GUNPITCH fallback and bike lean history
 		uint16_t gear_phase = 0; // +0x470, automatic five-unit clearance servo
 		bool movement_effects_disabled = false; // +0x44C

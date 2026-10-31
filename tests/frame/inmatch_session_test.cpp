@@ -536,7 +536,7 @@ int main() {
 			// The pause row's record (catalog row 70, code 25), the drain's to flip.
 			void queue_records(opennova::controls::InputEventQueue &records) override {
 				if (static_cast<int>(calls.size()) - 1 == flip_at)
-					(void)records.push({opennova::controls::action_code(70), 0, 0, 0, false});
+					(void)records.push({25, 0, 0, 0, false});
 			}
 		};
 		auto target = std::make_unique<TickProbe>();
@@ -548,9 +548,9 @@ int main() {
 		seed.kind = opennova::world::EntityKind::Organic;
 		seed.alive = true;
 		world.cached.local_player = world.registry.spawn(0, seed);
-		const int32_t weapon = opennova::controls::action_code(30); // Primary, 0x0C000801
-		const int32_t stance = opennova::controls::action_code(10); // Crouch, 0x0C000C01
-		const int32_t zoom = opennova::controls::action_code(48);   // radarout, 0x04000800
+		const int32_t weapon = 203; // Primary, 0x0C000801
+		const int32_t stance = 169; // Crouch, 0x0C000C01
+		const int32_t zoom = 361;   // radarout, 0x04000800
 		if (!expect(world.cached.local_player.valid() && target->action_head_admits(weapon) &&
 				target->action_head_admits(stance) && target->action_head_admits(zoom),
 				"the rows pass the head while running")) return 1;
@@ -650,7 +650,7 @@ int main() {
 			// The first update's queue: the pause row, the radar zoom, the pause row.
 			void queue_records(opennova::controls::InputEventQueue &records) override {
 				if (calls++ != 0) return;
-				const opennova::controls::InputEventRecord pause{opennova::controls::action_code(70),
+				const opennova::controls::InputEventRecord pause{25,
 						0, 0, 0, false};
 				(void)records.push(pause);
 				(void)records.push({zoom, 0, 0, 0, false});
@@ -675,8 +675,8 @@ int main() {
 		world.cached.local_player = world.registry.spawn(0, seed);
 		Drain drain;
 		drain.role = target.get();
-		drain.weapon = opennova::controls::action_code(30); // Primary, 0x0C000801
-		drain.zoom = opennova::controls::action_code(48);   // radarout, 0x04000800
+		drain.weapon = 203; // Primary, 0x0C000801
+		drain.zoom = 361;   // radarout, 0x04000800
 		FrameInput frame;
 		frame.delta_seconds = TickAccumulator::kTickDt * 3.0;
 		frame.tick_source = &drain;

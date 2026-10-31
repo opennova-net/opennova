@@ -29,6 +29,7 @@
 #include <base/io/bam.h>
 
 #include <runtime/world/entity.h>
+#include <runtime/world/title_rules.h> // PartSpinRates (DFX2-23)
 
 namespace opennova::world {
 
@@ -57,13 +58,15 @@ enum class RotorMachine : uint8_t { None, Ground, Helo };
 // decay [orig: ground @0x49294F = 186413; helo = 46603 inside @0x48FA70], so
 // a player-control ground rotor takes as long to stop as to start while a
 // rolled one may stop faster than it started, and a helicopter's rotor winds
-// down four times slower than it spun up.
-inline constexpr int32_t kRotorRateFull = 186413; // 0x2D82D
-inline constexpr int32_t kRotorRateMid = 163110;  // 0x27D26
-inline constexpr int32_t kRotorRateLow = 139809;  // 0x22221
+// down four times slower than it spun up. The rates are the title's
+// (TitleRules::part_spin, DFX2-23); these are Jointops.exe's row. The cap is
+// both binaries' [orig: @0x492995 / @0x48FB9B] [orig: @0x4929A5 / @0x48FBAB (dfx2.exe)].
+inline constexpr int32_t kRotorRateFull = PartSpinRates{}.full;
+inline constexpr int32_t kRotorRateMid = PartSpinRates{}.mid;
+inline constexpr int32_t kRotorRateLow = PartSpinRates{}.low;
 inline constexpr int32_t kRotorSpeedMax = 0x0CCCCCC0; // 214748352
-inline constexpr int32_t kRotorDecayGround = kRotorRateFull;
-inline constexpr int32_t kRotorDecayHelo = 46603; // 0xB60B
+inline constexpr int32_t kRotorDecayGround = PartSpinRates{}.ground_decay;
+inline constexpr int32_t kRotorDecayHelo = PartSpinRates{}.helo_decay;
 // kItemAttribPlayerControl (items.def PlayerControl, 0x40) is declared once
 // for the whole kItemAttrib* family in world/entity.h, included above.
 
@@ -75,8 +78,8 @@ inline RotorMachine rotor_machine_for_profile(int32_t profile_type) {
 	return RotorMachine::None;
 }
 
-inline int32_t rotor_decay_for(RotorMachine machine) {
-	return machine == RotorMachine::Helo ? kRotorDecayHelo : kRotorDecayGround;
+inline int32_t rotor_decay_for(RotorMachine machine, const PartSpinRates &rates) {
+	return machine == RotorMachine::Helo ? rates.helo_decay : rates.ground_decay;
 }
 
 // Whether THIS tick's seed needs a draw from the shared PRNG stream: only a
@@ -89,20 +92,20 @@ inline bool rotor_rate_needs_roll(const RotorState &s, bool player_control) {
 }
 
 // The rolled rate from a PRNG word [orig: @0x49290E..0x492935].
-inline int32_t rotor_rate_from_roll(uint16_t prng_word) {
+inline int32_t rotor_rate_from_roll(uint16_t prng_word, const PartSpinRates &rates) {
 	const int pct = static_cast<int>(prng_word % 100u);
-	if (pct > 66) return kRotorRateLow;
-	if (pct > 33) return kRotorRateMid;
-	return kRotorRateFull;
+	if (pct > 66) return rates.low;
+	if (pct > 33) return rates.mid;
+	return rates.full;
 }
 
 // Seed the rate when it is zero. `rolled_rate` is rotor_rate_from_roll's
 // result when rotor_rate_needs_roll said so, else ignored.
-inline void rotor_seed_rate(RotorState &s, bool player_control, bool occupied,
-		int32_t rolled_rate) {
+inline void rotor_seed_rate(RotorState &s, bool player_control, bool occupied, int32_t rolled_rate,
+		const PartSpinRates &rates) {
 	if (s.rate != 0) return;
 	if (player_control) {
-		if (occupied) s.rate = kRotorRateFull; // @0x4928F3
+		if (occupied) s.rate = rates.full; // @0x4928F3
 	} else {
 		s.rate = rolled_rate; // @0x492915 / @0x492930
 	}
@@ -110,8 +113,8 @@ inline void rotor_seed_rate(RotorState &s, bool player_control, bool occupied,
 
 // One tick [orig: occupied @0x492984..0x4929A7: speed += rate, cap, angle +=
 //  speed; unoccupied @0x492945..0x492972: speed -= decay floored at 0, angle
-//  += speed, rate = 0]. `decay` is the machine's: 186413 ground, 46603 helo.
-inline void rotor_tick(RotorState &s, bool occupied, int32_t decay = kRotorDecayGround) {
+//  += speed, rate = 0]. `decay` is the machine's (rotor_decay_for).
+inline void rotor_tick(RotorState &s, bool occupied, int32_t decay) {
 	if (occupied) {
 		s.speed += s.rate;
 		if (s.speed > kRotorSpeedMax) s.speed = kRotorSpeedMax;
@@ -132,10 +135,10 @@ inline void rotor_tick(RotorState &s, bool occupied, int32_t decay = kRotorDecay
 //  speed = 0x0CCCCCC0 and the ground speed register +0x29C = 0x10000] — a
 // helicopter spawned in flight has its rotor already turning. The +0x29C /
 // Flags side effects belong to the spawner (mission/promote.cpp), not this
-// state.
+// state. The rate is the title's full one [orig: @0x40ECD0, 0x5B05B (dfx2.exe)].
 inline constexpr int32_t kSpawnRotorFullBit = 0x20000;
-inline void rotor_spawn_full(RotorState &s) {
-	s.rate = kRotorRateFull;
+inline void rotor_spawn_full(RotorState &s, const PartSpinRates &rates) {
+	s.rate = rates.full;
 	s.speed = kRotorSpeedMax;
 }
 

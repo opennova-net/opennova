@@ -65,6 +65,11 @@ struct ListerOptions {
 	uint32_t taken_app_id = 0;
 };
 
+// This machine's NWPSSK / NWUSID under a protocol's serial term (Protocol::nwpssk_mix): retail's
+// machine inputs where they read, else the stand-in over this host's name. The verify Cookie
+// carries them, and the server's CD-key boot read runs its mix under the NWPSSK.
+LobbyMachineTokens machine_tokens(const FingerprintSerialMix &mix);
+
 // opennova-serve's NovaWorld listing kept up: the engine's NWU driver and host role, the account
 // login and the hosting page over LobbyHttpFlow, and the columns and roster from a ListingSource
 // (the live match, ServeListing). The process owns the socket layer (net::startup / shutdown);

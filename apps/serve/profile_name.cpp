@@ -39,10 +39,10 @@ std::string process_account_name() {
 #endif
 }
 
-ServeProfile load_serve_profile(int32_t player_index, const std::string &account_name,
-		const std::vector<uint8_t> *player_sav, const std::vector<uint8_t> *weapon_sav,
-		const inmatch::CharacterRegistry &characters) {
-	profile::PlayerProfiles profiles;
+ServeProfile load_serve_profile(const Title &title, int32_t player_index,
+		const std::string &account_name, const std::vector<uint8_t> *player_sav,
+		const std::vector<uint8_t> *weapon_sav, const inmatch::CharacterRegistry &characters) {
+	profile::PlayerProfiles profiles(title);
 	profiles.select_slot(player_index);
 	profile::PlayerProfiles::LoadInput input;
 	input.player_sav = player_sav;
@@ -74,16 +74,17 @@ ServeProfile load_serve_profile(int32_t player_index, const std::string &account
 	return out;
 }
 
-ServeProfile read_serve_profile(int32_t player_index, const std::string &account_name,
-		const std::string &expansion, const inmatch::CharacterRegistry &characters) {
+ServeProfile read_serve_profile(const Title &title, int32_t player_index,
+		const std::string &account_name, const std::string &expansion,
+		const inmatch::CharacterRegistry &characters) {
 	std::vector<uint8_t> player_sav;
 	std::vector<uint8_t> weapon_sav;
 	std::string error;
 	const bool have_player = io::read_file_bytes("player.sav", player_sav, error);
 	const bool have_weapon =
 			io::read_file_bytes(playersav::weapon_sav_relpath(expansion), weapon_sav, error);
-	return load_serve_profile(player_index, account_name, have_player ? &player_sav : nullptr,
-			have_weapon ? &weapon_sav : nullptr, characters);
+	return load_serve_profile(title, player_index, account_name,
+			have_player ? &player_sav : nullptr, have_weapon ? &weapon_sav : nullptr, characters);
 }
 
 } // namespace opennova::serve

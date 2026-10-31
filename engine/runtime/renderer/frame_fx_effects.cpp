@@ -161,6 +161,39 @@ void append_death_blur(std::vector<FrameFxStep> &steps, std::int32_t elapsed_tic
 	steps.push_back(pass_step(final_pass));
 }
 
+// Type 5, the low-health ring at the strength x (DFX2-48): the capture's 256A
+// downsample averaged through the Ring taps over the frame's border at alpha
+// f = min(sqrt(x), 1) (no root at or below 0), the taps' radius
+// (2.5 f + 0.5) / 512 from base 1/1024, the U taps reduced. Jointops.exe's
+// dispatcher carries it with no caller; dfx2.exe's scene frame calls it.
+// [orig: FrameFX_ApplyScreenEffect @0x584440 - the capture @0x584487, type 5
+//  @0x58449d..0x5844ba; FrameFX_LowHealthRing @0x583B60 - f @0x583B83..0x583BA6, base
+//  flt_7D68F4 @0x583BA8, radius flt_7D7BFC / flt_7C3B94 / flt_7D83A4
+//  @0x583BB8..0x583BEC, source [fx+4] @0x583BB1, the viewport rect and the
+//  reduced byte @0x583BE0 / @0x583BE8, stage [fx+14h] @0x583BAE, taps 5
+//  @0x583C03, count 1 @0x583BE4, c0 = (0, 0, 0, f) @0x583BF7..0x583C17]
+// [orig: FrameFX_LowHealthRing @0x581fe0, dispatched by FrameFX_ApplyScreenEffect @0x5828c0 case 5
+//  @0x58293a; FrameFX_BuildScarDecalVertices @0x582ab0 (dfx2.exe)]
+void append_low_health_ring(std::vector<FrameFxStep> &steps, float strength) {
+	append_capture_and_downsample(steps);
+	double f = strength;
+	if (f > 0.0)
+		f = std::sqrt(f);
+	if (f > 1.0)
+		f = 1.0;
+	FrameFxPass pass;
+	pass.source = FrameFxBuffer::WorkA;
+	pass.target = FrameFxBuffer::Frame;
+	pass.stage = FrameFxStage::AverageBlend;
+	pass.taps = FrameFxTaps::Ring;
+	pass.viewport_rect = true;
+	pass.reduced_u = true;
+	pass.base = kDownsampleRadius; // flt_7D68F4, 1/1024
+	pass.radius = static_cast<float>((2.5 * f + 0.5) * static_cast<double>(kWorkBase));
+	pass.constant_alpha = static_cast<float>(f);
+	steps.push_back(pass_step(pass));
+}
+
 // The Tiled scanline pass over the frame: "ffscan" at base 1/128, two rand()
 // draws per pass (the first gives the V offset, the second the U offset).
 // [orig: FrameFX_ScanlineOverlay @0x583a60; FrameFX_DrawPass @0x582cc2..0x582cd8]
@@ -228,6 +261,21 @@ FrameFxNvgPlan frame_fx_nvg_view(const FrameFxViewInputs &view) {
 	return nvg;
 }
 
+float frame_fx_low_health_strength(const FrameFxViewInputs &view) {
+	if (!view.local_present)
+		return -1.0f;
+	const std::int64_t health = static_cast<std::int16_t>(view.local_health);
+	const std::int32_t ceiling = view.local_max_health != 0 ? view.local_max_health : 1;
+	std::int32_t fraction = static_cast<std::int32_t>((health * 65536) / ceiling);
+	if (fraction > 0x10000)
+		return -1.0f;
+	if (fraction < 0)
+		fraction = 0;
+	if (fraction >= 0x10000)
+		return -1.0f;
+	return static_cast<float>(static_cast<double>(0x10000 - fraction) * 0.000030517578);
+}
+
 bool frame_fx_nvg_mask_visible(const FrameFxViewInputs &view) {
 	const FrameFxNvgPlan nvg = frame_fx_nvg_view(view);
 	return nvg.composite && !nvg.lens && !view.death_screen_active;
@@ -253,6 +301,15 @@ FrameFxFramePlan plan_frame_fx(const FrameFxFrameInputs &in, FrameFxPlannerState
 	if (dispatcher && !(view.in_session && view.local_dead) && !red_flash &&
 			in.frame_effects_level >= 2 && in.distortion_present)
 		append_distortion(plan.before_bloom, in.clock_ms, rand);
+	// Type 5 under a title whose scene frame dispatches it, below the health
+	// ceiling (DFX2-48). [orig: the twin of Render_ProcessMainSceneFrame @0x5c9000 -
+	// FrameFX_ApplyScreenEffect(5) @0x5c995d, after the type 0 @0x5c985e and the
+	// Inset @0x5c9879, ahead of the type 4 / 1 @0x5c99b1 / @0x5c99e3 (dfx2.exe)]
+	if (dispatcher && in.low_health_ring) {
+		const float strength = frame_fx_low_health_strength(view);
+		if (strength >= 0.0f)
+			append_low_health_ring(plan.before_bloom, strength);
+	}
 	// Type 4 while dead, else type 1 under the red flash. [orig: @0x5ca9f5..0x5caa71]
 	if (dispatcher) {
 		if (view.local_dead)

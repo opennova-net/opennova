@@ -20,7 +20,6 @@ Ref<LoadingBackground> LoadingBackground::resolve(const Ref<ResourceRoot> &p_roo
 	out.instantiate();
 	out->name_ = opennova::to_gd(pick.image);
 	out->custom_ = pick.custom;
-	out->band_right_ = opennova::hud::loading_band_right(pick.custom);
 	return out;
 }
 
@@ -36,8 +35,6 @@ void LoadingBackground::_bind_methods() {
 			&LoadingBackground::start_mission_splash_due);
 	ClassDB::bind_method(D_METHOD("get_name"), &LoadingBackground::get_name);
 	ClassDB::bind_method(D_METHOD("get_custom"), &LoadingBackground::get_custom);
-	ClassDB::bind_method(D_METHOD("get_band_right"), &LoadingBackground::get_band_right);
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "name"), "", "get_name");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "custom"), "", "get_custom");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "band_right"), "", "get_band_right");
 }

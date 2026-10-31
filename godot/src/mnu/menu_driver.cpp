@@ -13,10 +13,15 @@
 #include "resource_index/launch_flags.h"
 #include "resource_index/resource_root.h"
 #include "rtxt/rtxt_string_file.h"
+#include "hud/hud_overlay.h"
 #include "simulation/deploy_rows.h"
 #include "simulation/hud_view_records.h"
+#include "simulation/simulation.h"
 #include "util/string_convert.h"
 
+#include <runtime/inmatch/joiner_role.h> // the STAT DONE press's runtime
+#include <runtime/inmatch/role_feeds.h> // deploy_table_zones
+#include <base/title/title.h>
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/inmatch/vehicle_menu.h> // the ITEM_DISPLAY preview's view
 #include <runtime/world/occlusion.h>      // render_matrix_from_pose
@@ -43,7 +48,8 @@ std::vector<opennova::menu::MissionChoice> mission_choices(const TypedArray<Miss
 	for (int i = 0; i < rows.size(); ++i) {
 		const Ref<MissionCatalogRow> row = rows[i];
 		if (row.is_valid()) choices.push_back({to_std(row->get_file()), to_std(row->display_text()),
-				to_std(row->get_briefing()), static_cast<uint32_t>(row->get_game_type())});
+				to_std(row->get_briefing()), static_cast<uint32_t>(row->get_game_type()), {},
+				to_std(row->get_title()), static_cast<uint8_t>(row->get_mission_type())});
 	}
 	return choices;
 }
@@ -177,6 +183,9 @@ public:
 	}
 	void set_widget_focused(int index, bool focused) override {
 		if (MenuFrame *f = frame()) f->set_widget_focused(index, focused);
+	}
+	void set_widget_image(int index, uint32_t states, const std::string &file) override {
+		if (MenuFrame *f = frame()) f->set_widget_image(index, states, file);
 	}
 	void set_widget_rect(int index, int left, int top, int right, int bottom) override {
 		if (MenuFrame *f = frame())
@@ -734,7 +743,99 @@ void MenuDriver::set_deploy_list_items(int p_id, const TypedArray<DeployListRow>
 		const Ref<DeployListRow> row = p_rows[i];
 		if (row.is_valid()) rows.push_back(row->value());
 	}
-	runtime_.set_widget_items(p_id, opennova::world::deploy_list_items(rows));
+	opennova::world::fill_deploy_spawn_list(runtime_, p_id, rows);
+}
+
+bool MenuDriver::hide_stat_done(const Ref<Simulation> &p_sim) {
+	if (p_sim.is_null()) return false;
+	return opennova::inmatch::stat_screen_hide_done(runtime_, p_sim->role_view().title);
+}
+
+bool MenuDriver::show_stat_done(const Ref<Simulation> &p_sim) {
+	if (p_sim.is_null()) return false;
+	const opennova::inmatch::RoleView view = p_sim->role_view();
+	const bool hold = view.runtime != nullptr && view.runtime->state().round_reset_hold;
+	return opennova::inmatch::stat_screen_show_done(runtime_, view.title, hold);
+}
+
+bool MenuDriver::stat_done_pressed(const Ref<Simulation> &p_sim) {
+	if (p_sim.is_null() || !p_sim->is_joiner() || p_sim->joiner_role_ == nullptr) return false;
+	return opennova::inmatch::stat_screen_done_pressed(p_sim->role_view().title,
+			p_sim->joiner_role_->client_runtime());
+}
+
+bool MenuDriver::fill_deploy_spawn_table(const Ref<Simulation> &p_sim, Object *p_hud,
+		const Ref<RtxtStringFile> &p_gametext) {
+	const opennova::hud::HudLayout defaults;
+	const HudOverlay *hud = Object::cast_to<HudOverlay>(p_hud);
+	const opennova::hud::HudLayout &layout = hud != nullptr ? hud->layout() : defaults;
+	std::vector<opennova::world::DeployTableZone> zones;
+	int team = 0;
+	if (p_sim.is_valid() && p_sim->kernel_) {
+		const opennova::inmatch::RoleView view = p_sim->role_view();
+		opennova::inmatch::deploy_table_zones(view, p_sim->deploy_zone_registry(),
+				layout.stance_middle, layout.stance_bad, game_text_lookup(p_gametext), zones);
+		team = opennova::inmatch::deploy_list_team(view);
+	}
+	return opennova::world::fill_deploy_spawn_table(runtime_,
+			opennova::world::build_deploy_table_rows(team, zones));
+}
+
+Vector2i MenuDriver::deploy_table_click(int p_id, int p_row, int p_state,
+		bool p_double_click) const {
+	const opennova::world::DeployTableClick click =
+			opennova::world::deploy_table_click(runtime_, p_id, p_row, p_state, p_double_click);
+	return Vector2i(click.pan_zone_index, click.pick_value);
+}
+
+bool MenuDriver::fill_deploy_team_lists(const Ref<Simulation> &p_sim,
+		const Ref<RtxtStringFile> &p_gametext) {
+	if (p_sim.is_null() || !p_sim->kernel_) return false;
+	const opennova::inmatch::RoleView view = p_sim->role_view();
+	std::vector<opennova::world::DeployTeamListPlayer> players;
+	if (!opennova::inmatch::deploy_team_list_players(view, players)) return false;
+	opennova::world::fill_deploy_team_lists(runtime_, opennova::world::deploy_team_lists(players,
+			opennova::inmatch::deploy_list_team(view), game_text_lookup(p_gametext)));
+	return true;
+}
+
+void MenuDriver::apply_deploy_activation(const Ref<Simulation> &p_sim,
+		const Ref<RtxtStringFile> &p_gametext) {
+	if (p_sim.is_null() || !p_sim->kernel_) return;
+	opennova::world::apply_deploy_activation(runtime_, opennova::inmatch::deploy_activation(
+			p_sim->role_view(), game_text_lookup(p_gametext)));
+}
+
+bool MenuDriver::install_deploy_table_painter(const Ref<Simulation> &p_sim) {
+	MenuFrame *frame = frame_();
+	const int table = runtime_.find_screen_control("DEATH", "SPAWNPOINTS_TABLE");
+	const int index = frame_index(table);
+	if (frame == nullptr || index < 0) return false;
+	const ObjectID driver_id(get_instance_id());
+	const ObjectID sim_id = p_sim.is_valid() ? ObjectID(p_sim->get_instance_id()) : ObjectID();
+	// The zone labels draw in the HUD label face (world::deploy_table_paint).
+	frame->set_hud_label_face(true);
+	frame->set_table_cell_painter(index,
+			[driver_id, sim_id, table](const opennova::menu::MenuTableCellEvent &event,
+					opennova::menu::MenuTableCellCanvas &canvas) {
+				std::string name;
+				MenuDriver *driver = Object::cast_to<MenuDriver>(ObjectDB::get_instance(driver_id));
+				Simulation *sim = Object::cast_to<Simulation>(ObjectDB::get_instance(sim_id));
+				if (event.row >= 0 && event.column == 1 && driver != nullptr && sim != nullptr &&
+						sim->kernel_) {
+					const std::optional<int32_t> value =
+							driver->runtime().table_cell_record(table, event.row, 1);
+					if (value.has_value())
+						name = opennova::world::deploy_table_zone_name(sim->kernel_->world,
+								sim->deploy_zone_registry(), *value);
+				}
+				opennova::world::deploy_table_paint(event, canvas, name);
+			});
+	return true;
+}
+
+bool MenuDriver::deploy_map_moved() {
+	return opennova::world::deploy_map_moved(runtime_);
 }
 
 // ---- activation / actions --------------------------------------------------------
@@ -860,6 +961,37 @@ void MenuDriver::select_mission(int p_id, int p_row, const String &p_fallback) {
 
 String MenuDriver::get_selected_mission() const { return to_gd(flow_.selected_mission()); }
 
+Vector2i MenuDriver::get_selected_campaign() const {
+	const opennova::mission_catalog::CampaignWords &words = flow_.selected_campaign();
+	return Vector2i(words.campaign, words.campaign_mission);
+}
+
+bool MenuDriver::activate_single_player_tab(const String &p_name) {
+	return flow_.activate_tab(runtime_, to_std(p_name));
+}
+
+void MenuDriver::set_single_player_source(const Ref<PlayerProfiles> &p_profiles,
+		const Ref<RtxtStringFile> &p_menu_text) {
+	const opennova::Title &title = ResourceRoot::session_title(root_);
+	flow_.set_title(&title);
+	if (!title.sp_campaign_tabs) return;
+	sp_menu_text_ = p_menu_text;
+	std::string def;
+	if (root_.is_valid()) {
+		const PackedByteArray bytes = root_->read_file(to_gd(opennova::campaign::kCampaignFile));
+		def.assign(reinterpret_cast<const char *>(bytes.ptr()), static_cast<size_t>(bytes.size()));
+	}
+	opennova::campaign::CompletionTable progress{};
+	if (p_profiles.is_valid()) {
+		const auto &table = p_profiles->native().current().campaign_complete;
+		for (size_t c = 0; c < progress.size() && c < table.size(); ++c)
+			for (size_t m = 0; m < progress[c].size() && m < table[c].size(); ++m)
+				progress[c][m] = table[c][m];
+	}
+	flow_.set_campaign_source(std::move(def),
+			sp_menu_text_.is_valid() ? &sp_menu_text_->get_native() : nullptr, progress);
+}
+
 void MenuDriver::set_mod_descriptions(const PackedStringArray &p_names) {
 	mods_.set_descriptions(to_std_strings(p_names));
 }
@@ -872,7 +1004,8 @@ void MenuDriver::seed_mod_list(int p_id) {
 		if (!dir.is_empty()) records = opennova::vfs_expansion_records(to_std(dir));
 		mods_.set_records(std::move(records));
 	}
-	mods_.populate(runtime_, p_id, root_.is_valid() ? to_std(root_->get_expansion()) : std::string());
+	mods_.populate(runtime_, p_id, root_.is_valid() ? to_std(root_->get_expansion()) : std::string(),
+			ResourceRoot::session_title(root_).mod_list_base);
 }
 
 String MenuDriver::mod_list_pick(int p_id) const { return to_gd(mods_.pick(runtime_, p_id)); }
@@ -885,7 +1018,7 @@ bool MenuDriver::request_expansion(const String &p_name, const String &p_current
 String MenuDriver::take_expansion_reload() { return to_gd(flow_.take_expansion_reload()); }
 
 void MenuDriver::seed_host_pool(const TypedArray<MissionCatalogRow> &p_rows) {
-	host_dialog_.seed(runtime_, mission_choices(p_rows));
+	host_dialog_.seed(runtime_, mission_choices(p_rows), ResourceRoot::session_title(root_));
 }
 
 void MenuDriver::add_host_missions(const Ref<RtxtStringFile> &p_text) {
@@ -914,6 +1047,10 @@ String MenuDriver::screen_command(const String &p_screen, const String &p_name,
 			commands.command_of(to_std(p_screen), to_std(p_name))));
 }
 
+bool MenuDriver::is_player_info_document() const {
+	return opennova::menu::is_player_info_document(runtime_);
+}
+
 PackedStringArray MenuDriver::command_names(const String &p_set) {
 	opennova::menu::MenuNameSet set = opennova::menu::MenuNameSet::kCount;
 	if (!opennova::menu::menu_name_set_from_token(to_std(p_set), set)) return PackedStringArray();
@@ -930,11 +1067,16 @@ opennova::playersav::ProfileRecord *current_record(const Ref<PlayerProfiles> &p_
 } // namespace
 
 void MenuDriver::prepare_options(const Ref<PlayerProfiles> &p_profiles) {
-	options_.prepare(runtime_, current_record(p_profiles));
+	// The working records follow the profile's title's binding catalog (the launch's).
+	options_.prepare(runtime_, current_record(p_profiles),
+			opennova::controls::title_catalog(p_profiles.is_valid()
+							? p_profiles->native().title()
+							: ResourceRoot::session_title(Ref<ResourceRoot>())));
 }
 
 void MenuDriver::apply_options_policy(const Ref<PlayerProfiles> &p_profiles) {
 	options_.apply_policy(runtime_);
+	options_.apply_title(runtime_, ResourceRoot::session_title(root_));
 	options_.seed_profile(runtime_, current_record(p_profiles));
 }
 
@@ -985,7 +1127,15 @@ int MenuDriver::update_player_info_avatars(const Ref<AvatarDatabase> &p_db, int 
 	const opennova::avatars::AvatarsFile empty{};
 	return avatars_.update(runtime_, p_db.is_valid() ? p_db->native_file() : empty,
 			static_cast<opennova::menu::PlayerInfoAvatars::Change>(p_change), p_value, p_team, p_voice,
-			game_text_lookup(p_gameui), game_text_lookup(p_menutxt));
+			game_text_lookup(p_gameui), game_text_lookup(p_menutxt), ResourceRoot::session_title(root_));
+}
+
+String MenuDriver::player_info_combo_list_event() const {
+	return String(opennova::menu::player_info_combo_list_event(ResourceRoot::session_title(root_)));
+}
+
+bool MenuDriver::player_info_preview_hovers() const {
+	return ResourceRoot::session_title(root_).player_info_preview_hover;
 }
 
 PackedInt32Array MenuDriver::player_info_nationality_rows() const {
@@ -1063,6 +1213,10 @@ void MenuDriver::_bind_methods() {
 	BIND_ENUM_CONSTANT(AVATAR_COMBO);
 	BIND_ENUM_CONSTANT(AVATAR_VOICE);
 	ClassDB::bind_method(D_METHOD("update_player_info_avatars", "db", "change", "value", "team", "voice", "gameui", "menutxt"), &MenuDriver::update_player_info_avatars);
+	ClassDB::bind_method(D_METHOD("seed_player_info_avatars", "nationality", "division"),
+			&MenuDriver::seed_player_info_avatars);
+	ClassDB::bind_method(D_METHOD("player_info_combo_list_event"), &MenuDriver::player_info_combo_list_event);
+	ClassDB::bind_method(D_METHOD("player_info_preview_hovers"), &MenuDriver::player_info_preview_hovers);
 	ClassDB::bind_method(D_METHOD("player_info_nationality_rows"), &MenuDriver::player_info_nationality_rows);
 	ClassDB::bind_method(D_METHOD("player_info_avatar_nationality"), &MenuDriver::player_info_avatar_nationality);
 	ClassDB::bind_method(D_METHOD("player_info_avatar_division"), &MenuDriver::player_info_avatar_division);
@@ -1083,6 +1237,12 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("select_mission", "id", "row", "fallback"), &MenuDriver::select_mission);
 	ClassDB::bind_method(D_METHOD("activate_mission", "id", "row"), &MenuDriver::activate_mission);
 	ClassDB::bind_method(D_METHOD("get_selected_mission"), &MenuDriver::get_selected_mission);
+	ClassDB::bind_method(D_METHOD("get_selected_campaign"), &MenuDriver::get_selected_campaign);
+	ClassDB::bind_method(D_METHOD("set_single_player_source", "profiles", "menu_text"),
+			&MenuDriver::set_single_player_source);
+	ClassDB::bind_method(D_METHOD("select_campaign", "id", "row"), &MenuDriver::select_campaign);
+	ClassDB::bind_method(D_METHOD("activate_single_player_tab", "name"),
+			&MenuDriver::activate_single_player_tab);
 	ClassDB::bind_method(D_METHOD("clear_selected_mission"), &MenuDriver::clear_selected_mission);
 	ClassDB::bind_method(D_METHOD("set_mod_descriptions", "names"), &MenuDriver::set_mod_descriptions);
 	ClassDB::bind_method(D_METHOD("seed_mod_list", "id"), &MenuDriver::seed_mod_list);
@@ -1107,6 +1267,7 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_static_method("MenuDriver", D_METHOD("command_names", "set"), &MenuDriver::command_names);
 	ClassDB::bind_method(D_METHOD("screen_command", "screen", "name", "in_mission"),
 			&MenuDriver::screen_command);
+	ClassDB::bind_method(D_METHOD("is_player_info_document"), &MenuDriver::is_player_info_document);
 	ClassDB::bind_static_method("MenuDriver", D_METHOD("is_front_options_screen", "screen"),
 			&MenuDriver::is_front_options_screen);
 	ClassDB::bind_method(D_METHOD("activate_options", "profiles", "id"), &MenuDriver::activate_options);
@@ -1219,8 +1380,22 @@ void MenuDriver::_bind_methods() {
 			&MenuDriver::fill_stat_results);
 	ClassDB::bind_method(D_METHOD("filter_stat_results", "id", "tab"),
 			&MenuDriver::filter_stat_results);
+	ClassDB::bind_method(D_METHOD("hide_stat_done", "sim"), &MenuDriver::hide_stat_done);
+	ClassDB::bind_method(D_METHOD("show_stat_done", "sim"), &MenuDriver::show_stat_done);
+	ClassDB::bind_method(D_METHOD("stat_done_pressed", "sim"), &MenuDriver::stat_done_pressed);
 	ClassDB::bind_method(D_METHOD("set_deploy_list_items", "id", "rows"),
 			&MenuDriver::set_deploy_list_items);
+	ClassDB::bind_method(D_METHOD("fill_deploy_spawn_table", "sim", "hud", "gametext"),
+			&MenuDriver::fill_deploy_spawn_table);
+	ClassDB::bind_method(D_METHOD("deploy_table_click", "id", "row", "state", "double_click"),
+			&MenuDriver::deploy_table_click);
+	ClassDB::bind_method(D_METHOD("deploy_map_moved"), &MenuDriver::deploy_map_moved);
+	ClassDB::bind_method(D_METHOD("install_deploy_table_painter", "sim"),
+			&MenuDriver::install_deploy_table_painter);
+	ClassDB::bind_method(D_METHOD("apply_deploy_activation", "sim", "gametext"),
+			&MenuDriver::apply_deploy_activation);
+	ClassDB::bind_method(D_METHOD("fill_deploy_team_lists", "sim", "gametext"),
+			&MenuDriver::fill_deploy_team_lists);
 	ClassDB::bind_method(D_METHOD("table_cell_value", "id", "row", "col"),
 			&MenuDriver::table_cell_value);
 	ClassDB::bind_method(D_METHOD("table_selected_rows", "id"), &MenuDriver::table_selected_rows);

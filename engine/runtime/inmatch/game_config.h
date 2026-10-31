@@ -180,6 +180,10 @@ struct GameConfig {
 	int32_t connection_speed = 5;
 	int32_t max_friendly_kills = 3;
 	bool allow_ai = true;
+	// Set on the authority: each mission start after a map change runs on the clock the
+	// teardown kept (host_boot.h kept_mission_clock) instead of the BMS header's.
+	// [orig: dword_24D5A00, Game_ApplySessionSettingsToGlobals @0x551E1F; read by
+	//  Game_StartMission @0x5253A1]
 	int32_t time_of_day_continuity = 0;
 	// The session's four charattr restriction words, game.cfg's mp_No* (no host
 	// screen control sets them): each set one makes the authority zero and
@@ -527,7 +531,7 @@ struct GameConfig {
 	// The server / mission / player fields the reactive NapiNPServerMsg_0x0NN reply handlers read
 	// (server_message_dispatch.h). The replicated-entity / spawn-point inputs are NOT here — the
 	// faithful world-stream burst sources those from World + bms::File.
-	// The mission header's name [orig: dword_A761D4, the header's mission_name]; the
+	// The mission header's name [orig: g_MissionHeaderName, the header's mission_name]; the
 	// MISSIONNAME a session advertises is session_mission_name's (the mission text's
 	// title first, server_message_dispatch.h).
 	std::string mission_name = "AS - Dormant Volcano Isle";
@@ -576,8 +580,17 @@ struct GameConfig {
 	uint32_t lan_mode = 1;
 	std::optional<uint32_t> send_holdoff_ticks;
 
+	// The cfg block's network connect type (game.cfg `networkconnecttype`: 1 as the
+	// NovaWorld screen writes it and by default, 2 as the LAN screen writes it), which
+	// the session apply's player ceiling reads (host_player_slot_limit).
+	// [orig: networkConnectType_480 - Config_SetDefaults @0x54D1D4,
+	//  UI_InitLANMultiplayerScreen @0x5569E1 (2), UI_InitNovaWorldHostScreen @0x556AA0 (1);
+	//  Game_ApplySessionSettingsToGlobals @0x551B3B]
+	int32_t network_connect_type = 1;
+
 	// The session create's player-slot limit: max_players plus the dedicated
-	// host's own slot (host_player_slot_limit), the create's cap and server type.
+	// host's own slot (host_player_slot_limit), the create's cap, server type
+	// and network connect type.
 	// The slot table is allocated with it (total_player_slot_capacity); the live
 	// limit starts as it (live_slot_limit).
 	// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 - Server_InitNewRoundState
@@ -586,9 +599,16 @@ struct GameConfig {
 	uint32_t player_slot_limit() const;
 
 	// The limit a map change's mission start recomputed from the cfg block as it then stood
-	// (stage_next_mission), unset until a map change: a remote admin's SET of the cap or the
-	// server type between maps moves it, while the session's cap and its slot table stay the
-	// create's. [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals
+	// (stage_next_mission), unset until a map change: a cap or server type the host screen's
+	// read or the host file wrote into the block since the create moves it (no remote admin
+	// SET writes either), while the session's cap and its slot table stay the create's.
+	// [orig: the block's writers HostDialog_ReadSettings @0x555940 (from
+	//  UI_HandleHostSessionStart @0x556E36, HostDialog_StartSession @0x558764 and the host
+	//  screen's BACK callback HostDialog_OnBackReadSettings @0x5571FA) and
+	//  ServerConfig_ApplyHostSetting @0x4A6000 (the host file; its one caller,
+	//  Game_HostMultiplayerSession @0x4A65A0, has none: retail's dead /HOST path, ours
+	//  opennova-serve's host file); CAdminServer_HandleSetCommand @0x405A60 has no cap or
+	//  server-type key] [orig: Game_StartMission @0x524360 - Game_ApplySessionSettingsToGlobals
 	//  @0x524662 under the first-load flag @0x52465E (the store @0x551B2B / @0x551B35, the
 	//  ceiling @0x551B3B..0x551B48); Server_InitNewRoundState has no map-change caller (its
 	//  callers: Game_InitSubsystems @0x4A6D76, CNapiGameSession_FullDestroy @0x4C9780,

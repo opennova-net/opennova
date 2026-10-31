@@ -9,7 +9,10 @@
 #include <string>
 #include <vector>
 
+#include <base/title/title.h>
 #include <formats/mnu/mnu.h>
+#include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/menu/menu_runtime.h>
 
@@ -183,6 +186,49 @@ void test_tab_filter_hides_filled_rows() {
 	CHECK(rt.table_selected_rows(id) == std::vector<int>{ 1 });
 }
 
+// DFX2-97: the STAT screen's DONE. dfx2.exe's show hides it, its menu-screen pass shows it while
+// the joiner's S2C 0x25 round-reset hold is up, and its press stores mission exit 4 and ends the
+// end-round linger; Jointops.exe registers no DONE and its pass's call is an empty stub.
+// [orig: StatScreen_ShowCallback @0x561780 (@0x561812..0x561834); StatScreen_UpdateDoneButton
+//  @0x561000; StatScreen_OnDone @0x561130 (@0x561143, @0x56114d) (dfx2.exe); nullsub_130 @0x562130]
+void test_done_button() {
+	mnu::Document doc = stat_document();
+	mnu::Window done;
+	done.name = "DONE";
+	done.type = mnu::WindowType::Button;
+	doc.screens[0].roots[0].children.push_back(done);
+	menu::MenuRuntime rt;
+	rt.open_document(&doc, "stat.mnu", "");
+	const int id = rt.widget_id("DONE");
+	CHECK(id >= 0 && rt.is_widget_shown(id));
+	const Title jo;  // Jointops.exe's row: no DONE
+	Title dfx2;
+	dfx2.stat_screen_done = true;
+	CHECK(!stat_screen_hide_done(rt, &jo) && rt.is_widget_shown(id));
+	CHECK(!stat_screen_show_done(rt, &jo, true));
+	CHECK(!stat_screen_hide_done(rt, nullptr));
+	// The show hides it; the pass shows it only while the hold is up.
+	CHECK(stat_screen_hide_done(rt, &dfx2) && !rt.is_widget_shown(id));
+	CHECK(!stat_screen_show_done(rt, &dfx2, false) && !rt.is_widget_shown(id));
+	CHECK(stat_screen_show_done(rt, &dfx2, true) && rt.is_widget_shown(id));
+	// A menu with no DONE does nothing.
+	menu::MenuRuntime bare;
+	const mnu::Document plain = stat_document();
+	bare.open_document(&plain, "stat.mnu", "");
+	CHECK(!stat_screen_hide_done(bare, &dfx2) && !stat_screen_show_done(bare, &dfx2, true));
+	// The press: a joiner's runtime takes exit 4 and its linger ends; JO's title, or no joiner
+	// runtime (the authority, whose DONE never shows), takes nothing.
+	inmatch::ClientRuntime joiner("DoneJoiner");
+	joiner.state().end_round_linger_ticks = 1240;
+	CHECK(!stat_screen_done_pressed(&jo, &joiner));
+	CHECK(joiner.state().end_round_linger_ticks == 1240 &&
+			joiner.mission_exit_reason() != inmatch::kMissionExitRoundOver);
+	CHECK(!stat_screen_done_pressed(&dfx2, nullptr));
+	CHECK(stat_screen_done_pressed(&dfx2, &joiner));
+	CHECK(joiner.state().end_round_linger_ticks == 0);
+	CHECK(joiner.mission_exit_reason() == inmatch::kMissionExitRoundOver);
+}
+
 } // namespace
 
 int main() {
@@ -191,6 +237,7 @@ int main() {
 	test_fill_puts_the_roster_bytes_in_the_cells();
 	test_fill_selects_the_local_slot_after_the_sort();
 	test_tab_filter_hides_filled_rows();
+	test_done_button();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

@@ -326,10 +326,8 @@ void replace_all_ci(std::string &haystack, const char *needle,
 	}
 }
 
-// The single-`%s` fill of retail's sprintf-composed lines, bounds-safe: the
-// first `%s` takes `arg`, everything else is copied through. Retail hands the
-// game-data template straight to sprintf; the templates carry exactly one
-// `%s`, so the visible result is identical.
+} // namespace
+
 std::string sprintf_first_s(const std::string &tmpl, const std::string &arg) {
 	const size_t pos = tmpl.find("%s");
 	if (pos == std::string::npos) return tmpl;
@@ -340,8 +338,6 @@ std::string sprintf_first_s(const std::string &tmpl, const std::string &arg) {
 	out.append(tmpl, pos + 2, std::string::npos);
 	return out;
 }
-
-} // namespace
 
 std::string feed_format_line(const std::string &tmpl, const std::string &attacker,
 		const std::string &victim, const std::string &extra,

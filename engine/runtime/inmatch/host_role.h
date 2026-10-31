@@ -78,7 +78,8 @@ struct HostBringup {
 // world's word with, @0x551F6F..0x551F75). The difficulty byte is the word
 // the mission start leaves out of a session (world::mission_start_difficulty),
 // which overwrites the profile's before any serializer reads it [orig:
-// Game_StartMission @0x525CDD].
+// Game_StartMission @0x525CDD], or the profile's where the title's start sets no
+// word (TitleRules::mission_start_sets_difficulty, DFX2-28).
 // The session runs as `title` (GameConfig::set_title): its rules, which single player once never
 // set, so a single-player session ran Joint Operations' whatever the game.
 GameConfig singleplayer_game_config(const Title &title, uint32_t game_type,

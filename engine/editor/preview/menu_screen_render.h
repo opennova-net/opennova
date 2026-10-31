@@ -29,6 +29,10 @@ enum class MenuScreenStatus : uint8_t {
 };
 // "no_project", "ready", ...: its token on the wire.
 const char *menu_screen_status_token(MenuScreenStatus status);
+
+// The menu font scale a project's game draws its menus at (Title::menu_font_scale, D-FNT-7): the
+// title whose code is `game`, the default title's for a code no title has (as a session's).
+float menu_font_scale_of(const std::string &game);
 // The line a menu viewport shows for a status (`detail`: the first serialize issue, the screen's
 // name); "" when ready.
 std::string menu_screen_status_message(MenuScreenStatus status, const std::string &detail);
@@ -48,10 +52,11 @@ public:
 	MenuScreenRender(const MenuScreenRender &) = delete;
 	MenuScreenRender &operator=(const MenuScreenRender &) = delete;
 
-	// Compile the screen `screen_row` of `document`. Ready, or why not: Unserializable (the
+	// Compile the screen `screen_row` of `document`, its menu fonts at `font_scale` (the project's
+	// game's, Title::menu_font_scale; menu_font_scale_of). Ready, or why not: Unserializable (the
 	// detail is the first reason) or ScreenMissing (the screen's name).
 	MenuScreenStatus configure(const MnuDocument &document, NodeId screen_row, const FileSource &files,
-	                           const std::map<std::string, std::string> &vars);
+	                           const std::map<std::string, std::string> &vars, float font_scale);
 	MenuScreenStatus status() const { return status_; }
 	const std::string &detail() const { return detail_; }
 	// The document revision the render read.

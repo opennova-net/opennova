@@ -89,6 +89,12 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	out.team_xy = pos_record4(hud.team_xy);
 	out.zone_info = pos_record2(hud.zone_info[0], hud.zone_info[1]);
 	out.zone_info.align = hud.zone_info[2];
+	// EXPPOINTS' four numbers (DFX2-36, hud_exp_points.h HudExpPointsRecord).
+	out.exp_points.x = hud.exp_points[0];
+	out.exp_points.y = hud.exp_points[1];
+	out.exp_points.hidden = hud.exp_points[2];
+	out.exp_points.pulse_percent = hud.exp_points[3];
+	out.exp_points.present = true;
 	// The HUDLS block [orig: dword_2723700..dword_272373C + 8*9].
 	out.hudls.system = hud.hudls_system;
 	out.hudls.key_ofst_x = hud.hudls_keyofst[0];
