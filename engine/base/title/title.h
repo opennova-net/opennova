@@ -44,6 +44,24 @@ struct TitleHudFonts {
 //  (dfx2.exe)]
 enum class MissionListOrder : uint8_t { FileName, Title };
 
+// The F12 map legend's table, the title's executable's (runtime/hud's element_map_legend draws
+// it): one entry per icon, its gametext Hud key, TSDicon strip cell, size factor and ARGB, laid in
+// two columns from design y 144 a design `row_step` apart.
+// [orig: HUD_DrawHelpScreenIcons @0x497480 - the 44-byte records from aHudIconPerson, name +0x00,
+//  cell +0x20, size +0x24, colour +0x28, the walk ending on an empty name] [orig: sub_497490
+//  @0x497490 (dfx2.exe)]
+struct TitleHudMapLegendIcon {
+	const char *name = nullptr;
+	uint8_t cell = 0;
+	float size = 0.0f;
+	uint32_t color = 0;
+};
+struct TitleHudMapLegend {
+	const TitleHudMapLegendIcon *icons = nullptr;
+	int count = 0;
+	int row_step = 0;
+};
+
 // A title (CONTEXT.md "Title"): the retail game a game runs as, by its short code (the `/game
 // <code>` launch flag, a project's target game). Its rows live in games/<code>/<code>_title.cpp,
 // which games::install() hands to install_titles; engine/ holds the type and the lookups alone.
@@ -251,6 +269,10 @@ struct Title {
 	// [orig: sub_5B8CC0 @0x5B8DED, sub_5B8FF0 @0x5B9036, sub_5B8E80 @0x5B8FAD, each push 0
 	//  (dfx2.exe)]
 	bool hud_message_tags = false;
+	// DFX2-89: the F12 map legend (TitleHudMapLegend): Jointops.exe's 26 entries 40 design units a
+	// row, dfx2.exe's 20 (no medic, personmedicable, lfp, farp or armoury entry, a pwrweap one) 52
+	// a row. Null where no binary of the title was read for it: the legend draws its box alone.
+	const TitleHudMapLegend *hud_map_legend = nullptr;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

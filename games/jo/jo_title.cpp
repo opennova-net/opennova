@@ -46,6 +46,42 @@ constexpr TitleHudFontTier kHudFontTiers[] = {
 };
 constexpr TitleHudFonts kHudFonts{kHudFontTiers, "Impac22b.fnt", "Impac38b.fnt", 800};
 
+// Jointops.exe's F12 map legend: its 26 records, 40 design units a row (DFX2-89).
+// [orig: HUD_DrawHelpScreenIcons @0x497480 - the records from aHudIconPerson @0x8154F8 (44 bytes:
+//  name, cell +0x20, size +0x24, colour +0x28) to the empty name @0x815970, the row step
+//  @0x497524]
+constexpr TitleHudMapLegendIcon kHudMapLegendIcons[] = {
+	{"hud_icon_person", 3, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_medic", 0, 3.0f, 0xFFFFFFFFu},
+	{"hud_icon_persondead", 8, 1.0f, 0x7F2F3F7Fu},
+	{"hud_icon_personmedicable", 14, 1.0f, 0x7F2F3F7Fu},
+	{"hud_icon_waypoint", 1, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_psp", 0, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_lfp_attack", 26, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_lfp_defend", 27, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_emplaced", 4, 0.8f, 0x7F7F6200u},
+	{"hud_icon_emplaced2", 12, 0.8f, 0x7F7F6200u},
+	{"hud_icon_vehicle", 10, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_watervehicle", 15, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_helo", 11, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_motorcycle", 25, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_farp", 5, 1.0f, 0x7F7F6200u},
+	{"hud_icon_armoury", 13, 0.8f, 0x7F207F20u},
+	{"hud_icon_bldg", 0, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_bridge", 9, 1.0f, 0x7F207F20u},
+	{"hud_icon_ridewanted", 23, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_enemyloc", 24, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_recentspeaker", 28, 0.8f, 0x7F7F7F7Fu},
+	{" ", 0, 0.0f, 0x00000000u},
+	{"hud_icon_flag", 2, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_flagbay", 6, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_pwrmed", 16, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_pwrammo", 17, 1.0f, 0x7F7F7F7Fu},
+};
+constexpr TitleHudMapLegend kHudMapLegend{
+		kHudMapLegendIcons, static_cast<int>(sizeof(kHudMapLegendIcons) / sizeof(kHudMapLegendIcons[0])),
+		40};
+
 Title make() {
 	Title t;
 	t.code = "jo";
@@ -102,6 +138,7 @@ Title make() {
 	// DFX2-61: the Mods list's base row [orig: Options_PopulateModList @ 0x559fb0 (the literal
 	//  @0x7C7114, read @ 0x559fe2)].
 	t.mod_list_base = "Joint Operations: Typhoon Rising";
+	t.hud_map_legend = &kHudMapLegend;
 	return t;
 }
 

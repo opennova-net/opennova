@@ -44,9 +44,12 @@ void HudOverlay::set_map_legend(bool p_shown, const String &p_title,
 }
 
 PackedStringArray HudOverlay::map_legend_keys() {
+	// The launch title's legend (Title::hud_map_legend), one key per entry.
 	PackedStringArray keys;
-	for (const opennova::hud::HudMapLegendIcon &icon : opennova::hud::kHudMapLegendIcons)
-		keys.push_back(String(icon.name));
+	const opennova::TitleHudMapLegend *legend =
+			ResourceRoot::session_title(Ref<ResourceRoot>()).hud_map_legend;
+	for (int i = 0; legend != nullptr && i < legend->count; ++i)
+		keys.push_back(String(legend->icons[i].name));
 	return keys;
 }
 

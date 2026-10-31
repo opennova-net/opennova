@@ -51,6 +51,7 @@ Title make() {
 	t.hud_crosshair_fixed = jo_title().hud_crosshair_fixed;
 	t.hud_stance_health_tint = jo_title().hud_stance_health_tint;
 	t.hud_message_tags = jo_title().hud_message_tags;
+	t.hud_map_legend = jo_title().hud_map_legend;
 	return t;
 }
 

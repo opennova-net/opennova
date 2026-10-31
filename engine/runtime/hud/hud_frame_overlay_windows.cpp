@@ -8,6 +8,7 @@
 // too (HUD_DrawOverlayPanels @0x5c0060).
 
 #include <base/title/title.h> // Title::hud_lone_gunner_panel
+#include <base/title/title.h> // Title::hud_map_legend
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_medic_cross.h>
 
@@ -376,19 +377,25 @@ void HudFrameCompiler::element_help_screen(const HudFrameState &state, float w, 
 void HudFrameCompiler::element_map_legend(const HudFrameState &state, float w, float h) {
 	// [orig: HUD_DrawHelpScreenIcons @0x497480 — HUD_DrawLabelBox(ctx, 128,
 	//  96, 896, 672, Hud/hud_map_legend, -1) @0x4974bd; the label offset
-	//  (32, 8), column x 192 / 512, first row y 144 and the 40 row step, each
-	//  through Viewport_ScaleToVirtualCoords @0x4974e1/@0x49750d/@0x49752f]
+	//  (32, 8), column x 192 / 512, first row y 144 and the row step, each
+	//  through Viewport_ScaleToVirtualCoords @0x4974e1/@0x49750d/@0x49752f].
+	// The table and the step are the title's (Title::hud_map_legend, DFX2-89):
+	// Jointops.exe's 40 [orig: @0x497524], dfx2.exe's 52 over its own table
+	// [orig: sub_497490 @0x497490 - @0x497534 (dfx2.exe)].
 	const HudMapLegendState &ml = state.map_legend;
 	emit_label_box(128.0f, 96.0f, 896.0f, 672.0f, ml.title, 0xFFFFFFFFu, w, h);
+	const TitleHudMapLegend *legend =
+			state.title != nullptr ? state.title->hud_map_legend : nullptr;
+	const int icon_count = legend != nullptr ? legend->count : 0;
 	const float label_dx = sx(32.0f, w);
 	const float label_dy = sy(8.0f, h);
 	const float col0_x = sx(192.0f, w);
 	const float col1_x = sx(512.0f, w);
-	const float row_step = sy(40.0f, h);
+	const float row_step = legend != nullptr ? sy(static_cast<float>(legend->row_step), h) : 0.0f;
 	float y = sy(144.0f, h);
 	const uint32_t label_color = half_bright_argb(active_color(state));
-	for (int i = 0; i < kHudMapLegendIconCount; ++i) {
-		const HudMapLegendIcon &icon = kHudMapLegendIcons[i];
+	for (int i = 0; i < icon_count; ++i) {
+		const TitleHudMapLegendIcon &icon = legend->icons[i];
 		// The icon's half extents: the size factor times 16, scaled per axis
 		// [orig: `fmul flt_7C4870` (16.0) @0x49754a; Viewport_ScaleToVirtualCoords
 		//  @0x49756c]. The pair walk: even entries in the left column, odd in

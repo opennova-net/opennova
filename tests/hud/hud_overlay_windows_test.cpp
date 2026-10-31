@@ -5,6 +5,7 @@
 // elements riding the draw list's top layer even at the blank level
 // [orig: HUD_DrawGameplayOverlays @0x5BDE60; HelpScreen_Draw @0x497800;
 // HUD_DrawHelpScreenIcons @0x497480].
+#include <base/title/title.h>
 #include <runtime/hud/game_font.h>
 #include <runtime/hud/hud_elements.h>
 #include <runtime/hud/hud_frame.h>
@@ -149,18 +150,56 @@ void test_windows_ride_the_top_layer(const fnt_font_t *font) {
 	// entry, the medic entry as the three cross rects.
 	state.map_legend.shown = true;
 	state.map_legend.title = "Map Legend";
-	state.map_legend.labels.assign(kHudMapLegendIconCount, "label");
-	{
+	// The table and its row step are the title's (DFX2-89): Jointops.exe's 26 entries 40 a row,
+	// the medic one the cross [orig: HUD_DrawHelpScreenIcons @0x497480 - @0x497524]; dfx2.exe's 20,
+	// no medic, 52 a row [orig: sub_497490 @0x497490 - @0x497534 (dfx2.exe)].
+	const opennova::Title *jo = opennova::title_by_code("jo");
+	const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+	CHECK(jo != nullptr && jo->hud_map_legend != nullptr && jo->hud_map_legend->count == 26 &&
+			jo->hud_map_legend->row_step == 40);
+	CHECK(dfx2 != nullptr && dfx2->hud_map_legend != nullptr && dfx2->hud_map_legend->count == 20 &&
+			dfx2->hud_map_legend->row_step == 52);
+	// The label rows' y: the even entries' (left column) labels, top to bottom.
+	const auto legend_rows = [&](const opennova::Title *title, size_t *icon_tris, size_t *red) {
+		state.title = title;
+		state.map_legend.labels.assign(
+				title != nullptr && title->hud_map_legend ? title->hud_map_legend->count : 0, "L");
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
-		size_t icon_tris = 0;
+		*icon_tris = 0;
 		for (size_t i = list.top_begin.tris; i < list.tris.size(); ++i)
-			if (list.tris[i].texture == kHudTexMapIcons) ++icon_tris;
-		CHECK(icon_tris == static_cast<size_t>(2 * (kHudMapLegendIconCount - 1)));
-		size_t red = 0;
+			if (list.tris[i].texture == kHudTexMapIcons) ++*icon_tris;
+		*red = 0;
 		for (size_t i = list.top_begin.quads; i < list.quads.size(); ++i)
-			if (list.quads[i].color == 0xFFFF0000u) ++red;
+			if (list.quads[i].color == 0xFFFF0000u) ++*red;
+		std::vector<float> ys;
+		for (size_t i = list.top_begin.glyphs; i < list.glyphs.size(); ++i) {
+			const float y = list.glyphs[i].y_top;
+			if (list.glyphs[i].x_top_left < 300.0f && y > 120.0f &&
+					(ys.empty() || ys.back() != y))
+				ys.push_back(y);
+		}
+		return ys;
+	};
+	{
+		size_t icon_tris = 0, red = 0;
+		const std::vector<float> ys = legend_rows(jo, &icon_tris, &red);
+		CHECK(icon_tris == static_cast<size_t>(2 * (26 - 1)));
 		CHECK(red == 2); // the cross's two bars
+		CHECK(ys.size() == 13 && ys[1] - ys[0] == 40.0f);
 	}
+	{
+		size_t icon_tris = 0, red = 0;
+		const std::vector<float> ys = legend_rows(dfx2, &icon_tris, &red);
+		CHECK(icon_tris == static_cast<size_t>(2 * 20));
+		CHECK(red == 0); // no medic entry
+		CHECK(ys.size() == 10 && ys[1] - ys[0] == 52.0f);
+	}
+	{
+		// A title with no legend draws the box alone.
+		size_t icon_tris = 0, red = 0;
+		CHECK(legend_rows(nullptr, &icon_tris, &red).empty() && icon_tris == 0);
+	}
+	state.title = nullptr;
 	state.map_legend.shown = false;
 	state.help_screen.shown = false;
 	// The briefing: a text taller than the panel overflows into page 1.

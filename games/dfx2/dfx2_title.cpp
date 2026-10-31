@@ -62,6 +62,36 @@ constexpr const char *const *kProfileClassKits[] = {
 	kEmptyKit, kEmptyKit, kXm4AutoKit, kM4AutoKit, kEmptyKit,
 };
 
+// dfx2.exe's F12 map legend: 20 records, no medic, personmedicable, lfp, farp or armoury entry and
+// a pwrweap one, 52 design units a row (DFX2-89).
+// [orig: sub_497490 @0x497490 (dfx2.exe) - the records from aHudIconPerson @0x8144F8 to the empty
+//  name @0x814868, the row step `mov [esp+8Ch], 34h` @0x497534]
+constexpr TitleHudMapLegendIcon kHudMapLegendIcons[] = {
+	{"hud_icon_person", 3, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_persondead", 8, 1.0f, 0x7F2F3F7Fu},
+	{"hud_icon_waypoint", 1, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_psp", 0, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_emplaced", 4, 0.8f, 0x7F7F6200u},
+	{"hud_icon_emplaced2", 12, 0.8f, 0x7F7F6200u},
+	{"hud_icon_vehicle", 10, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_watervehicle", 15, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_helo", 11, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_motorcycle", 25, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_bldg", 0, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_bridge", 9, 1.0f, 0x7F207F20u},
+	{"hud_icon_enemyloc", 24, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_recentspeaker", 28, 0.8f, 0x7F7F7F7Fu},
+	{"hud_icon_ridewanted", 23, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_pwrweap", 29, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_pwrmed", 16, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_pwrammo", 17, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_flag", 2, 1.0f, 0x7F7F7F7Fu},
+	{"hud_icon_flagbay", 6, 1.0f, 0x7F7F7F7Fu},
+};
+constexpr TitleHudMapLegend kHudMapLegend{
+		kHudMapLegendIcons, static_cast<int>(sizeof(kHudMapLegendIcons) / sizeof(kHudMapLegendIcons[0])),
+		52};
+
 Title make() {
 	Title t;
 	t.code = "dfx2";
@@ -191,6 +221,7 @@ Title make() {
 	// DFX2-88: the message lines parse their tags [orig: sub_5B8CC0 @0x5B8DED, sub_5B8FF0
 	//  @0x5B9036, sub_5B8E80 @0x5B8FAD (dfx2.exe)].
 	t.hud_message_tags = true;
+	t.hud_map_legend = &kHudMapLegend; // DFX2-89
 	return t;
 }
 

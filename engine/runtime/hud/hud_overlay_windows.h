@@ -25,53 +25,13 @@ struct HudHelpScreenState {
 	std::vector<std::string> texts; // row + 128, left at x 512
 };
 
-// One map-legend entry: its gametext Hud key, TSDicon strip cell, size
-// factor and ARGB [orig: the 44-byte records @0x8154F8 — name +0x00, cell
-// +0x20, size +0x24 (float), colour +0x28; the walk stops on an empty name].
-struct HudMapLegendIcon {
-	const char *name;
-	uint8_t cell;
-	float size;
-	uint32_t color;
-};
-inline constexpr HudMapLegendIcon kHudMapLegendIcons[] = {
-	{"hud_icon_person", 3, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_medic", 0, 3.0f, 0xFFFFFFFFu},
-	{"hud_icon_persondead", 8, 1.0f, 0x7F2F3F7Fu},
-	{"hud_icon_personmedicable", 14, 1.0f, 0x7F2F3F7Fu},
-	{"hud_icon_waypoint", 1, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_psp", 0, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_lfp_attack", 26, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_lfp_defend", 27, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_emplaced", 4, 0.8f, 0x7F7F6200u},
-	{"hud_icon_emplaced2", 12, 0.8f, 0x7F7F6200u},
-	{"hud_icon_vehicle", 10, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_watervehicle", 15, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_helo", 11, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_motorcycle", 25, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_farp", 5, 1.0f, 0x7F7F6200u},
-	{"hud_icon_armoury", 13, 0.8f, 0x7F207F20u},
-	{"hud_icon_bldg", 0, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_bridge", 9, 1.0f, 0x7F207F20u},
-	{"hud_icon_ridewanted", 23, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_enemyloc", 24, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_recentspeaker", 28, 0.8f, 0x7F7F7F7Fu},
-	{" ", 0, 0.0f, 0x00000000u},
-	{"hud_icon_flag", 2, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_flagbay", 6, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_pwrmed", 16, 1.0f, 0x7F7F7F7Fu},
-	{"hud_icon_pwrammo", 17, 1.0f, 0x7F7F7F7Fu},
-};
-inline constexpr int kHudMapLegendIconCount =
-		static_cast<int>(sizeof(kHudMapLegendIcons) / sizeof(kHudMapLegendIcons[0]));
-
 // The F12 map legend's resolved text: the title and one label per icon
 // entry, each a gametext Hud lookup [orig: GameText_GetString("Hud",
 // "hud_map_legend") @0x49749e; GameText_GetString("Hud", name) @0x4977a7].
 struct HudMapLegendState {
 	bool shown = false;
 	std::string title;
-	std::vector<std::string> labels; // kHudMapLegendIconCount entries
+	std::vector<std::string> labels; // one per entry of the title's legend (Title::hud_map_legend)
 };
 
 // The briefing panel's text [orig: HUD_DrawBriefingPanel @0x5bad00 — the authority reads
