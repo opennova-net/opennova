@@ -582,6 +582,18 @@ void deploy_table_zone_cases() {
 	row.slot_id = 1; // the rider, the local player
 	cs.scoreboard.rows.push_back(row);
 	w.rules.mp_session = true;
+	// Ace again, then an active slot that drives no body: the local player.
+	row.slot_id = 0;
+	cs.scoreboard.rows.push_back(row);
+	replication::ClientRosterSlot bodiless;
+	bodiless.bound = true;
+	bodiless.name = "Ghost";
+	cs.roster[6] = bodiless;
+	row.slot_id = 6;
+	cs.scoreboard.rows.push_back(row);
+	CHECK(deploy_team_list_players(view, players));
+	CHECK(players.size() == 5 && players[4].name == "Rider" && players[4].local);
+	cs.scoreboard.rows.resize(3);
 	CHECK(deploy_team_list_players(view, players));
 	CHECK(players.size() == 3);
 	CHECK(players.size() == 3 && players[0].name == "Ace<ch>CL<co>" && players[0].team == 1 &&

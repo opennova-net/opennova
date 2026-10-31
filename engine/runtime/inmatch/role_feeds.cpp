@@ -1245,13 +1245,19 @@ bool deploy_team_list_players(const RoleView &view, std::vector<world::DeployTea
 	const replication::ClientState &cs = runtime.state();
 	const bool in_session = view.joiner ? runtime.in_session() : w.rules.mp_session;
 	const uint16_t self_handle = deploy_self_handle(view);
-	// The entity the walk holds: never reset between rows [orig: @0x5503cb, @0x550449].
+	// The entity the walk holds: never reset between rows [orig: @0x5503cb, @0x550449]. An
+	// active slot (PlayerSlotTable_GetActiveSlot answers only a slot whose +13 byte is set)
+	// overwrites it with the slot's entity (+36), none when the slot drives no body, which then
+	// takes the local player [orig: @0x550437..0x550459; PlayerSlotTable_GetActiveSlot @0x434580
+	// (dfx2.exe)].
 	world::EntityHandle entity{};
 	for (const replication::ClientScoreboardRow &row : cs.scoreboard.rows) {
 		if (in_session && row.slot_id < cs.roster.size()) {
 			const replication::ClientRosterSlot &slot = cs.roster[row.slot_id];
-			if (slot.bound && slot.entity_slot >= 0)
-				entity = world::EntityHandle::make(0, static_cast<uint16_t>(slot.entity_slot));
+			if (slot.bound)
+				entity = slot.entity_slot >= 0
+						? world::EntityHandle::make(0, static_cast<uint16_t>(slot.entity_slot))
+						: world::EntityHandle{};
 		}
 		if (!entity.valid()) entity = w.cached.local_player;
 		if (!entity.valid()) continue;
