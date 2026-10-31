@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <base/io/bam.h>
+#include <formats/def/def.h> // DEF_WEAPON_FLAG2_NOAUTOZERO
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/round_sim.h>
@@ -83,6 +84,25 @@ void weapon_scope_zero_bake(WeaponScopeZero &zero, const AmmoTableEntry &ammo) {
 
 int16_t weapon_scope_zero_initial(const WeaponScopeZero &zero) {
     return zero.step_metres != 0 ? static_cast<int16_t>(zero.default_metres / zero.step_metres) : 0;
+}
+
+ScopeZeroSlotSeed weapon_scope_zero_slot_seed(const WeaponScopeZero &zero, int32_t def_flags,
+    int32_t def_flags2, ScopeZeroSeed seed) {
+    ScopeZeroSlotSeed out;
+    out.step = weapon_scope_zero_initial(zero);
+    if ((def_flags & 3) != 0) out.pitch = weapon_scope_zero_pitch(zero, out.step);
+    out.yaw = weapon_scope_zero_yaw(zero, out.step);
+    if (seed == ScopeZeroSeed::Rangefinder) {
+        // [orig: WeaponSlot_InitFromDef @0x53C0C0 - `and eax, 400h` @0x53C1E8, +4 = 0
+        //  @0x53C1EA, +0x60 = 0 @0x53C1F1 / -1 @0x53C1F9 (dfx2.exe)]
+        out.pitch = 0;
+        out.step = (static_cast<uint32_t>(def_flags2) & def::DEF_WEAPON_FLAG2_NOAUTOZERO) != 0 ? 0 : -1;
+    }
+    return out;
+}
+
+int32_t weapon_scope_mount_rangefinder(const WeaponScopeZero &zero, ScopeZeroSeed seed) {
+    return seed == ScopeZeroSeed::Rangefinder ? -1 : zero.default_metres;
 }
 
 int16_t weapon_scope_zero_adjust(const WeaponScopeZero &zero, int16_t current,

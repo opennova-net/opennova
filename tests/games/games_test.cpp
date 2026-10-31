@@ -252,6 +252,7 @@ void retail_rules_values() {
 			jo.part_spin.ground_decay == 186413 && jo.part_spin.helo_decay == 46603);
 	CHECK(!jo.parachute_opens_on_jump && !jo.airborne_steer_glide &&
 			!jo.tracked_impact_speed_xz_first);
+	CHECK(jo.scope_zero_seed == world::ScopeZeroSeed::DefaultStep);
 
 	const world::TitleRules &dfx2 = world::title_rules("dfx2");
 	CHECK(dfx2.waypoint_completion == world::WaypointCompletion::CoopCheckpoint); // DFX2-9
@@ -284,6 +285,7 @@ void retail_rules_values() {
 	// profile each point at, neither reading the other's row (DFX2-29, DFX2-33).
 	CHECK(dfx2.spawn_kit == games::dfx2_single_player_kit() &&
 			games::dfx2_title().profile_single_player_kit == games::dfx2_single_player_kit());
+	CHECK(dfx2.scope_zero_seed == world::ScopeZeroSeed::Rangefinder); // DFX2-120
 }
 
 // The Title's knobs read on the local player's input alone (docs/titles/dfx2-vs-jo-re.md §8, the
@@ -394,7 +396,8 @@ std::string joiner_rules_row(const world::TitleRules &r) {
 			" tracked_impact_speed_xz_first=" + std::to_string(r.tracked_impact_speed_xz_first) +
 			" spawn_kit=" + (r.spawn_kit == nullptr ? std::string("jo_single_player_page") : kit) +
 			" script_voice_volume=" + std::to_string(r.script_voice_volume) +
-			" trail_surface_alternate=" + std::to_string(r.trail_surface_alternate);
+			" trail_surface_alternate=" + std::to_string(r.trail_surface_alternate) +
+			" scope_zero_seed=" + std::to_string(static_cast<int>(r.scope_zero_seed));
 }
 
 // The bump-rule sheets (ADR 0076 decision 6), one per protocol: what its joiner reads or writes as
@@ -455,7 +458,8 @@ void bump_rule_sheet_per_protocol() {
 			"narrow_still_player_radius=0 emplaced_solo_holds_fire=0 "
 			"part_spin=186413/163110/139809/186413/46603 parachute_opens_on_jump=0 "
 			"airborne_steer_glide=0 tracked_impact_speed_xz_first=0 "
-			"spawn_kit=jo_single_player_page script_voice_volume=210 trail_surface_alternate=0";
+			"spawn_kit=jo_single_player_page script_voice_volume=210 trail_surface_alternate=0 "
+			"scope_zero_seed=0";
 	const std::string dfx2 =
 			"S 0x0A: s2c_0a.objective_checkpoint=1 slot_state.join_state_fixed=1\n"
 			"S 0x0F: s2c_0f.spawn_zone_flag_always=1 s2c_0f.deploy_screen_always=1\n"
@@ -479,7 +483,8 @@ void bump_rule_sheet_per_protocol() {
 			"airborne_steer_glide=1 tracked_impact_speed_xz_first=1 "
 			"spawn_kit=WPN_M4AUTO,WPN_M4,WPN_MK23,WPN_AT4,"
 			"WPN_GRENADEFB,WPN_GRENADEHE,WPN_GRENADESM,WPN_KNIFE script_voice_volume=240 "
-			"trail_surface_alternate=1";
+			"trail_surface_alternate=1 "
+			"scope_zero_seed=1";
 	CHECK(sheet("jo") == jo);
 	CHECK(sheet("dfx2") == dfx2);
 	// Two protocols have an in-match part: JO's, which OP: Acid Gambit speaks (the one object, at

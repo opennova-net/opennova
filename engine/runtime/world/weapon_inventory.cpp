@@ -263,7 +263,8 @@ int32_t weapon_slot_initial_zoom(int32_t scope_max_mag, int32_t scope_initial_ma
 
 WeaponFillResult weapon_inventory_load_from_display(
         const WeaponTable &table, const std::vector<std::string> &display,
-        WeaponInventory &inv, int32_t owner_class, bool allow_sniper_scope_zoom) {
+        WeaponInventory &inv, int32_t owner_class, bool allow_sniper_scope_zoom,
+        ScopeZeroSeed zero_seed) {
     // [orig: WeaponSlotTable_LoadAllFromDefs @ 0x5414E0]
     WeaponFillResult result;
     char msg[192];
@@ -304,7 +305,7 @@ WeaponFillResult weapon_inventory_load_from_display(
             continue;
         }
         weapon_slot_init_from_def(*def, static_cast<int16_t>(adm), *slot, owner_class,
-                                  allow_sniper_scope_zoom);
+                                  allow_sniper_scope_zoom, zero_seed);
     }
     // The local player's ToSpecial slots: both cleared, then the first slot in
     // combo order whose def carries QuickSwitch is the target
@@ -325,13 +326,20 @@ WeaponFillResult weapon_inventory_load_from_display(
 
 void weapon_slot_init_from_def(const WeaponTableEntry &def, int16_t adm_index,
                                WeaponInventorySlot &slot, int32_t owner_class,
-                               bool allow_sniper_scope_zoom) {
+                               bool allow_sniper_scope_zoom, ScopeZeroSeed zero_seed) {
     // [orig: WeaponSlot_InitFromDef @ 0x53EE70 — the memset @ 0x53EE86 (clip 0),
     //  the def bound @ 0x53EEA1, the zoom seed @ 0x53EF2D..0x53EF44]
     slot = WeaponInventorySlot{};
     slot.adm_index = adm_index;
     slot.clip = 0;
-    slot.scope_zero = weapon_scope_zero_initial(def.action_fsm.scope_zero);
+    // The zero words by the title (DFX2-120) [orig: WeaponSlot_InitFromDef @ 0x53EE70
+    //  (@0x53EEB2..0x53EEEC, @0x53EF4F..0x53EF8B)] [orig: WeaponSlot_InitFromDef @0x53C0C0
+    //  (@0x53C1E8..0x53C1F9) (dfx2.exe)]
+    const ScopeZeroSlotSeed zero = weapon_scope_zero_slot_seed(def.action_fsm.scope_zero,
+            def.flags, def.flags2, zero_seed);
+    slot.scope_zero = zero.step;
+    slot.zero_pitch = zero.pitch;
+    slot.zero_yaw = zero.yaw;
     slot.scope_zoom = weapon_slot_initial_zoom(def.scope_max_mag, def.scope_initial_mag,
             def.scope_min_mag,
             weapon_slot_zoom_sniper_lock(owner_class, def.category, allow_sniper_scope_zoom));
@@ -371,7 +379,7 @@ void refill_slot(const WeaponTable &table, WeaponInventory &inv, const WeaponTab
 
 WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table,
         WeaponInventory &inv, int32_t adm_index, int32_t owner_class,
-        bool allow_sniper_scope_zoom, const WeaponAmmoSeat &seat) {
+        bool allow_sniper_scope_zoom, const WeaponAmmoSeat &seat, ScopeZeroSeed zero_seed) {
     // [orig: WeaponSlot_InitFromAvatarDef @ 0x542730]
     WeaponAvatarGrant out;
     if ((adm_index & 0xFF) == 0xFF) return out;                  // @0x542753
@@ -414,14 +422,15 @@ WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table
             WeaponInventorySlot *child_slot = inv.slot(combo_of(*child));
             if (child_slot == nullptr) continue;
             weapon_slot_init_from_def(*child, static_cast<int16_t>(child_adm), *child_slot,
-                                      owner_class, allow_sniper_scope_zoom); // @0x542839
+                                      owner_class, allow_sniper_scope_zoom,
+                                      zero_seed); // @0x542839
             if (child->clipsize != -1) {                         // @0x542848
                 refill_slot(table, inv, *child, combo_of(*child), own_combo, seat);
                 out.reloaded = true;
             }
         }
         weapon_slot_init_from_def(*cur, static_cast<int16_t>(cur_adm), *slot, owner_class,
-                                  allow_sniper_scope_zoom);      // @0x5428B2
+                                  allow_sniper_scope_zoom, zero_seed); // @0x5428B2
     }
     // The refill tail on the slot's def [orig: @0x5428BA..0x542909].
     const WeaponTableEntry *slot_def = slot->adm_index >= 0

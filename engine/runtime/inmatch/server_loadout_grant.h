@@ -122,7 +122,8 @@ bool loadout_envelope_accepted(const LoadoutSubmit &req, uint32_t game_type);
 // ammo pool image, the per-ammo damage classes, the carry flags and the rebuilt slot rows.
 // The rebuild starts from the slot's pools and buckets and reads its revive latch, team
 // and the entity's seat (world::entity_ammo_seat); the fills' sniper lock reads the
-// fill's zoom value (World::rules.sniper_zoom_fill). A null/empty `table` is the
+// fill's zoom value (World::rules.sniper_zoom_fill), their zero words the title's seed
+// (TitleRules::scope_zero_seed, DFX2-120). A null/empty `table` is the
 // resource-less request-echo fallback. `local_table` is the slot's table when it is the
 // local one (own_slot_local_player), whose pools and buckets the rebuild starts from.
 GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
@@ -131,6 +132,7 @@ GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 										  const NapiNPConnection &conn,
 										  const world::WeaponAmmoSeat &seat,
 										  bool allow_sniper_scope_zoom,
+										  world::ScopeZeroSeed zero_seed,
 										  const LoadoutAvailability *availability = nullptr,
 										  const world::WeaponInventory *local_table = nullptr);
 

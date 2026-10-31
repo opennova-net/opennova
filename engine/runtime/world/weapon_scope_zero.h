@@ -29,6 +29,44 @@ struct WeaponScopeZero {
 
 void weapon_scope_zero_bake(WeaponScopeZero &zero, const AmmoTableEntry &ammo);
 int16_t weapon_scope_zero_initial(const WeaponScopeZero &zero);
+
+// DFX2-120: the sight zero a slot's init seeds and the rangefinder word a ForceScoped mount
+// stores, by title (TitleRules::scope_zero_seed).
+enum class ScopeZeroSeed : uint8_t {
+	// Jointops.exe's: the zero step (MountSlot+0x60) the def's default, +0xA0 / +0x9C, and the
+	// zero pitch (MountSlot+4) that step's elevation entry under the def's Flags & 3; a ForceScoped
+	// mount's rangefinder word (dword_B76808) the def's +0xA0.
+	// [orig: WeaponSlot_InitFromDef @0x53EE70 - the step @0x53EEB2..0x53EECB, the pitch
+	//  @0x53EEDA..0x53EEEC; Player_MountWeaponSlot @0x4DFA40 - @0x4DFB3B..0x4DFB44]
+	DefaultStep,
+	// dfx2.exe's: the same computed, then the pitch 0 and the step -1, the automatic rangefinder
+	// zero (weapon_scope_zoom_step), or 0 for a NoAutoZero def (Flags2 0x400); the zero yaw
+	// (MountSlot+8) stays the default step's. A ForceScoped mount's rangefinder word -1. dfx2.exe
+	// has no zero keys (DFX2-110), so its sights stay on the rangefinder.
+	// [orig: WeaponSlot_InitFromDef @0x53C0C0 - the yaw @0x53C196..0x53C1DA, `and eax, 400h`
+	//  @0x53C1E8, the pitch 0 @0x53C1EA, the step 0 @0x53C1F1 / -1 @0x53C1F9;
+	//  Player_MountWeaponSlot @0x4DCAE0 - `mov dword_B6FDB8, 0FFFFFFFFh` @0x4DCBDB (dfx2.exe)]
+	Rangefinder,
+};
+
+// A slot init's three zero words: the step (MountSlot+0x60), the pitch (+4) and the yaw (+8).
+struct ScopeZeroSlotSeed {
+	int16_t step = 0;
+	int32_t pitch = 0;
+	int32_t yaw = 0;
+};
+// The zero words WeaponSlot_InitFromDef seeds for a def of `def_flags` / `def_flags2` (the
+// def's +8 / +0xC words) under the title's `seed`. The yaw is never negated here (the adjust's
+// leg alone negates it).
+// [orig: WeaponSlot_InitFromDef @0x53EE70 (@0x53EEB2..0x53EEEC, @0x53EF4F..0x53EF8B)]
+// [orig: WeaponSlot_InitFromDef @0x53C0C0 (@0x53C102..0x53C1F9) (dfx2.exe)]
+ScopeZeroSlotSeed weapon_scope_zero_slot_seed(const WeaponScopeZero &zero, int32_t def_flags,
+	int32_t def_flags2, ScopeZeroSeed seed);
+// The rangefinder word (dword_B76808) a mount of a ForceScoped def stores: the def's +0xA0
+// under Jointops.exe's seed, -1 under dfx2.exe's. The body tick's aim trace writes it again.
+// [orig: Player_MountWeaponSlot @0x4DFA40 - @0x4DFB3B..0x4DFB44] [orig: Player_MountWeaponSlot
+//  @0x4DCAE0 - @0x4DCBDB (dfx2.exe)]
+int32_t weapon_scope_mount_rangefinder(const WeaponScopeZero &zero, ScopeZeroSeed seed);
 // The zero-step adjust: capped at +0x84, floored at -1 (the automatic
 // rangefinder zero) offline or when the mpattrib rules word carries 0x10000,
 // else at 0, then at +0x88 when set.

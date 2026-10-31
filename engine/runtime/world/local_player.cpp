@@ -196,9 +196,6 @@ bool LocalPlayer::request_scope_zero(int delta) {
     click.kind = ScriptSoundEvent::Kind::Interface;
     world_.out.script_sounds.push_back(std::move(click));
     slot.scope_zero = next;
-    if (!weapon.usegun_slot_active && inventory_valid) {
-        if (WeaponInventorySlot *entry = inventory.slot(inventory.equipped_combo)) entry->scope_zero = next;
-    }
     const int32_t offset = weapon_scope_zero_pitch(weapon.def.scope_zero, next);
     input.look_pitch = io::bam_add(input.look_pitch, io::bam_sub(offset, slot.zero_pitch));
     slot.zero_pitch = offset;
@@ -206,6 +203,15 @@ bool LocalPlayer::request_scope_zero(int delta) {
     // [orig: @0x4dbd91..0x4dbde3 -- the negate @0x4dbddf..0x4dbde3].
     slot.zero_yaw = weapon_scope_zero_yaw(weapon.def.scope_zero, next);
     if (weapon.def.scope_zero.paralax_distance_q16 < 0) slot.zero_yaw = -slot.zero_yaw;
+    // The personal slot is the table's entry, so its three words stay as the adjust leaves
+    // them for the next mount.
+    if (!weapon.usegun_slot_active && inventory_valid) {
+        if (WeaponInventorySlot *entry = inventory.slot(inventory.equipped_combo)) {
+            entry->scope_zero = next;
+            entry->zero_pitch = slot.zero_pitch;
+            entry->zero_yaw = slot.zero_yaw;
+        }
+    }
     return true;
 }
 

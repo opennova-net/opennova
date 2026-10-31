@@ -221,7 +221,7 @@ struct Rig {
         b.inf.is_local_player = true;
 
         inv.reset(t);
-        weapon_inventory_load_from_display(t, {"WPN_M4AUTO"}, inv, 8, false);
+        weapon_inventory_load_from_display(t, {"WPN_M4AUTO"}, inv, 8, false, ScopeZeroSeed::DefaultStep);
         inv.equipped_combo = 3 * 65;
         if (bucket) inv.shared_clips[1] = 30;
         else inv.slot(3 * 65)->clip = 30;

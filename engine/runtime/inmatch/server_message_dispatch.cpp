@@ -860,7 +860,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				const GrantedWeaponLoadout grant =
 						grant_weapon_loadout(req, config.class_allow_mask, armory, conn,
 								world::entity_ammo_seat(*world, *loadout_player),
-								world->rules.sniper_zoom_fill, &availability,
+								world->rules.sniper_zoom_fill,
+								world->rules.title().scope_zero_seed, &availability,
 								local != nullptr ? &local->inventory : nullptr);
 				// The kept entries become the slot's loadout buffer, which every
 				// deploy rebuilds the kit from (D-NET-378) [orig: @0x515A5A..0x515A7E,

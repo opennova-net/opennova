@@ -6435,7 +6435,7 @@ int32_t sniper_fill_zoom(const w::World &world) {
 	w::WeaponInventory inventory;
 	inventory.reset(table);
 	(void)w::weapon_inventory_load_from_display(table, {"WPN_SNIPER"}, inventory,
-			/*owner_class=*/6, world.rules.sniper_zoom_fill);
+			/*owner_class=*/6, world.rules.sniper_zoom_fill, w::ScopeZeroSeed::DefaultStep);
 	return inventory.slot(3 * 65)->scope_zoom;
 }
 

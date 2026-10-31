@@ -38,6 +38,7 @@
 #include <string_view>
 
 #include <runtime/world/impact_damage.h> // hit_zone_damage_multiplier (Jointops.exe's table)
+#include <runtime/world/weapon_scope_zero.h> // ScopeZeroSeed (DFX2-120)
 
 namespace opennova::world {
 
@@ -364,6 +365,17 @@ struct TitleRules {
 	//  `cmp ax, 3` @0x458AAE taking +0x300 @0x458AB3, the test @0x458AD2, the store
 	//  @0x458DB9 / @0x458DD2 (dfx2.exe)]
 	bool trail_surface_alternate = false;
+
+	// --- DFX2-120: the weapon slot's sight zero. -------------------------------------------------
+	// joiner-side: every slot init (the loadout fills, a pickup's grant, an emplacement's own slot)
+	// seeds the zero words by it (world::weapon_scope_zero_slot_seed), and a ForceScoped mount
+	// stores the rangefinder word by it (world::weapon_scope_mount_rangefinder). A joiner fills its
+	// own slots, and the local shooter's zero step rides its fire (the round's subtype), so a
+	// joiner's rounds climb as its title zeroes them.
+	// [orig: WeaponSlot_InitFromDef @0x53EE70; Player_MountWeaponSlot @0x4DFA40 (@0x4DFB3B..
+	//  0x4DFB44)] [orig: WeaponSlot_InitFromDef @0x53C0C0 (@0x53C1E8..0x53C1F9);
+	//  Player_MountWeaponSlot @0x4DCAE0 (@0x4DCBDB) (dfx2.exe)]
+	ScopeZeroSeed scope_zero_seed = ScopeZeroSeed::DefaultStep;
 };
 
 // One registry row: a title's code and the rules it runs.

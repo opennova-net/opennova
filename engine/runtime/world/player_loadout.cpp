@@ -182,7 +182,8 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     //  @ 0x54D364].
     const uint8_t seed_class = loadout_seed_class(world, loadout);
     const WeaponFillResult fill = weapon_inventory_load_from_display(table, display,
-            inventory, seed_class, world.rules.sniper_zoom_fill);
+            inventory, seed_class, world.rules.sniper_zoom_fill,
+            world.rules.title().scope_zero_seed);
     for (const std::string &w : fill.warnings)
         io::logf(io::LogLevel::kWarn, "%s", w.c_str()); // [orig: ErrorLog_WriteTimestamped]
     weapon_inventory_seed_pools(table, inventory, seed_class);

@@ -216,6 +216,10 @@ world::TitleRules make() {
 	// DFX2-46: the trail lanes follow the ground, the alternate effect on snow
 	//  [orig: Entity_UpdateBoneTrailEffects @0x4589A0 - @0x458AAA..0x458AB3 (dfx2.exe)].
 	r.trail_surface_alternate = true;
+	// DFX2-120: the slot's zero on the rangefinder, -1 (0 for a NoAutoZero def), its pitch 0,
+	// and a ForceScoped mount's rangefinder word -1 [orig: WeaponSlot_InitFromDef @0x53C0C0 -
+	//  @0x53C1E8..0x53C1F9; Player_MountWeaponSlot @0x4DCAE0 - @0x4DCBDB (dfx2.exe)].
+	r.scope_zero_seed = world::ScopeZeroSeed::Rangefinder;
 	return r;
 }
 
