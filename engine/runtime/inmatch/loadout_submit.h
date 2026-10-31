@@ -22,6 +22,8 @@
 
 namespace opennova::inmatch {
 
+struct NapiNPConnection;
+
 // The side selector: the host's S2C 0x04 tail byte is retail's g_LocalTeam
 // (teams 1/3 read the BLUE block, 2/4 the RED one [orig: @0x525788]). Before
 // that latch lands (assigned_team == 0) fall back to the local entity's own
@@ -211,6 +213,22 @@ LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &
 		const Protocol *protocol,
 		const std::vector<world::WeaponKitEntry> &kit, uint8_t armory_class, bool authority,
 		bms::MissionType mission_type);
+
+// The armory ACCEPT out of a session, the DEATH screen's close-leg apply alike (both are one
+// apply): WeaponLoadout_ApplyFromBuffer's offline leg. The local apply
+// (world::local_loadout_apply_accept), then the selection copied into the loadout buffer of
+// the slot holding the local player, `own_slot` (local_player_slot), which every later deploy
+// rebuilds the kit from (PlayerSlot_InitWeaponsFromLoadout), so a respawn keeps the accepted
+// kit. No slot (no session context) copies nothing. False, writing nothing, when the apply
+// refuses. [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 - the slot Entity_ValidatePtr
+//  (g_LocalPlayerEntity) @0x565DAF, the copy into slot+0x170C8 @0x565DE4, the display lists
+//  built from it; Server_DeployPlayer @0x517740 -> PlayerSlot_InitWeaponsFromLoadout
+//  @0x5178E1] [orig: WeaponLoadout_ApplyFromBuffer @0x564C30 - Entity_ValidatePtr @0x564D14,
+//  the copy @0x564D44, AvatarDef_BuildDisplayList(slot+78464, slot+94408) @0x564FBD;
+//  Server_DeployPlayer @0x514990 -> PlayerSlot_InitWeaponsFromLoadout @0x514B22 (dfx2.exe)]
+bool armory_accept_offline(world::World &world, world::LocalPlayer &local,
+		NapiNPConnection *own_slot, const std::vector<world::WeaponKitEntry> &kit,
+		int32_t player_class);
 
 void build_joiner_loadout_kit(const world::World &world,
 		const playersav::Record &profile, uint8_t assigned_team,

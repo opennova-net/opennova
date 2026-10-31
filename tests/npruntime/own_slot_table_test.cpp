@@ -8,7 +8,9 @@
 // equipped weapon names and mounts the EquippedSlot [orig: Server_SendWeaponSlotListToPlayer
 // @0x502550 - @0x5025EC..0x50264B, @0x5028B8..0x50290E]; the round init seeds the own
 // slot's buffer from the spawn buffer [orig: Server_InitAllPlayerEntitiesForRound
-// @0x516BC4..0x516BE3]. The weapons are a model of the test's own; every value follows from
+// @0x516BC4..0x516BE3]; out of a session the ACCEPT copies its kit into that slot's buffer
+// [orig: WeaponLoadout_ApplyFromBuffer @0x565DE4]. The weapons are a model of the test's own;
+// every value follows from
 // the cited arithmetic (pool = min(count, maxclips) * clipsize).
 
 #include <net/protocol/protocol.h>
@@ -247,6 +249,49 @@ void test_the_armory_submit_feeds_the_own_accept() {
 	CHECK(r.local->inventory.pools[1] == 30);
 }
 
+// Out of a session the ACCEPT (and the DEATH screen's close-leg apply, the same apply) copies
+// its kit into the loadout buffer of the slot holding the local player, so the next deploy
+// rebuilds that kit: a socketless single-player host's round-init kit K1 (the rifle), then
+// the offline ACCEPT of K2 (the pistol, 4 clips), then a deploy, keeps K2 in the local table.
+// The slot walk finds the slot holding the local player and no other.
+// [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 - Entity_ValidatePtr @0x565DAF, the copy into
+//  slot+0x170C8 @0x565DE4; Server_DeployPlayer -> PlayerSlot_InitWeaponsFromLoadout @0x5178E1]
+// [orig: WeaponLoadout_ApplyFromBuffer @0x564C30 - @0x564D14, @0x564D44;
+//  PlayerSlot_InitWeaponsFromLoadout called @0x514B22 (dfx2.exe)]
+void test_the_offline_accept_keeps_its_kit_for_the_next_deploy() {
+	Rig r(/*own=*/true);
+	r.world.rules.mp_session = false;
+	CHECK(inmatch::local_player_slot(r.roster, r.world) == &r.conn());
+	r.local->loadout.spawn_kit() = {w::WeaponKitEntry{"WPN_RIFLE", 3, -1, -1}};
+	inmatch::PlayerSlot_SeedOwnLoadoutBuffer(r.conn(), r.world);
+	inmatch::PlayerSlot_RebuildKitForRound(r.conn(), r.world, r.entity());
+	CHECK(r.local_slot(kRifleCombo).adm_index == kRifleAdm);
+	CHECK(inmatch::armory_accept_offline(r.world, *r.local,
+			inmatch::local_player_slot(r.roster, r.world),
+			{w::WeaponKitEntry{"WPN_PISTOL", 4, -1, -1}}, 8));
+	const LoadoutSubmit &buffer = r.conn().reply.loadout_buffer;
+	CHECK(buffer.entries.size() == 1);
+	if (buffer.entries.size() == 1)
+		CHECK(buffer.entries[0].adm_index == kPistolAdm && buffer.entries[0].ammo_primary == 4);
+	CHECK(r.local_slot(kPistolCombo).adm_index == kPistolAdm);
+	CHECK(r.local_slot(kRifleCombo).adm_index < 0);
+	// The deploy's rebuild reads the buffer: the pistol, its four clips less the one drawn.
+	inmatch::PlayerSlot_InitWeaponsFromLoadout(r.conn(), r.world, r.entity());
+	CHECK(r.local_slot(kPistolCombo).adm_index == kPistolAdm);
+	CHECK(r.local_slot(kRifleCombo).adm_index < 0);
+	CHECK(r.local->inventory.pools[1] == 30);
+	// No slot (no session context): the local apply alone.
+	Rig n(/*own=*/true);
+	n.world.rules.mp_session = false;
+	CHECK(inmatch::armory_accept_offline(n.world, *n.local, nullptr,
+			{w::WeaponKitEntry{"WPN_PISTOL", 4, -1, -1}}, 8));
+	CHECK(n.local_slot(kPistolCombo).adm_index == kPistolAdm);
+	CHECK(n.conn().reply.loadout_buffer.entries.empty());
+	// A joiner's slot never holds the local player.
+	Rig j(/*own=*/false);
+	CHECK(inmatch::local_player_slot(j.roster, j.world) == nullptr);
+}
+
 } // namespace
 
 int main() {
@@ -255,6 +300,7 @@ int main() {
 	test_the_deploy_rebuilds_the_local_table();
 	test_the_round_init_seeds_the_own_buffer();
 	test_the_armory_submit_feeds_the_own_accept();
+	test_the_offline_accept_keeps_its_kit_for_the_next_deploy();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

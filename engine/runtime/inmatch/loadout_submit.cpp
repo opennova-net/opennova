@@ -1,6 +1,7 @@
 #include <runtime/inmatch/loadout_submit.h>
 
 #include <net/protocol/protocol.h> // DFX2-12, the sender's fixed class
+#include <runtime/inmatch/server_loadout_grant.h> // PlayerSlot_SeedOwnLoadoutBuffer
 #include <runtime/world/weapon_table.h>
 
 #include <vector>
@@ -225,6 +226,25 @@ LoadoutSubmit armory_accept_in_session(world::World &world, world::LocalPlayer &
 				static_cast<uint8_t>(entry.flags)});
 	}
 	return submit;
+}
+
+bool armory_accept_offline(world::World &world, world::LocalPlayer &local,
+		NapiNPConnection *own_slot, const std::vector<world::WeaponKitEntry> &kit,
+		int32_t player_class) {
+	// The local apply: the local table rebuilt from the selection, its counts, the select
+	// of the held weapon and its mount [orig: WeaponLoadout_ApplyFromBuffer @0x565CD0 -
+	//  @0x565DA1..0x566297].
+	if (!world::local_loadout_apply_accept(world, local.loadout, local.weapon, local.inventory,
+				local.inventory_valid, kit, player_class, /*validate_banned=*/true,
+				world::LoadoutApplySelect::HeldWeapon))
+		return false;
+	// The slot holding the local player keeps the applied kit in its loadout buffer, the one
+	// every deploy rebuilds from: the kit the local table was just built from, so a respawn
+	// rebuilds the same [orig: the copy into slot+0x170C8 @0x565DE4, the display lists built
+	//  from it; PlayerSlot_InitWeaponsFromLoadout @0x515550 reads it]
+	// [orig: @0x564D44, @0x564FBD (dfx2.exe)].
+	if (own_slot != nullptr) PlayerSlot_SeedOwnLoadoutBuffer(*own_slot, world);
+	return true;
 }
 
 void build_joiner_loadout_kit(const world::World &world,

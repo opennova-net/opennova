@@ -436,6 +436,14 @@ world::LocalPlayer *own_slot_local_player(const NapiNPConnection &conn, world::W
 	return world.local_player_state;
 }
 
+NapiNPConnection *local_player_slot(std::vector<NapiNPConnection> &connections,
+		world::World &world) {
+	// [orig: Entity_ValidatePtr @0x500910 - the slot walk; the declaration carries the cites]
+	for (NapiNPConnection &conn : connections)
+		if (own_slot_local_player(conn, world) != nullptr) return &conn;
+	return nullptr;
+}
+
 void apply_granted_loadout(NapiNPConnection &conn, world::Entity &player,
                            const GrantedWeaponLoadout &grant, bool rebuild_rows,
                            world::LocalPlayer *local) {
