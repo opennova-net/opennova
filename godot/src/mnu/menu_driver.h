@@ -25,6 +25,7 @@
 #include <runtime/menu/mod_list.h>
 #include <runtime/menu/options_screen.h>
 #include <runtime/menu/player_info_avatars.h>
+#include <runtime/menu/menu_screen_controller.h>
 
 #include <memory>
 #include <vector>
@@ -69,6 +70,21 @@ public:
 	int get_value() const { return value_.value; }
 };
 
+// A screen controller's binding: the engine controller (menu::MenuScreenController) a script
+// hands a driver (MenuDriver.claim_screen), with the host the controller reads its
+// models through. A subclass holds both and relays the device work its controller asks for (a
+// preview, an icon) as its own signals.
+class MenuScreenBinding : public RefCounted {
+	GDCLASS(MenuScreenBinding, RefCounted)
+
+protected:
+	static void _bind_methods() {}
+
+public:
+	// The engine controller (C++ only); null for none.
+	virtual opennova::menu::MenuScreenController *screen_controller() { return nullptr; }
+};
+
 // The compiled-menu interaction driver: ONE MenuFrame (the engine draw-list /
 // pump surface) over a parsed MnuDocument. Every decision — navigation and
 // the back stack, the per-widget state store and its replay, ACTION dispatch,
@@ -94,6 +110,14 @@ class MenuDriver : public RefCounted {
 	opennova::menu::PlayerInfoAvatars avatars_;
 	// The commands the game binds on the open document by control name (wire_commands).
 	opennova::menu::MenuCommands commands_;
+	// The screen controller holding the open document (claim_screen) and its binding; the last one
+	// let go stays alive past a dispatch that released it. While an open runs, its events are the
+	// claimant's open() (opening_).
+	opennova::menu::MenuScreenController *wired_ = nullptr;
+	Ref<MenuScreenBinding> claimed_;
+	Ref<MenuScreenBinding> released_;
+	bool opening_ = false;
+	void release_wired_();
 	std::unique_ptr<FrameSeam> seam_;
 	ObjectID frame_id_;
 	ObjectID audio_id_;
@@ -491,6 +515,15 @@ public:
 
 	// Advance the blink/marquee clock; the shell's _process forwards its clock.
 	void tick(int64_t p_time_ms);
+
+	// --- screen controllers (engine menu_screen_controller.h) ---
+	// The document open now (a screen a mission opens by name, opened with open_document, or a
+	// delegate's document the shell hands its companion) is `p_screen`'s: its open() runs now with
+	// the open file and screen, the runtime's events reach it while it holds the document (ahead of
+	// this driver's signals), and its close() runs at release_screen() or the next open. False with
+	// no document open or no controller.
+	bool claim_screen(const Ref<MenuScreenBinding> &p_screen);
+	void release_screen();
 };
 
 } // namespace godot

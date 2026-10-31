@@ -320,6 +320,10 @@ public:
 
 MenuDriver::MenuDriver() : seam_(std::make_unique<FrameSeam>(this)) {
 	runtime_.set_sink([this](const opennova::menu::MenuEvent &p_event) {
+		// The screen controller holding the document hears an event first, while it still holds
+		// it (the open's own events are its controller's open(), its INIT); this device half
+		// relays every event after.
+		if (wired_ != nullptr && !opening_) wired_->on_event(runtime_, p_event);
 		on_runtime_event_(p_event);
 	});
 	// The single-player screen's controls and the Mods list's descriptions, the engine's name
@@ -330,7 +334,38 @@ MenuDriver::MenuDriver() : seam_(std::make_unique<FrameSeam>(this)) {
 	mods_.set_descriptions(opennova::menu::menu_name_set(opennova::menu::MenuNameSet::ModDescriptions));
 }
 
-MenuDriver::~MenuDriver() = default;
+MenuDriver::~MenuDriver() {
+	runtime_.set_sink(nullptr);
+	release_wired_();
+}
+
+void MenuDriver::release_wired_() {
+	if (wired_ == nullptr) return;
+	opennova::menu::MenuScreenController *const released = wired_;
+	wired_ = nullptr;
+	released->close(runtime_);
+}
+
+bool MenuDriver::claim_screen(const Ref<MenuScreenBinding> &p_screen) {
+	opennova::menu::MenuScreenController *const controller =
+			p_screen.is_valid() ? p_screen->screen_controller() : nullptr;
+	if (controller == nullptr || runtime_.document() == nullptr) return false;
+	if (wired_ != controller) release_wired_();
+	released_ = claimed_;
+	claimed_ = p_screen;
+	wired_ = controller;
+	controller->open(runtime_, runtime_.menu_file(), runtime_.current_screen());
+	return true;
+}
+
+void MenuDriver::release_screen() {
+	// A controller may ask its own release from inside its event (a CANCEL that closes the
+	// screen): its binding stays alive until the next claim or release, past the dispatch on the
+	// stack.
+	released_ = claimed_;
+	claimed_.unref();
+	release_wired_();
+}
 
 MenuFrame *MenuDriver::frame_() const {
 	return frame_id_.is_null() ? nullptr
@@ -404,8 +439,15 @@ bool MenuDriver::open_document(const Ref<MnuDocument> &p_doc, const Ref<Resource
 	// The STARTUP label's line (D-MNU-76): the launch's game and its installed release, ONE's
 	// build and the protocol it speaks (LaunchFlags::version_line).
 	runtime_.set_version_line(to_std(LaunchFlags::version_line()));
-	return runtime_.open_document(doc_.is_valid() ? &doc_->get_native() : nullptr,
+	opening_ = true;
+	const bool shown = runtime_.open_document(doc_.is_valid() ? &doc_->get_native() : nullptr,
 			to_std(p_menu_file), to_std(p_target_screen));
+	opening_ = false;
+	// The previous document's controller lets go: the embedder claims this one for its own.
+	released_ = claimed_;
+	claimed_.unref();
+	release_wired_();
+	return shown;
 }
 
 PackedStringArray MenuDriver::get_screen_names() const {
@@ -1257,6 +1299,8 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_options_surface"), &MenuDriver::is_options_surface);
 	ClassDB::bind_method(D_METHOD("apply_options_policy", "profiles"), &MenuDriver::apply_options_policy);
 	ClassDB::bind_static_method("MenuDriver", D_METHOD("command_names", "set"), &MenuDriver::command_names);
+	ClassDB::bind_method(D_METHOD("claim_screen", "screen"), &MenuDriver::claim_screen);
+	ClassDB::bind_method(D_METHOD("release_screen"), &MenuDriver::release_screen);
 	ClassDB::bind_method(D_METHOD("wire_commands", "in_mission"), &MenuDriver::wire_commands);
 	ClassDB::bind_method(D_METHOD("screen_command", "screen", "name"), &MenuDriver::screen_command);
 	ClassDB::bind_method(D_METHOD("command_owner"), &MenuDriver::command_owner);
