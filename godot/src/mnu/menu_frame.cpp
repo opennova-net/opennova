@@ -8,6 +8,7 @@
 #include <base/title/title.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_state_frame.h>
+#include <runtime/menu/menu_texture_header.h>
 #include <runtime/menu/options_policy.h>
 #include <runtime/renderer/texture_load_rules.h>
 
@@ -243,6 +244,18 @@ bool MenuFrameTextures::decode(const std::string &p_key, opennova::menu::MenuTex
 	// A menu image draws its top level alone.
 	if (image->has_mipmaps()) {
 		image->clear_mipmaps();
+	}
+	// Read back at the sides the game keeps (engine menu_image_readback_size): a DDS's own, out
+	// of the larger texture D3DX made of it.
+	int readback_w = 0;
+	int readback_h = 0;
+	if (opennova::menu::menu_image_readback_size(p_format, p_bytes, &readback_w, &readback_h) &&
+			readback_w <= image->get_width() && readback_h <= image->get_height() &&
+			(readback_w != image->get_width() || readback_h != image->get_height())) {
+		image = image->get_region(Rect2i(0, 0, readback_w, readback_h));
+		if (image.is_null() || image->is_empty()) {
+			return false;
+		}
 	}
 	Entry entry;
 	entry.image = image;

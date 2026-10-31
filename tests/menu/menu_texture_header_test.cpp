@@ -9,6 +9,7 @@
 #include <formats/pcx/pcx_io.h>
 #include <formats/png/png_encode.h>
 #include <formats/tga/tga.h>
+#include <runtime/renderer/device_texture.h>
 
 #include "common/test_expect.h"
 
@@ -89,10 +90,38 @@ static int test_probe_keeps_no_pixels() {
 	return 0;
 }
 
+// A menu DDS is read back at the sides its header states, out of the texture D3DX made at
+// D3DX_DEFAULT sides: a 1600 x 1200 background (dfx2.exe's JO_epil) at 1600 x 1200, not the
+// 2048 x 2048 texture; every other format's reader decodes at its own sides, so none is cropped.
+// [orig: TextureSlot_LoadFromDXTFile @0x6642E0 - @0x6643A0; GTexture_InitFromMemory - the
+//  D3DXIMAGE_INFO sides @0x687F09 / @0x687F0C; GTexture_ReadMipPixels @0x6879D5 / @0x6879D7]
+static int test_readback_size() {
+	std::string error;
+	std::vector<uint8_t> dds;
+	TEST_EXPECT(opennova::dds::dds_write_a8r8g8b8(rgba(1600, 1200).data(), 1600, 1200, dds, error));
+	// The texture D3DX makes of it is larger.
+	TEST_EXPECT(opennova::renderer::d3dx_default_texture_side(1600) == 2048 &&
+			opennova::renderer::d3dx_default_texture_side(1200) == 2048);
+	int w = -1, h = -1;
+	TEST_EXPECT(opennova::menu::menu_image_readback_size(MenuTextureFormat::Dds, dds, &w, &h) &&
+			w == 1600 && h == 1200);
+	std::vector<uint8_t> tga;
+	TEST_EXPECT(opennova::tga::tga_write_rgba32(rgba(5, 3).data(), 5, 3, tga, error));
+	TEST_EXPECT(!opennova::menu::menu_image_readback_size(MenuTextureFormat::Tga, tga, &w, &h));
+	const std::vector<uint8_t> png = opennova::png::encode_png_rgba(rgba(4, 9).data(), 4, 9);
+	TEST_EXPECT(!opennova::menu::menu_image_readback_size(MenuTextureFormat::Png, png, &w, &h));
+	// A DDS too short for its header states no sides.
+	TEST_EXPECT(!opennova::menu::menu_image_readback_size(
+			MenuTextureFormat::Dds, std::vector<uint8_t>{'D', 'D', 'S', ' '}, &w, &h));
+	std::printf("test_readback_size passed\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_each_format();
 	failures += test_refusals();
 	failures += test_probe_keeps_no_pixels();
+	failures += test_readback_size();
 	return failures == 0 ? 0 : 1;
 }
