@@ -1571,6 +1571,14 @@ struct Entity {
 		int32_t wheel_slip_phase = 0; // +0x46C: signed wheelspin carry
 		bool contact_solved_once = false; // +0x3CE: contact solver has run
 		bool flare_latched = false; // brain+0x318 bit 2
+		// entity+0xB0 on a vehicle row: a joiner's 0x0D copy of the host brain's +0x318
+		// byte, sign-extended (replication::ClientEntityState::spawn_sound_latch); every other
+		// spawn leaves it 0. A joiner's CHel / cpln class init reads it back: its low two bits
+		// into the brain's latch byte and bit 7 as a rotor already turning
+		// (VehicleSystem::run_weapon_slot_class_init).
+		// [orig: NapiNPClientMsg_0x00D @0x4331BA; Entity_SpawnDeployable @0x51C446;
+		//  Entity_InitAircraftWeaponBones @0x490160 - the reads @0x4902D5 / @0x4902E4]
+		int32_t spawn_sound_latch = 0;
 		int32_t view_tilt_bam = 0; // +0x45C, helo GUNPITCH fallback and bike lean history
 		uint16_t gear_phase = 0; // +0x470, automatic five-unit clearance servo
 		bool movement_effects_disabled = false; // +0x44C

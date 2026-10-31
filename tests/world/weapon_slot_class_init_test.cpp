@@ -19,6 +19,7 @@
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/mount_controls.h>
+#include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/vehicle_system.h>
 #include <runtime/world/world.h>
 
@@ -280,6 +281,71 @@ void test_the_armory_load_binds_the_promoted_guns() {
 	CHECK(live.primary_weapon_slot.clip == 7 && live.primary_weapon_slot.reserve == 14);
 }
 
+// A joiner's CHel / cpln class init takes back the row's +0xB0, the 0x0D's copy of the host
+// brain's latch byte: the brain's latch byte becomes its low two bits (the other six cleared),
+// and with bit 7 the rotor starts at the title's full rate and at full speed. A brainless row
+// seeds its rotor and writes no latch; the authority, a single player and another class's row
+// run no such tail; dfx2.exe's full rate is 0x5B05B.
+// [orig: Entity_InitAircraftWeaponBones @0x490160 - the authority / session tests
+//  @0x4902BB..0x4902CB, +0x318 = +0xB0 & 3 @0x4902D5..0x4902DE, the bit-7 test @0x4902E4,
+//  +0x468 / +0x460 @0x4902ED / @0x4902F7]
+// [orig: sub_490170 @0x490170 - +0x468 = 0x5B05B @0x4902FD (dfx2.exe)]
+void test_a_joiners_aircraft_init_takes_back_its_latch_byte() {
+	const auto latched = [](const w::Entity &e) {
+		const w::Entity::VehicleMotorState &m = e.veh;
+		return (m.engine_sound_latched ? 0x01u : 0u) | (m.reverse_sound_latched ? 0x02u : 0u) |
+				(m.light_sound_latched ? 0x04u : 0u) | (m.flare_latched ? 0x04u : 0u) |
+				(m.skid_sound_latched ? 0x08u : 0u) | (m.collision_sound_latched ? 0x10u : 0u) |
+				(m.pivot_sound_latched ? 0x20u : 0u) | (m.tumble_hard_latched ? 0x40u : 0u) |
+				(m.tumble_med_latched ? 0x80u : 0u);
+	};
+	const auto set_latched = [](w::Entity &e) {
+		w::Entity::VehicleMotorState &m = e.veh;
+		m.light_sound_latched = m.flare_latched = m.skid_sound_latched = true;
+		m.collision_sound_latched = m.pivot_sound_latched = true;
+		m.tumble_hard_latched = m.tumble_med_latched = true;
+	};
+	const auto row = [&](Rig &r, int32_t item_id, uint8_t byte, bool brain) {
+		const w::EntityHandle h = r.item(item_id, "", 0, true, 1);
+		r.at(h).veh.spawn_sound_latch = static_cast<int8_t>(byte);
+		set_latched(r.at(h));
+		if (brain) r.world.ai.attach(h);
+		r.world.vehicles.run_weapon_slot_class_init(r.at(h));
+		return h;
+	};
+	const w::PartSpinRates jo{};
+	{
+		Rig r;
+		r.world.rules.mp_session = true;
+		r.world.rules.projectile_authority = false;
+		const w::EntityHandle turning = row(r, kHeloItem, 0x83, true);
+		CHECK(latched(r.at(turning)) == 0x03u);
+		CHECK(r.at(turning).veh.part_spin.rate == jo.full && jo.full == 0x2D82D);
+		CHECK(r.at(turning).veh.part_spin.speed == w::kRotorSpeedMax);
+		const w::EntityHandle parked = row(r, kHeloItem, 0x01, true);
+		CHECK(latched(r.at(parked)) == 0x01u);
+		CHECK(r.at(parked).veh.part_spin.rate == 0 && r.at(parked).veh.part_spin.speed == 0);
+		const w::EntityHandle brainless = row(r, kHeloItem, 0x80, false);
+		CHECK(latched(r.at(brainless)) == 0xFCu);
+		CHECK(r.at(brainless).veh.part_spin.rate == jo.full &&
+				r.at(brainless).veh.part_spin.speed == w::kRotorSpeedMax);
+		const w::EntityHandle crate = row(r, kCrateItem, 0x83, true);
+		CHECK(latched(r.at(crate)) == 0xFCu && r.at(crate).veh.part_spin.rate == 0);
+		r.world.rules.title_rules = &w::title_rules("dfx2");
+		const w::EntityHandle dfx2 = row(r, kHeloItem, 0x80, true);
+		CHECK(r.at(dfx2).veh.part_spin.rate == 0x5B05B &&
+				r.at(dfx2).veh.part_spin.speed == w::kRotorSpeedMax);
+	}
+	for (const bool session : {true, false}) {
+		Rig r;
+		r.world.rules.mp_session = session;
+		r.world.rules.projectile_authority = true;
+		const w::EntityHandle host = row(r, kHeloItem, 0x83, true);
+		CHECK(latched(r.at(host)) == 0xFCu);
+		CHECK(r.at(host).veh.part_spin.rate == 0 && r.at(host).veh.part_spin.speed == 0);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -288,6 +354,7 @@ int main() {
 	test_the_aircraft_respawn_reseeds_its_slot();
 	test_the_carrier_death_refills_the_spawn_bound_child();
 	test_the_armory_load_binds_the_promoted_guns();
+	test_a_joiners_aircraft_init_takes_back_its_latch_byte();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

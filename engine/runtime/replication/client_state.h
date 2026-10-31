@@ -465,6 +465,15 @@ struct ClientEntityState {
 	int16_t spawn_location_index = 0;
 	uint8_t spawn_ref_num = 0;
 	uint8_t spawn_sub_type = 0;
+	// entity+0xB0 of a pool-1 row: the 0x0D record's field-0x1000 byte (the host brain's
+	// +0x318 sound-latch byte), sign-extended, 0 when the record omits it (the slot's memset) and
+	// on a 0x18 row (its store of 0). The dword a person row holds its lean in (lean_angle); the
+	// joiner's CHel / cpln class init reads it (world::Entity::VehicleMotorState::spawn_sound_latch).
+	// [orig: NapiNPClientMsg_0x00D @0x432C40 - `movsx ecx, cl; mov [ebx+0B0h], ecx`
+	//  @0x4331B7..0x4331BA; NapiNPClientMsg_FullEntitySpawn @0x433780 - +0xB0 = 0 @0x433E5C]
+	// [orig: NapiNPClientMsg_0x00D @0x430250 - @0x4307C7..0x4307CA;
+	//  NapiNPClientMsg_FullEntitySpawn @0x4311C0 - @0x43189C (dfx2.exe)]
+	int32_t spawn_sound_latch = 0;
 	// The full 0x18 repair carries these fields in addition to pool-load data.
 	uint32_t spawn_owner_connection_id = 0;
 	uint8_t spawn_player_class = 0;

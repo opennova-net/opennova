@@ -450,6 +450,8 @@ void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 		es.spawn_ammo_count = rec.bone_byte;
 		es.spawn_ref_num = rec.alert_byte;
 		es.spawn_sub_type = rec.action_byte;
+		// entity+0xB0, the byte sign-extended [orig: NapiNPClientMsg_0x00D @0x4331B7..0x4331BA].
+		es.spawn_sound_latch = static_cast<int8_t>(rec.sound_latch_byte);
 		es.spawn_mount_mask = rec.seat_mask;
 		for (std::size_t slot = 0; slot < rec.mount_handles.size(); ++slot)
 			es.spawn_mount_handles[slot] = rec.mount_handles[slot];

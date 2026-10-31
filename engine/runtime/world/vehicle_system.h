@@ -251,9 +251,11 @@ public:
     // with its model loaded and a weapon bound, splits its startrounds, then on a ground
     // entity with a def (an addeweap child's carrier) runs its class update once, which
     // composes it; a CHel / cpln row whose def carries EWeap binds and splits without the
-    // model test. Every other row's init touches no slot. The mission start, a deployable
-    // and its addeweap children, a joiner's arriving rows and a vehicle's respawn run it;
-    // no mount does.
+    // model test, and on a joiner every CHel / cpln row then takes back its 0x0D latch byte
+    // (Entity::VehicleMotorState::spawn_sound_latch): its brain the low two bits, its rotor a
+    // full start under bit 7. Every other row's init touches no slot. The mission start, a
+    // deployable and its addeweap children, a joiner's arriving rows and a vehicle's respawn
+    // run it; no mount does.
     // [orig: Entity_InitBoneReferences @0x441470 (the ewep row's init dword @0x81309C; the
     //  class update called @0x44164B); the
     //  CHel / cpln rows' Entity_InitHelicopterAIFromDef @0x4683C0 -> Entity_InitAircraftWeaponBones
