@@ -416,6 +416,17 @@ struct Title {
 	// texels [orig: CFontCache_LoadOrGetFont @0x652f70 (@0x6530e7); CFontCache_EnsureFontLoaded
 	// @0x653de0 (@0x653ea0)].
 	float menu_font_scale = 1.0f;
+	// DFX2-72: the host screen's combat-vehicle missions (menu::HostDialog; the BMS header's
+	// mission type 2): its GAME_TYPE value 254 (game_type::kHostFilterVehicle) lists them, the
+	// init enables it when one is in the catalog, none lists under its own game type's value, and a
+	// remove re-shows one under 254, ALL or its own value. False (Jointops.exe): every mission
+	// lists under its own value and ALL alone [orig: HostDialog_FilterMissionListByGameType
+	// @0x556fe0 (@0x55717c); UI_InitHostSettingsDialog @0x558960 (@0x558ad6..0x558c02)].
+	bool host_vehicle_missions = false;
+	// DFX2-72: the host screen's ADD writes every SELECTED_MISSIONS row's Switch cell (its launch
+	// option) 0. False (Jointops.exe): 1 for a team, non-objective mission [orig:
+	// HostDialog_AddRemoveSelectedMissions @0x557c10 (@0x557e72..0x557e94)].
+	bool host_switch_starts_off = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

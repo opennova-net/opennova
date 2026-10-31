@@ -41,7 +41,9 @@ void append_u32_le(std::vector<uint8_t> &bytes, uint32_t value) {
 	bytes.push_back(static_cast<uint8_t>((value >> 24) & 0xffu));
 }
 
-std::vector<uint8_t> bms_blob(const std::string &mission_name, uint32_t attribs) {
+// `mission_type`: the header's +0x22A byte (bms::MissionType), 0 none.
+std::vector<uint8_t> bms_blob(const std::string &mission_name, uint32_t attribs,
+		uint8_t mission_type = 0) {
 	std::vector<uint8_t> bytes(opennova::bms::kHeaderSize, 0);
 	bytes[0] = 'B';
 	bytes[1] = 'M';
@@ -50,6 +52,7 @@ std::vector<uint8_t> bms_blob(const std::string &mission_name, uint32_t attribs)
 	std::memcpy(bytes.data() + 4, mission_name.c_str(),
 			std::min<size_t>(mission_name.size(), 31));
 	std::memcpy(bytes.data() + 136, &attribs, sizeof(attribs));
+	bytes[0x22A] = mission_type;
 	return bytes;
 }
 
@@ -196,7 +199,7 @@ int main() {
 	write_bytes(root / "zulu.bin", info_bin("Zulu Strike", "Take the island."));
 	write_bytes(root / "alpha.bms",
 			bms_blob("Alpha Header Name",
-					static_cast<uint32_t>(AttribFlags::TeamDeathmatch)));
+					static_cast<uint32_t>(AttribFlags::TeamDeathmatch), /*mission_type=*/2));
 	write_bytes(root / "mike.bms", bms_blob("Mike Header Name", 0));
 	write_bytes(root / "mike.bin",
 			info_bin("", "Briefing without a title.", /*include_title=*/false));
@@ -284,6 +287,9 @@ int main() {
 	TEST_EXPECT(alpha->briefing.empty());
 	TEST_EXPECT(alpha->game_mode ==
 			static_cast<uint32_t>(AttribFlags::TeamDeathmatch));
+	// The header's mission type rides the row (a combat-vehicle mission's 2), as the table
+	// entry's +0x1134 [orig: MissionList_ScanAndBuildFromFiles @0x563170 (@0x56335d..0x563365)].
+	TEST_EXPECT(alpha->mission_type == 2 && zulu->mission_type == 0);
 
 	// A table without TITLE: the title stays empty and the row text falls back to
 	// the FILENAME [orig: the +1044-empty arm @ 0x56191e].

@@ -442,6 +442,14 @@ Title make() {
 	// (@0x6d8607..0x6d8611); CFontCache_EnsureFontLoaded @0x6d9300 (@0x6d93c0..0x6d93cb)
 	// (dfx2.exe)]. Jointops.exe's twin of the init stores nothing there (@0x552500).
 	t.menu_font_scale = 0.5f;
+	// DFX2-72: the host screen's combat-vehicle filter and its ADD's Switch default [orig:
+	//  sub_555180 @0x555180 (@0x555300..0x555334), the twin of
+	//  HostDialog_FilterMissionListByGameType @0x556fe0; sub_556B30 @0x556b30 (@0x556cd5..
+	//  0x556d18), the twin of UI_InitHostSettingsDialog @0x558960; the ADD / REMOVE chunk of
+	//  sub_556180 @0x555df0 (the 0 @0x556076, the re-show @0x555f87..0x555faf), the twin of
+	//  HostDialog_AddRemoveSelectedMissions @0x557c10 (dfx2.exe)].
+	t.host_vehicle_missions = true;
+	t.host_switch_starts_off = true;
 	return t;
 }
 

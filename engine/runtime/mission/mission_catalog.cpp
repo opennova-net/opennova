@@ -132,6 +132,7 @@ void fill_row(Row &row, const bms::Header &header, bool header_ok, const rtxt::F
 	// The single-select mode bit the code-word derivation consumes (the switch itself is
 	// game_type::for_mission_mode, game_type_of).
 	row.game_mode = header_ok ? bms::selected_game_mode(header.attrib_flags) : 0u;
+	row.mission_type = header_ok ? static_cast<uint8_t>(header.mission_type) : uint8_t{0};
 	if (text != nullptr) {
 		if (const rtxt::Entry *title = rtxt::find_with_override(text_override, *text,
 				kTextInfoSection, kTextTitleKey))

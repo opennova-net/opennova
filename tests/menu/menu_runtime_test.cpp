@@ -1675,7 +1675,7 @@ void test_host_dialog() {
 		{"team.bms", "Team", "", game_type::kTeamDeathmatch},
 		{"obj.bms", "Objective", "", game_type::kObjectiveCoop},
 		{"dm.bms", "Deathmatch", "", game_type::kDeathmatch}};
-	host.seed(menu, rows);
+	host.seed(menu, rows, Title{});
 	const int list = menu.widget_id("MISSION_LIST"), table = menu.widget_id("SELECTED_MISSIONS");
 	CHECK(menu.item_count(list) == 3 && menu.selected_row(list) == -1);
 	CHECK(!host.can_start() && menu.is_widget_disabled(menu.widget_id("START_GAME")));
@@ -1713,7 +1713,7 @@ void test_host_dialog() {
 	CHECK(menu.selected_row(country) == 1);
 	HostDialog::select_location(menu, country, "unknown");
 	CHECK(menu.selected_row(country) == 1);
-	host.seed(menu, rows);
+	host.seed(menu, rows, Title{});
 	CHECK(!host.can_start() && host.selected_missions().empty());
 }
 
@@ -1804,10 +1804,10 @@ void test_row_switch_callers() {
 	menu.select_row(game_type, 1, false);
 	HostDialog host;
 	host.seed(menu, { { "dm.bms", "Deathmatch", "", game_type::kDeathmatch },
-			{ "sp.bms", "Training", "", game_type::kCoop } });
+			{ "sp.bms", "Training", "", game_type::kCoop } }, Title{});
 	CHECK(menu.is_item_enabled(game_type, 0) && !menu.is_item_enabled(game_type, 1));
 	CHECK(menu.selected_row(game_type) == 0);
-	host.seed(menu, { { "team.bms", "Team", "", game_type::kTeamDeathmatch } });
+	host.seed(menu, { { "team.bms", "Team", "", game_type::kTeamDeathmatch } }, Title{});
 	CHECK(menu.is_item_enabled(game_type, 0) && menu.is_item_enabled(game_type, 1));
 
 	mnu::Document armory;
@@ -1831,6 +1831,75 @@ void test_row_switch_callers() {
 	for (int row = 0; row < 5; ++row) CHECK(weapon.is_item_enabled(spin, row));
 }
 
+// DFX2-72: dfx2.exe's host screen lists its combat-vehicle missions (the BMS header's mission
+// type 2) under GAME_TYPE 254 and not under their own game type, enables 254 at its init when one
+// is in the catalog, writes every ADD's Switch 0, and its remove re-shows a removed one under its
+// own value too, until the next filter; Jointops.exe lists every mission under its own value.
+// [orig: sub_555180 @0x555180 (@0x555300..0x555334); sub_556B30 @0x556b30 (@0x556cd5..0x556d18);
+//  sub_556180's chunk @0x555df0 (@0x556076, @0x555f87..0x555faf) (dfx2.exe);
+//  HostDialog_FilterMissionListByGameType @0x556fe0 (@0x55717c)]
+void test_host_dialog_vehicle_missions() {
+	auto doc = flow_document();
+	for (mnu::Window &w : doc.screens[0].roots[0].children)
+		if (w.name == "GAME_TYPE") w.items.items.push_back(item("Vehicle", "254"));
+	MenuRuntime menu;
+	menu.open_document(&doc, "mp.mnu", "");
+	const int spin = menu.widget_id("GAME_TYPE"), list = menu.widget_id("MISSION_LIST");
+	const int table = menu.widget_id("SELECTED_MISSIONS");
+	const std::vector<MissionChoice> rows = {
+		{"team.bms", "Team", "", game_type::kTeamDeathmatch, {}, "", 1},
+		{"veh.bms", "Vehicles", "", game_type::kTeamDeathmatch, {}, "", 2},
+		{"dm.bms", "Deathmatch", "", game_type::kDeathmatch, {}, "", 1}};
+	const auto key = [](const char *, const char *, const char *fallback) { return std::string(fallback); };
+	HostDialog jo;
+	jo.seed(menu, rows, Title{});
+	CHECK(menu.item_count(list) == 3 && !menu.is_item_enabled(spin, 2));
+	menu.select_row(spin, 1, false);
+	jo.filter(menu);
+	CHECK(menu.item_count(list) == 2 && menu.item_text(list, 1) == "Vehicles");
+	menu.select_row(spin, 0, false);
+	jo.filter(menu);
+	menu.set_selected_set(list, {0, 1});
+	jo.add_selected(menu, key);
+	CHECK(jo.selected_launch_options() == (std::vector<int32_t>{1, 1}));
+
+	Title dfx2;
+	dfx2.host_vehicle_missions = true;
+	dfx2.host_switch_starts_off = true;
+	HostDialog host;
+	host.seed(menu, rows, dfx2);
+	CHECK(menu.item_count(list) == 3 && menu.is_item_enabled(spin, 1) && menu.is_item_enabled(spin, 2));
+	menu.select_row(spin, 1, false);
+	host.filter(menu);
+	CHECK(menu.item_count(list) == 1 && menu.item_text(list, 0) == "Team");
+	menu.select_row(spin, 2, false);
+	host.filter(menu);
+	CHECK(menu.item_count(list) == 1 && menu.item_text(list, 0) == "Vehicles");
+	// The ADD writes every Switch 0.
+	menu.select_row(spin, 0, false);
+	host.filter(menu);
+	menu.set_selected_set(list, {0, 1});
+	host.add_selected(menu, key);
+	CHECK(host.selected_launch_options() == (std::vector<int32_t>{0, 0}));
+	CHECK(menu.table_cell_text(table, 0, 2) == "0" && menu.table_cell_text(table, 1, 2) == "0");
+	CHECK(menu.item_count(list) == 1 && menu.item_text(list, 0) == "Deathmatch");
+	// Under Team, the remove re-shows the vehicle mission it took back with the team one; the
+	// next filter hides it again.
+	menu.select_row(spin, 1, false);
+	host.filter(menu);
+	CHECK(menu.item_count(list) == 0);
+	menu.table_select_row(table, 0, false);
+	menu.table_select_row(table, 1, true);
+	host.remove_selected(menu);
+	CHECK(menu.table_row_count(table) == 0 && menu.item_count(list) == 2 &&
+			menu.item_text(list, 1) == "Vehicles");
+	host.filter(menu);
+	CHECK(menu.item_count(list) == 1 && menu.item_text(list, 0) == "Team");
+	// No combat-vehicle mission in the catalog: 254 stays off.
+	host.seed(menu, {rows[0], rows[2]}, dfx2);
+	CHECK(!menu.is_item_enabled(spin, 2));
+}
+
 // The shipped MISSION_LIST is a LIST whose ITEMS are MULTISELECT: a click keeps a
 // selection set, ADD takes the picked mission, and the rebuilt rows drop the set (its
 // indexes named the old rows), so a second ADD adds nothing and no row stays
@@ -1847,7 +1916,7 @@ void test_host_dialog_multiselect() {
 	HostDialog host;
 	host.seed(menu, {{"team.bms", "Team", "", game_type::kTeamDeathmatch},
 			{"obj.bms", "Objective", "", game_type::kObjectiveCoop},
-			{"dm.bms", "Deathmatch", "", game_type::kDeathmatch}});
+			{"dm.bms", "Deathmatch", "", game_type::kDeathmatch}}, Title{});
 	const int list = menu.widget_id("MISSION_LIST");
 	const int index = menu.frame_index(list);
 	CHECK(index >= 0 && menu.item_count(list) == 3);
@@ -2684,6 +2753,7 @@ int main() {
 	test_shell_flow();
 	test_campaign_tabs();
 	test_host_dialog();
+	test_host_dialog_vehicle_missions();
 	test_host_dialog_multiselect();
 	test_spin_rows_enabled_and_parts();
 	test_row_switch_callers();

@@ -58,6 +58,10 @@ struct Row {
 	// game_type_of derives it.
 	uint32_t game_mode = 0;
 	bool loose = false; // loose-scanned, not archived [orig: entry+4380]
+	// The header's mission type byte (bms::MissionType: 2 a combat-vehicle mission; 0 with no
+	// header) [orig: entry+0x1134, MissionList_ScanAndBuildFromFiles @0x563170 (@0x56335d..
+	//  0x563365), Mission_BuildMapListFromPFF @0x562910 (@0x562b29)].
+	uint8_t mission_type = 0;
 	CampaignWords campaign;
 };
 

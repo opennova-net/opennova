@@ -24,6 +24,7 @@ class MissionCatalogRow : public RefCounted {
 	String briefing_;
 	int64_t game_type_ = 0;
 	bool loose_ = false;
+	int64_t mission_type_ = 0;
 
 protected:
 	static void _bind_methods();
@@ -33,13 +34,15 @@ public:
 	// come from MissionCatalog::rows.
 	static Ref<MissionCatalogRow> create(const String &p_file,
 			const String &p_title, const String &p_briefing,
-			int64_t p_game_type, bool p_loose);
+			int64_t p_game_type, bool p_loose, int64_t p_mission_type);
 
 	String get_file() const { return file_; }
 	String get_title() const { return title_; }
 	String get_briefing() const { return briefing_; }
 	int64_t get_game_type() const { return game_type_; }
 	bool is_loose() const { return loose_; }
+	// The header's mission type (engine mission_catalog::Row::mission_type).
+	int64_t get_mission_type() const { return mission_type_; }
 	// The list row text (engine mission_catalog::display_text).
 	String display_text() const;
 };

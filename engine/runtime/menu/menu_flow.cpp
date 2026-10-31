@@ -12,7 +12,7 @@ namespace opennova::menu {
 
 MissionChoice mission_choice(const mission_catalog::Row &row) {
 	return { row.file, mission_catalog::display_text(row), row.briefing, mission_catalog::game_type_of(row),
-		row.campaign, row.title };
+		row.campaign, row.title, row.mission_type };
 }
 
 namespace {
@@ -331,12 +331,15 @@ void enable_class_rows(MenuRuntime &menu, int spin, uint32_t class_allow_mask) {
 // The host population excludes stock Co-op and resets the rotation.
 // [orig: UI_InitHostSettingsDialog @0x558960, skip @0x558a70;
 // GAME_TYPE ALL=255 @0x558aee]
-void HostDialog::seed(MenuRuntime &menu, const std::vector<MissionChoice> &rows) {
+void HostDialog::seed(MenuRuntime &menu, const std::vector<MissionChoice> &rows, const Title &title) {
 	pool_.clear();
 	selected_.clear();
 	launch_options_.clear();
+	vehicle_missions_ = title.host_vehicle_missions;
+	switch_starts_off_ = title.host_switch_starts_off;
 	for (const auto &row : rows)
 		if (game_type::host_list_visible(row.game_type)) pool_.push_back(row);
+	shown_.assign(pool_.size(), false);
 	const int table = menu.widget_id("SELECTED_MISSIONS");
 	if (table >= 0) menu.table_clear_rows(table);
 	// Each GAME_TYPE row disabled, then enabled when it is ALL or some mission of the whole list
@@ -352,6 +355,15 @@ void HostDialog::seed(MenuRuntime &menu, const std::vector<MissionChoice> &rows)
 			// The row's VALUE as its parse read it [orig: CUISpinList_ParseXMLDefinition @ 0x64c144, wcstol].
 			const int item = static_cast<int>(std::strtol(menu.item_value(spin, i).c_str(), nullptr, 10));
 			bool used = item == game_type::kHostFilterAll;
+			// DFX2-72: the combat-vehicle value is enabled by any combat-vehicle mission of the
+			// whole list [orig: sub_556B30 @0x556b30 - the 254 test @0x556cd5, the walk over
+			// entry+0x1134 == 2 @0x556cf5..0x556d11 (dfx2.exe)].
+			if (vehicle_missions_ && item == game_type::kHostFilterVehicle) {
+				for (size_t m = 0; !used && m < rows.size(); ++m)
+					used = rows[m].mission_type == game_type::kHostVehicleMissionType;
+				if (used) menu.set_item_enabled(spin, i, true);
+				continue;
+			}
 			for (size_t m = 0; !used && m < rows.size(); ++m)
 				used = game_type::host_filter_category(rows[m].game_type) == item;
 			if (used) menu.set_item_enabled(spin, i, true);
@@ -362,7 +374,38 @@ void HostDialog::seed(MenuRuntime &menu, const std::vector<MissionChoice> &rows)
 	sync_start(menu);
 }
 
-// [orig: HostDialog_FilterMissionListByGameType @0x556fe0, walk @0x557072;
+// Whether `row` lists under GAME_TYPE `value`: ALL, or its own category; under the title's
+// combat-vehicle filter (DFX2-72) a combat-vehicle row lists under 254 too and, but for a
+// remove's re-show, not under its own category.
+// [orig: HostDialog_FilterMissionListByGameType @0x556fe0 - (category == value || value == 255)
+//  @0x55717c; HostDialog_AddRemoveSelectedMissions @0x557c10 - the remove's re-show, the same
+//  test @0x557da1..0x557db7; sub_555180 @0x555180 - (category == value && entry+0x1134 != 2) ||
+//  value == 255 || (entry+0x1134 == 2 && value == 254) @0x555300..0x555334; the remove's re-show
+//  in sub_556180's chunk @0x555f87..0x555faf: category == value || value == 255 ||
+//  (entry+0x1134 == 2 && value == 254) (dfx2.exe)]
+bool HostDialog::listed_under_(const MissionChoice &row, int value, bool removed) const {
+	if (value == game_type::kHostFilterAll) return true;
+	const bool vehicle = vehicle_missions_ && row.mission_type == game_type::kHostVehicleMissionType;
+	if (vehicle && value == game_type::kHostFilterVehicle) return true;
+	return game_type::host_filter_category(row.game_type) == value && (removed || !vehicle);
+}
+
+void HostDialog::publish_(MenuRuntime &menu) {
+	const int list = menu.widget_id("MISSION_LIST");
+	if (list < 0) return;
+	visible_.clear();
+	std::vector<std::string> texts;
+	for (int i = 0; i < static_cast<int>(pool_.size()); ++i) {
+		if (!shown_[static_cast<size_t>(i)]) continue;
+		visible_.push_back(i);
+		texts.push_back(pool_[i].text);
+	}
+	menu.set_widget_items(list, texts);
+	menu.select_row(list, -1, false);
+}
+
+// Every row disabled, then each not selected that lists under the value enabled.
+// [orig: HostDialog_FilterMissionListByGameType @0x556fe0, the value @0x557044, walk @0x557072;
 // UI_InitHostSettingsDialog title/filename row @0x558a48]
 void HostDialog::filter(MenuRuntime &menu) {
 	const int list = menu.widget_id("MISSION_LIST");
@@ -371,20 +414,13 @@ void HostDialog::filter(MenuRuntime &menu) {
 	const auto value = menu.item_value(spin, menu.selected_row(spin));
 	char *end = nullptr;
 	const long parsed = std::strtol(value.c_str(), &end, 10);
-	const int category = !value.empty() && end == value.c_str() + value.size()
+	filter_value_ = !value.empty() && end == value.c_str() + value.size()
 			? static_cast<int>(parsed) : game_type::kHostFilterAll;
-	visible_.clear();
-	std::vector<std::string> texts;
-	for (int i = 0; i < static_cast<int>(pool_.size()); ++i) {
-		if (std::find(selected_.begin(), selected_.end(), i) != selected_.end()) continue;
-		if (category != game_type::kHostFilterAll &&
-				game_type::host_filter_category(pool_[i].game_type) != category)
-			continue;
-		visible_.push_back(i);
-		texts.push_back(pool_[i].text);
-	}
-	menu.set_widget_items(list, texts);
-	menu.select_row(list, -1, false);
+	for (int i = 0; i < static_cast<int>(pool_.size()); ++i)
+		shown_[static_cast<size_t>(i)] =
+				std::find(selected_.begin(), selected_.end(), i) == selected_.end() &&
+				listed_under_(pool_[static_cast<size_t>(i)], filter_value_, false);
+	publish_(menu);
 }
 
 // Resolve every selected visible row before rebuilding its mapping. Each
@@ -402,14 +438,20 @@ void HostDialog::add_selected(MenuRuntime &menu, const hud::GameTextLookup &text
 		const auto &row = pool_[picked];
 		const char *key = game_type::host_abbreviation_key(row.game_type);
 		// The ADD sets the row's launch option to its default: a team mode and
-		// not an objective mode [orig: @0x557E72..0x557E94].
-		const int32_t option = game_type::host_rotation_default(row.game_type) ? 1 : 0;
+		// not an objective mode [orig: @0x557E72..0x557E94]; under the title's
+		// DFX2-72 default, 0 for every row [orig: sub_556180's chunk - `mov
+		// [esi+eax+1140h], 0` @0x556076 (dfx2.exe)].
+		const int32_t option =
+				!switch_starts_off_ && game_type::host_rotation_default(row.game_type) ? 1 : 0;
 		menu.table_add_row(table, {row.text, text ? text("GateTypeAbbrev", key, key) : key,
 				option != 0 ? "1" : "0"});
 		selected_.push_back(picked);
 		launch_options_.push_back(option);
+		// Its list row disabled [orig: CListWnd_SetRowEnabled(row, 0) @0x557EF1; @0x5560ce
+		// (dfx2.exe)].
+		shown_[static_cast<size_t>(picked)] = false;
 	}
-	filter(menu);
+	publish_(menu);
 	sync_start(menu);
 }
 
@@ -423,11 +465,17 @@ void HostDialog::remove_selected(MenuRuntime &menu) {
 	for (int row : rows) {
 		menu.table_remove_row(table, row);
 		if (row >= 0 && row < static_cast<int>(selected_.size())) {
+			// Its list row enabled again when it lists under the last filtered value, by the
+			// remove's own test [orig: @0x557cce..0x557dc7; sub_556180's chunk
+			// @0x555f87..0x555fbf (dfx2.exe)].
+			const int picked = selected_[static_cast<size_t>(row)];
+			shown_[static_cast<size_t>(picked)] =
+					listed_under_(pool_[static_cast<size_t>(picked)], filter_value_, true);
 			selected_.erase(selected_.begin() + row);
 			launch_options_.erase(launch_options_.begin() + row);
 		}
 	}
-	filter(menu);
+	publish_(menu);
 	sync_start(menu);
 }
 

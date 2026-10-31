@@ -189,6 +189,12 @@ inline uint32_t for_mission_attribs(uint32_t attrib_flags) {
 // The GAME_TYPE spin's ALL-types value [orig: UI_InitHostSettingsDialog
 // @ 0x558aee selects 255; the filter's show-all test @ 0x55717c].
 inline constexpr int kHostFilterAll = 255;
+// DFX2-72: the GAME_TYPE value dfx2.exe's host screen lists its combat-vehicle missions under
+// (Title::host_vehicle_missions), and the mission type that marks one (the BMS header's +0x22A,
+// bms::MissionType::CombatVehicleMission; the table entry's +0x1134) [orig: sub_555180 @0x555180
+// (@0x555314..0x55532c); sub_556B30 @0x556b30 (@0x556cd5, @0x556d01) (dfx2.exe)].
+inline constexpr int kHostFilterVehicle = 254;
+inline constexpr uint8_t kHostVehicleMissionType = 2;
 
 // Which catalog rows the host MISSION_LIST shows at all: everything except
 // STOCK (non-objective) Co-op — the pure-SP/training family

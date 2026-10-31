@@ -17,10 +17,11 @@ struct MissionChoice {
 	uint32_t game_type = 0;
 	mission_catalog::CampaignWords campaign; // the table entry's (mission_catalog.h)
 	std::string title; // the entry's title alone ("" none): the campaign mission list's text
+	uint8_t mission_type = 0; // the header's mission type (mission_catalog::Row::mission_type)
 };
 
 // A catalog row's choice: its file, its list text (mission_catalog::display_text), its briefing,
-// its session game type (mission_catalog::game_type_of) and its campaign words.
+// its session game type (mission_catalog::game_type_of), its campaign words and its mission type.
 MissionChoice mission_choice(const mission_catalog::Row &row);
 
 // The SP list's model and deferred expansion request survive screen switches
@@ -119,7 +120,9 @@ void enable_class_rows(MenuRuntime &menu, int spin, uint32_t class_allow_mask);
 // in inmatch/host_settings; this model consumes catalog values and menu state.
 class HostDialog {
 public:
-	void seed(MenuRuntime &menu, const std::vector<MissionChoice> &rows);
+	// The dialog's init over the catalog's rows, for `title`'s screen (its combat-vehicle filter
+	// and ADD Switch default, Title::host_vehicle_missions / host_switch_starts_off).
+	void seed(MenuRuntime &menu, const std::vector<MissionChoice> &rows, const Title &title);
 	void filter(MenuRuntime &menu);
 	void add_selected(MenuRuntime &menu, const hud::GameTextLookup &text);
 	void remove_selected(MenuRuntime &menu);
@@ -145,7 +148,17 @@ public:
 
 private:
 	void sync_start(MenuRuntime &menu) const;
+	// MISSION_LIST from the rows' shown flags (each the list row retail enables or disables),
+	// in the pool's order, nothing picked.
+	void publish_(MenuRuntime &menu);
+	// The game-type value a row lists under: its own (game_type::host_filter_category), and
+	// for a combat-vehicle row under the title's filter 254 (kHostFilterVehicle) as well.
+	bool listed_under_(const MissionChoice &row, int value, bool removed) const;
 	std::vector<MissionChoice> pool_;
+	std::vector<bool> shown_; // per pool row: its MISSION_LIST row enabled
+	int filter_value_ = 255;  // the last GAME_TYPE value filtered by [orig: dword_25C76EC]
+	bool vehicle_missions_ = false;
+	bool switch_starts_off_ = false;
 	std::vector<int> visible_, selected_;
 	std::vector<int32_t> launch_options_; // one per selected row
 	bool any_class_ = true; // some class word set (the block's ten, set_class_words)

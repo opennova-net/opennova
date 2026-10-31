@@ -49,7 +49,7 @@ std::vector<opennova::menu::MissionChoice> mission_choices(const TypedArray<Miss
 		const Ref<MissionCatalogRow> row = rows[i];
 		if (row.is_valid()) choices.push_back({to_std(row->get_file()), to_std(row->display_text()),
 				to_std(row->get_briefing()), static_cast<uint32_t>(row->get_game_type()), {},
-				to_std(row->get_title())});
+				to_std(row->get_title()), static_cast<uint8_t>(row->get_mission_type())});
 	}
 	return choices;
 }
@@ -1013,7 +1013,7 @@ bool MenuDriver::request_expansion(const String &p_name, const String &p_current
 String MenuDriver::take_expansion_reload() { return to_gd(flow_.take_expansion_reload()); }
 
 void MenuDriver::seed_host_pool(const TypedArray<MissionCatalogRow> &p_rows) {
-	host_dialog_.seed(runtime_, mission_choices(p_rows));
+	host_dialog_.seed(runtime_, mission_choices(p_rows), ResourceRoot::session_title(root_));
 }
 
 void MenuDriver::add_host_missions(const Ref<RtxtStringFile> &p_text) {

@@ -25,14 +25,14 @@ opennova::mission_catalog::Row to_engine_row(const MissionCatalogRow &row) {
 
 void MissionCatalogRow::_bind_methods() {
 	ClassDB::bind_static_method("MissionCatalogRow",
-			D_METHOD("create", "file", "title", "briefing", "game_type", "loose"),
+			D_METHOD("create", "file", "title", "briefing", "game_type", "loose", "mission_type"),
 			&MissionCatalogRow::create);
 	ClassDB::bind_method(D_METHOD("get_file"), &MissionCatalogRow::get_file);
 }
 
 Ref<MissionCatalogRow> MissionCatalogRow::create(const String &p_file,
 		const String &p_title, const String &p_briefing, int64_t p_game_type,
-		bool p_loose) {
+		bool p_loose, int64_t p_mission_type) {
 	Ref<MissionCatalogRow> row;
 	row.instantiate();
 	row->file_ = p_file;
@@ -40,6 +40,7 @@ Ref<MissionCatalogRow> MissionCatalogRow::create(const String &p_file,
 	row->briefing_ = p_briefing;
 	row->game_type_ = p_game_type;
 	row->loose_ = p_loose;
+	row->mission_type_ = p_mission_type;
 	return row;
 }
 
@@ -79,7 +80,7 @@ TypedArray<MissionCatalogRow> MissionCatalog::rows(const Ref<ResourceRoot> &p_ro
 				opennova::to_gd(row.title),
 				opennova::to_gd(row.briefing),
 				static_cast<int64_t>(opennova::mission_catalog::game_type_of(row)),
-				row.loose));
+				row.loose, static_cast<int64_t>(row.mission_type)));
 	}
 	return out;
 }
