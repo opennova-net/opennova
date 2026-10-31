@@ -53,7 +53,7 @@ void PlayerInfoLoadout::fill_slots(MenuRuntime &menu, const def::DefWeaponsFile 
 		const int combo = menu.widget_id(kPlayerInfoCategoryControls[i]);
 		if (combo < 0) continue;
 		slot_rows[i] = loadout_fill_slot(menu, weapons, kPlayerInfoCategoryControls[i],
-				kPlayerInfoCategorySlots[i], class_mask, team_mask, WeaponAvailability(), none_label,
+				kPlayerInfoCategorySlots[i], class_mask, team_mask, WeaponAvailability(), &none_label,
 				gametext);
 	}
 }

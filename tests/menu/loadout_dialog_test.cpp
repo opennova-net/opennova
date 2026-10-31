@@ -84,6 +84,9 @@ struct Weapons {
 	}
 };
 
+const std::string kNoneMixed = "None";
+const std::string kNoneUpper = "NONE";
+
 void test_fill_slot_and_reselects() {
 	Weapons weapons;
 	const auto doc = document({"PRIMARY", "SECONDARY", "PRIMARY_AMMO1"});
@@ -92,7 +95,7 @@ void test_fill_slot_and_reselects() {
 	const int primary = menu.widget_id("PRIMARY");
 	// The slot filter (class 8, blue team), the case-insensitive label order and NONE at row 0.
 	const LoadoutSlotRows rows = loadout_fill_slot(menu, weapons.file, "PRIMARY", 1, 8, 2,
-			WeaponAvailability(), "None", text);
+			WeaponAvailability(), &kNoneMixed, text);
 	CHECK(rows == (LoadoutSlotRows{-1, 1, 2, 0})); // alpha, MIKE, Zulu
 	CHECK(menu.get_widget_items(primary) == (std::vector<std::string>{"None", "wpn_alpha", "WPN_MIKE", "WPN_Zulu"}));
 	CHECK(menu.selected_row(primary) == 0);
@@ -100,7 +103,7 @@ void test_fill_slot_and_reselects() {
 	// The map availability term: a 0 drops the row; any other value lists.
 	const WeaponAvailability availability = [](const std::string &name) { return name == "WPN_MIKE" ? 0 : 2; };
 	const LoadoutSlotRows armory = loadout_fill_slot(menu, weapons.file, "PRIMARY", 1, 8, 2, availability,
-			"NONE", text);
+			&kNoneUpper, text);
 	CHECK(armory == (LoadoutSlotRows{-1, 1, 0}));
 	CHECK(menu.item_text(primary, 0) == "NONE");
 	// By weapon.def row (PLAYER_INFO): the row carrying it, else none at all.
@@ -110,8 +113,13 @@ void test_fill_slot_and_reselects() {
 	CHECK(menu.selected_row(primary) == -1 && loadout_selected_weapon(menu, "PRIMARY", rows) == -1);
 	loadout_select_weapon_row(menu, "PRIMARY", rows, -1);
 	CHECK(menu.selected_row(primary) == -1); // the NONE row never carries a weapon
+	// No NONE label: the rows alone, the first selected.
+	const LoadoutSlotRows bare = loadout_fill_slot(menu, weapons.file, "PRIMARY", 1, 8, 2,
+			WeaponAvailability(), nullptr, text);
+	CHECK(bare == (LoadoutSlotRows{1, 2, 0}));
+	CHECK(menu.get_widget_items(primary) == (std::vector<std::string>{"wpn_alpha", "WPN_MIKE", "WPN_Zulu"}));
 	// An absent control fills nothing.
-	CHECK(loadout_fill_slot(menu, weapons.file, "ACCESSORY", 0, 8, 2, {}, "None", text).empty());
+	CHECK(loadout_fill_slot(menu, weapons.file, "ACCESSORY", 0, 8, 2, {}, &kNoneMixed, text).empty());
 	CHECK(loadout_selected_weapon(menu, "ACCESSORY", rows) == -1);
 }
 
@@ -186,8 +194,8 @@ void test_armory_page_memory() {
 	MenuRuntime menu;
 	CHECK(menu.open_document(&doc, "test.mnu", "LOADOUT"));
 	LoadoutSlotRows rows[3];
-	rows[0] = loadout_fill_slot(menu, weapons.file, "PRIMARY", 1, 8, 2, {}, "NONE", text);
-	rows[1] = loadout_fill_slot(menu, weapons.file, "SECONDARY", 2, 8, 2, {}, "NONE", text);
+	rows[0] = loadout_fill_slot(menu, weapons.file, "PRIMARY", 1, 8, 2, {}, &kNoneUpper, text);
+	rows[1] = loadout_fill_slot(menu, weapons.file, "SECONDARY", 2, 8, 2, {}, &kNoneUpper, text);
 	ArmoryScreenPairs pairs;
 	armory_populate_page(menu, weapons.file, rows, blue, pairs, text);
 	CHECK(menu.selected_row(menu.widget_id("PRIMARY")) == 2); // WPN_MIKE
@@ -322,6 +330,18 @@ void test_grenade_positions_by_title() {
 	CHECK(names_of(death.accept(menu, weapons.file, 1, 8)) ==
 			"WPN_KNIFE:-1,-1,-1 WPN_MIKE:2,-1,1 WPN_FRAG:-1,-1,-1 WPN_FLASH:2,-1,-1 "
 			"null:-1,-1,-1 ");
+	// DFX2-73: dfx2.exe's lists open with no NONE row [orig: UI_PopulateThreeCategoryLists
+	// @0x565d10 (@0x565e33..0x565e55) (dfx2.exe); JO's NONE @0x566f05..0x566f34].
+	CHECK(jo.slot_rows[0].front() == -1 && menu.item_text(menu.widget_id("PRIMARY"), 0) == "NONE");
+	Title bare;
+	bare.armory_lists_none_row = false;
+	ArmoryLoadout lists;
+	lists.title = &bare;
+	CHECK(lists.buffers.stage_on_show(record, 1, {}));
+	lists.populate(menu, weapons.file, 1, 8, {}, "NONE", text);
+	CHECK(lists.slot_rows[0] == (LoadoutSlotRows{1, 2, 0}));
+	CHECK(menu.item_text(menu.widget_id("PRIMARY"), 0) == "wpn_alpha");
+	CHECK(lists.selected_weapon(menu, "PRIMARY") == 2);
 	// A position the walk zeroed (the "None" catalog row) is AdmDef entry 0, "null", which
 	// dfx2.exe's serializer writes with the None row's count.
 	CHECK(armory_serialize_page(

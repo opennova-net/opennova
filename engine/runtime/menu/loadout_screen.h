@@ -36,7 +36,7 @@ std::vector<int> player_info_fill_grenades(MenuRuntime &menu, const def::DefWeap
 		const hud::GameTextLookup &text);
 
 // One loadout category list as its fill left it: the weapon.def row each list
-// row carries, row 0 the NONE row (-1).
+// row carries, row 0 the NONE row (-1) where the fill made one.
 using LoadoutSlotRows = std::vector<int32_t>;
 
 // Fill the category list `control` (PRIMARY / SECONDARY / ACCESSORY, weapon
@@ -44,7 +44,8 @@ using LoadoutSlotRows = std::vector<int32_t>;
 // team masks (world::weapon_slot_indices), less any whose availability reads 0
 // when `availability` is set (the WEAPON screen's map term), labelled
 // (weapon_label) and in the screens' row order (armory_slot_order), under the
-// NONE row `none_label` at row 0. An absent control fills nothing and returns
+// NONE row `none_label` at row 0 (null: no NONE row, dfx2.exe's WEAPON screen,
+// Title::armory_lists_none_row). An absent control fills nothing and returns
 // no rows.
 // [orig: PlayerInfo_PopulateWeaponSlotLists @0x560430 -- the NONE inserts
 //  @0x56058f / @0x56059d / @0x5605ab; UI_PopulateThreeCategoryLists @0x566db0 --
@@ -52,7 +53,7 @@ using LoadoutSlotRows = std::vector<int32_t>;
 //  the sorts loadout_labels.h armory_slot_order carries]
 LoadoutSlotRows loadout_fill_slot(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 		const std::string &control, int slot, int class_mask, int team_mask,
-		const WeaponAvailability &availability, const std::string &none_label,
+		const WeaponAvailability &availability, const std::string *none_label,
 		const hud::GameTextLookup &gametext);
 
 // The weapon.def row a category list's selection carries; -1 for the NONE row,

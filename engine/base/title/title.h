@@ -427,6 +427,11 @@ struct Title {
 	// option) 0. False (Jointops.exe): 1 for a team, non-objective mission [orig:
 	// HostDialog_AddRemoveSelectedMissions @0x557c10 (@0x557e72..0x557e94)].
 	bool host_switch_starts_off = false;
+	// DFX2-73: the WEAPON screen's three category lists (PRIMARY / SECONDARY / ACCESSORY, and the
+	// DEATH screen's under death_screen_loadout) open with the "Menu" / "NONE" row
+	// (menu::ArmoryLoadout::populate). Jointops.exe's do [orig: UI_PopulateThreeCategoryLists
+	// @0x566db0 (@0x566f05..0x566f34)]; false: none, dfx2.exe's.
+	bool armory_lists_none_row = true;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

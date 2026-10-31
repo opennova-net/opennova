@@ -450,6 +450,11 @@ Title make() {
 	//  HostDialog_AddRemoveSelectedMissions @0x557c10 (dfx2.exe)].
 	t.host_vehicle_missions = true;
 	t.host_switch_starts_off = true;
+	// DFX2-73: the three category lists carry no NONE row [orig: UI_PopulateThreeCategoryLists
+	//  @0x565d10 - the three ListWidget_SortRows @0x565e33..0x565e4d go straight to the ammo
+	//  populate @0x565e55; no TextResource_GetStringWithFallback("Menu", "NONE") (dfx2.exe)], the
+	// twin of Jointops.exe's @0x566db0, which inserts it at row 0 of each @0x566f05..0x566f34.
+	t.armory_lists_none_row = false;
 	return t;
 }
 

@@ -49,7 +49,7 @@ int armory_selected_clips(const MenuRuntime &menu, const std::string &control) {
 
 LoadoutSlotRows loadout_fill_slot(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 		const std::string &control, int slot, int class_mask, int team_mask,
-		const WeaponAvailability &availability, const std::string &none_label,
+		const WeaponAvailability &availability, const std::string *none_label,
 		const hud::GameTextLookup &gametext) {
 	const int combo = menu.widget_id(control);
 	if (combo < 0) return {};
@@ -64,8 +64,12 @@ LoadoutSlotRows loadout_fill_slot(MenuRuntime &menu, const def::DefWeaponsFile &
 		listed.push_back(index);
 		labels.push_back(weapon_label(*w, gametext));
 	}
-	LoadoutSlotRows rows{ -1 };
-	std::vector<std::string> items{ none_label };
+	LoadoutSlotRows rows;
+	std::vector<std::string> items;
+	if (none_label != nullptr) {
+		rows.push_back(-1);
+		items.push_back(*none_label);
+	}
 	for (const int i : armory_slot_order(labels)) {
 		items.push_back(labels[static_cast<size_t>(i)]);
 		rows.push_back(listed[static_cast<size_t>(i)]);

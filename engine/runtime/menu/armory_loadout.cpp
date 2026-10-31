@@ -32,9 +32,13 @@ void ArmoryLoadout::populate(MenuRuntime &menu, const def::DefWeaponsFile &weapo
 		const std::string &none_label, const hud::GameTextLookup &text) {
 	const int32_t class_mask = world::armory_class_filter_mask(selected_class);
 	const int32_t team_mask = armory_team_mask(entity_team);
+	// DFX2-73: dfx2.exe's populate inserts no NONE row [orig: UI_PopulateThreeCategoryLists
+	//  @0x565d10 - the sorts @0x565e33..0x565e4d, then the ammo populate @0x565e55 (dfx2.exe)].
+	const std::string *none =
+			title != nullptr && !title->armory_lists_none_row ? nullptr : &none_label;
 	for (int i = 0; i < 3; ++i)
 		slot_rows[i] = loadout_fill_slot(menu, weapons, kCategories[i], kCategorySlots[i],
-				class_mask, team_mask, availability, none_label, text);
+				class_mask, team_mask, availability, none, text);
 	grenade_rows = armory_populate_page(
 			menu, weapons, slot_rows, buffers.page(selected_class), pairs, text);
 	const std::vector<int> filled =

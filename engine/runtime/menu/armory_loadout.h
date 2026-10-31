@@ -29,7 +29,8 @@ struct ArmoryLoadout {
 	LoadoutSlotRows slot_rows[3];
 	std::vector<int> grenade_rows;
 	// The title the screens run as: its death_screen_loadout serializes every grenade position
-	// (armory_serialize_page). Null: Jointops.exe's serializer.
+	// (armory_serialize_page), its armory_lists_none_row puts the NONE row over the three lists.
+	// Null: Jointops.exe's serializer and NONE rows.
 	const Title *title = nullptr;
 
 	// UI_PopulateThreeCategoryLists over the class's page: the PRIMARY / SECONDARY /
