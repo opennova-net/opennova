@@ -72,6 +72,9 @@ struct EndRoundOverlayInput {
 	std::string player_names[3];
 	int32_t player_scores[3] = {0, 0, 0};
 	int32_t round_time_remaining_ticks = 0; // g_RoundTimeRemaining
+	// The team score lines' fallbacks, blue then red: the title's (Title::
+	// end_round_team_fallbacks, DFX2-124); empty, the key alone.
+	std::string team_fallbacks[2];
 };
 
 // The text ladder [orig: HUD_DrawEndRoundStatsOverlay @0x5b7cd0]: headline at

@@ -247,6 +247,11 @@ EndRoundSessionState end_round_session_state(const RoleView &view) {
 
 hud::EndRoundOverlayInput end_round_overlay_input(const RoleView &view) {
 	hud::EndRoundOverlayInput in;
+	// The team score lines' fallbacks, the session title's (Title::end_round_team_fallbacks).
+	if (view.title != nullptr)
+		for (size_t i = 0; i < 2; ++i)
+			if (const char *fallback = view.title->end_round_team_fallbacks[i])
+				in.team_fallbacks[i] = fallback;
 	if (const world::MatchResult *board = serve_only_round_board(view)) {
 		// The board build's globals: a row's name is copied into its 32-byte entry, its primary
 		// score kept whole (the host's words are 32-bit, the 0x1D's i16 only on the wire); a

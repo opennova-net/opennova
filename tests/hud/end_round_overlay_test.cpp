@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include <base/title/title.h>
 #include <runtime/hud/end_round_overlay.h>
 #include <runtime/hud/end_round_statistics.h>
 
@@ -20,8 +21,15 @@ static int failures = 0;
 
 namespace {
 
+// The input's team fallbacks from a title, as the role feed fills them.
+void take_team_fallbacks(EndRoundOverlayInput &in, const char *code) {
+	const opennova::Title *title = opennova::title_by_code(code);
+	for (size_t i = 0; i < 2; ++i) in.team_fallbacks[i] = title->end_round_team_fallbacks[i];
+}
+
 void test_team_mode_ladder() {
 	EndRoundOverlayInput in;
+	take_team_fallbacks(in, "jo");
 	in.game_type = 0x10000; // TDM
 	in.winner_team = 2;
 	in.team_scores[0] = 12;
@@ -37,6 +45,16 @@ void test_team_mode_ladder() {
 	CHECK(lines[2].literal == "%s : %ld" && lines[2].y == 414);
 	CHECK(lines[2].args[0].key == "STROVER_BLUETEAM" && lines[2].args[0].fallback == "!Joint Ops Team");
 	CHECK(lines[2].args[1].is_number && lines[2].args[1].number == 12);
+	CHECK(lines[3].args[0].key == "STROVER_REDTEAM" && lines[3].args[0].fallback == "!Rebel Team");
+	// DFX2-124: dfx2.exe's lines fall back to its own team names [orig:
+	//  HUD_DrawEndRoundStatsOverlay @0x5B6C20 - @0x5B7372, @0x5B73B5 (dfx2.exe)].
+	{
+		EndRoundOverlayInput dfx2 = in;
+		take_team_fallbacks(dfx2, "dfx2");
+		const std::vector<EndRoundLine> d = end_round_overlay_lines(dfx2);
+		CHECK(d.size() == 5 && d[2].args[0].fallback == "!Blue Team" &&
+				d[3].args[0].fallback == "!Red Team");
+	}
 	CHECK(lines[3].y == 454 && lines[3].args[1].number == 30);
 	// +40 then +24 -> 518: the game time with the un-modded minutes quirk.
 	CHECK(lines[4].y == 518 && lines[4].literal == "%s : %d:%02d:%02d");

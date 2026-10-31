@@ -562,6 +562,16 @@ struct Title {
 	//  @0x5B5BA0 (`retn 4`) at every producer's call, nullsub_36 @0x5B5AA0 from
 	//  Render_InitMissionTextures @0x5856F0 (dfx2.exe)]
 	bool hud_tips = true;
+	// DFX2-124: the end-round overlay's two team score lines' gametext fallbacks, the blue team's
+	// (STROVER_BLUETEAM) then the red team's (STROVER_REDTEAM), each "!"-led, the line's when the
+	// Overlays key is missing or empty (hud::EndRoundOverlayInput::team_fallbacks): Jointops.exe's
+	// "!Joint Ops Team" / "!Rebel Team", dfx2.exe's "!Blue Team" / "!Red Team". Null where no
+	// binary of the title was read for them: the key alone. The DEATH screen's "you have joined
+	// the %s" line keeps Jointops.exe's pair in both executables (world::deploy_screen_feed).
+	// [orig: HUD_DrawEndRoundStatsOverlay @0x5B7CD0 - @0x5B8422 (0x7D4CB8), @0x5B8465 (0x7D4C98)]
+	// [orig: HUD_DrawEndRoundStatsOverlay @0x5B6C20 - @0x5B7372 (0x7DA364), @0x5B73B5 (0x7DA34C);
+	//  the death screen's twin @0x551E10 - @0x5525B9 (0x7D3D3C), @0x5525CA (0x7D3D1C) (dfx2.exe)]
+	std::array<const char *, 2> end_round_team_fallbacks{};
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

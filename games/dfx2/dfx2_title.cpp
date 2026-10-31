@@ -520,6 +520,10 @@ Title make() {
 	//  Entity_ProcessVehicleAttach @0x435A37 among the rest; nullsub_36 @0x5B5AA0 from
 	//  Render_InitMissionTextures @0x5856F0; CTipSystem_ShowTip @0x5B5B30 no caller (dfx2.exe)].
 	t.hud_tips = false;
+	// DFX2-124: the end-round score lines' team fallbacks [orig: HUD_DrawEndRoundStatsOverlay
+	//  @0x5B6C20 - "!Blue Team" (0x7DA364) @0x5B7372, "!Red Team" (0x7DA34C) @0x5B73B5, the twin of
+	//  Jointops.exe's @0x5B7CD0 (dfx2.exe)].
+	t.end_round_team_fallbacks = { "!Blue Team", "!Red Team" };
 	return t;
 }
 
