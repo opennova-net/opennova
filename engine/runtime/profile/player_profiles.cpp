@@ -157,19 +157,14 @@ void init_defaults(playersav::ProfileRecord &record, playersav::Record &weapons,
 	weapons.red.avatar_a = defaults.avatars[1].nationality;
 	weapons.red.avatar_b = defaults.avatars[1].division;
 	weapons.red.avatar_packed = defaults.avatars[1].packed;
-	weapons.single_player = title.profile_single_player_kit != nullptr
-			? playersav::kit_page_of_names(title.profile_single_player_kit)
-			: playersav::default_single_player_page();
+	// An unwitnessed title names no pages (Title::profile_class_kits): none is written.
+	if (title.profile_single_player_kit != nullptr)
+		weapons.single_player = playersav::kit_page_of_names(title.profile_single_player_kit);
+	if (title.profile_class_kits == nullptr) return;
 	for (size_t i = 0; i < playersav::kKitPagesPerSide; ++i) {
-		const uint8_t klass = static_cast<uint8_t>(playersav::kMinPlayerClass + i);
-		if (title.profile_class_kits != nullptr) {
-			weapons.blue.pages[i] = playersav::kit_page_of_names(title.profile_class_kits[i]);
-			weapons.red.pages[i] = playersav::kit_page_of_names(
-					title.profile_class_kits[playersav::kKitPagesPerSide + i]);
-			continue;
-		}
-		weapons.blue.pages[i] = playersav::default_kit_page(playersav::SideId::Blue, klass);
-		weapons.red.pages[i] = playersav::default_kit_page(playersav::SideId::Red, klass);
+		weapons.blue.pages[i] = playersav::kit_page_of_names(title.profile_class_kits[i]);
+		weapons.red.pages[i] = playersav::kit_page_of_names(
+				title.profile_class_kits[playersav::kKitPagesPerSide + i]);
 	}
 }
 

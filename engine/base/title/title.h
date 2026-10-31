@@ -134,9 +134,10 @@ struct Title {
 	// DFX2-29: the kit pages PlayerProfile_InitDefaults copies into a fresh profile's weapon
 	// record (runtime/profile/player_profiles.h init_defaults), each a null-terminated list of
 	// weapon names (every entry "<name> -1 -1 -1"; an empty list an empty page): the
-	// single-player page, and the ten class pages, side 0's classes 5..9 then side 1's. Null: the
-	// format's own pages, Jointops.exe's (playersav::default_single_player_page,
-	// default_kit_page).
+	// single-player page, and the ten class pages, side 0's classes 5..9 then side 1's. Each title
+	// a binary was read for names its own (Jointops.exe's are playersav::kJointOpsSinglePlayerKit
+	// and kJointOpsClassKits); null unwitnessed, a title no launch runs (refused by name), whose
+	// fresh record init_defaults gives no page.
 	const char *const *profile_single_player_kit = nullptr;
 	const char *const *const *profile_class_kits = nullptr;
 };

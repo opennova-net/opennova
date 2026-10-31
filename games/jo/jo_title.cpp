@@ -1,6 +1,7 @@
 #include "jo.h"
 
 #include <formats/gamecfg/game_cfg.h>
+#include <formats/playersav/weapon_sav.h> // kJointOpsSinglePlayerKit, kJointOpsClassKits
 
 namespace opennova::games {
 
@@ -93,6 +94,10 @@ Title make() {
 	//  ServerConfig_ApplyHostSetting @ 0x4a6000 - the MaxPlayers line's override
 	//  @ 0x4a6233..0x4a6243].
 	t.max_players_switch = true;
+	// A fresh profile's kit pages, the eleven static pages the format holds with their witness
+	// [orig: PlayerProfile_InitDefaults @ 0x54bb40 - @ 0x54bced, @ 0x54bd1a..0x54bdd1].
+	t.profile_single_player_kit = playersav::kJointOpsSinglePlayerKit;
+	t.profile_class_kits = playersav::kJointOpsClassKits;
 	return t;
 }
 

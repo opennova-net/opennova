@@ -9,6 +9,7 @@
 
 #include <base/title/title.h>
 #include <formats/gamecfg/game_cfg.h>
+#include <formats/playersav/weapon_sav.h>
 #include <games/acidgambit/acidgambit.h>
 #include <games/dfx2/dfx2.h>
 #include <games/jo/jo.h>
@@ -99,6 +100,17 @@ void acidgambit_speaks_jo() {
 			std::string(ag.title_text) == "OP: Acid Gambit");
 	CHECK(std::string(ag.command_file) == "ACIDGAMBIT.CMD" && ag.executable == nullptr);
 	CHECK(ag.mission_list_order == games::jo_title().mission_list_order);
+	// DFX2-29: each witnessed title names its fresh profile's kit pages; JO's are the format's
+	// eleven, Acid Gambit's JO's; the unwitnessed name none.
+	CHECK(games::jo_title().profile_single_player_kit == playersav::kJointOpsSinglePlayerKit &&
+			games::jo_title().profile_class_kits == playersav::kJointOpsClassKits);
+	CHECK(ag.profile_single_player_kit == games::jo_title().profile_single_player_kit &&
+			ag.profile_class_kits == games::jo_title().profile_class_kits);
+	CHECK(games::dfx2_title().profile_single_player_kit != nullptr &&
+			games::dfx2_title().profile_class_kits != nullptr);
+	for (const char *code : { "dfx", "bhd" })
+		CHECK(title_by_code(code) == nullptr || (title_by_code(code)->profile_single_player_kit == nullptr &&
+				title_by_code(code)->profile_class_kits == nullptr));
 	CHECK(protocol_by_pn("DELTAFORCEXTREME2") == title_protocol("dfx2"));
 	// The updater login the service serves OpenNova's own content under is its title's; a retail
 	// title's folder names its own (Title::updater_login).

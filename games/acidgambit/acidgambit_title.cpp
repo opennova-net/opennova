@@ -37,6 +37,9 @@ Title make() {
 	t.profile_magic = jo_title().profile_magic;
 	// Its command line is Joint Operations', /maxplayers with it.
 	t.max_players_switch = jo_title().max_players_switch;
+	// Its fresh profile's kit pages are Joint Operations', as its code is.
+	t.profile_single_player_kit = jo_title().profile_single_player_kit;
+	t.profile_class_kits = jo_title().profile_class_kits;
 	return t;
 }
 

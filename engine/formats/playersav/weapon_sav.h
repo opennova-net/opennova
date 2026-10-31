@@ -140,6 +140,13 @@ std::vector<uint8_t> write(const File &in, uint32_t magic);
 // 0x83ABF8)]. The single-player page is also the session start's fallback
 // when neither the mission nor the profile carries one [orig:
 // Game_StartMission @0x5246be; Game_ApplySessionSettingsToGlobals @0x5519e4].
+// Jointops.exe's eleven pages as the names each holds (each null-terminated, every entry
+// "<name> -1 -1 -1"): the single-player page, and the ten class pages, side 0's (blue) classes
+// 5..9 then side 1's (red). Its Title row names them (Title::profile_single_player_kit,
+// profile_class_kits); the two functions here read them.
+inline constexpr size_t kJointOpsClassKitCount = 2 * kKitPagesPerSide;
+extern const char *const *const kJointOpsSinglePlayerKit;
+extern const char *const *const kJointOpsClassKits[kJointOpsClassKitCount];
 KitPage default_single_player_page();
 // A page of `names` (null-terminated), each entry "<name> -1 -1 -1", as the
 // static page blobs hold them; null or an empty list is an empty page.
