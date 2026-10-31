@@ -19,6 +19,7 @@
 #include <base/proc/child_process.h>
 #include <base/project/project_manifest.h>
 #include <base/version/one_build.h>
+#include <formats/update/command_file.h>
 #include <formats/update/update_wizard.h>
 #include <net/protocol/protocol.h>
 
@@ -137,6 +138,20 @@ bool plan_of(db::Database &db, const ReleaseRow &release, BuildPlan &plan, std::
 	}
 	if (plan.product.product_name.empty()) {
 		why = product->display_name + " names no updater product (a product name)";
+		return false;
+	}
+	// The command file's [HEADER] as pack_command names it, refused before any export by the rule
+	// opennova-update-tool's writer refuses it by: what UPDATE.EXE's header reader would not read
+	// back (update::command_header_refusal).
+	update::CommandFile header;
+	header.product = plan.product.product_name;
+	header.version = release.version;
+	if (plan.product.expansion_code.empty())
+		header.exe = plan.product.product_exe;
+	if (const update::CommandFileProblem problem = update::command_file_problem(header);
+			!problem.ok()) {
+		why = product->display_name + "'s command file cannot name it: " +
+				update::command_file_problem_words(problem);
 		return false;
 	}
 	if (!source_of(db, *product, release.revision, plan.project, why))

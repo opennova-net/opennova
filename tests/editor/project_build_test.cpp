@@ -440,6 +440,72 @@ static int test_long_names_bind_packed_files_only() {
 	return 0;
 }
 
+// A file the build ships under a name a release's command file cannot carry refuses the build
+// (build.update_name), by the rule opennova-update-tool's writer refuses the row by
+// (update::command_name_refusal): the stock updater reads a row's fields with strtok over " ,\r\n"
+// [orig: CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE)]. The realistic case is JO:TAC's: its
+// RevX02.pff ships "Audio Track.wav", which a project of it holds as sounds/Audio Track.wav, an
+// archive entry whose COPY row would carry the space (the one name of REVX02 r2's 13,658 that the
+// staging release refused). That wave and a loose video are refused, named, and saying what
+// UPDATE.EXE would read; a note the build never ships is not; an expansion's Problems rows hold the
+// wave as its build would; renamed, the wave packs into localres.pff and the build goes ahead.
+static int test_update_names_bind_shipped_files() {
+	Project p("opennova_editor_build_update_names_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	const std::string wave = "sounds/Audio Track.wav", video = "video/my,intro.bik", note = "notes/My File.txt";
+	TEST_EXPECT(test_io::write_text(p.root + "/" + wave, "RIFF"));
+	TEST_EXPECT(test_io::write_text(p.root + "/" + video, "BIKi"));
+	TEST_EXPECT(test_io::write_text(p.root + "/" + note, "a note for the authors"));
+	const BuildPlan plan = p.plan();
+	TEST_EXPECT(!plan.ok);
+	std::vector<std::string> named;
+	for (const Diagnostic &d : plan.blockers)
+		if (d.code() == "build.update_name" && d.severity == DiagnosticSeverity::Error && blocks_build(d) &&
+		    blocker_is_the_games(d))
+			named.push_back(d.asset);
+	std::sort(named.begin(), named.end());
+	TEST_EXPECT((named == std::vector<std::string>{ wave, video }));
+	for (const Diagnostic &d : plan.diagnostics) {
+		if (d.code() != "build.update_name") continue;
+		if (d.asset == wave)
+			TEST_EXPECT(d.message.rfind("Audio Track.wav has a space: UPDATE.EXE splits", 0) == 0 &&
+			            d.message.find("reads the name as \"Audio\"") != std::string::npos &&
+			            d.message.find("[orig: CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE)") != std::string::npos);
+		if (d.asset == video) TEST_EXPECT(d.message.rfind("my,intro.bik has a comma: ", 0) == 0);
+		TEST_EXPECT(d.asset != note);
+		TEST_EXPECT(blocker_reason(d).find("[orig: CmdFile_ReadCommandRow @ 0x404f60 (UPDATE.EXE)") != std::string::npos);
+	}
+	TEST_EXPECT(refusal_words(plan.blockers).find("which a release's command file cannot carry") != std::string::npos);
+	const auto in = [](const std::vector<BuildEntry> &entries, const std::string &name) {
+		for (const BuildEntry &entry : entries)
+			if (entry.relative_path == name) return true;
+		return false;
+	};
+	for (const BuildArchive &archive : plan.archives) TEST_EXPECT(!in(archive.entries, wave));
+	TEST_EXPECT(!in(plan.loose, video) && !in(plan.loose, note));
+
+	// An expansion's Problems rows (the project as REVX02 builds it): the wave in its <b>.pff, refused alike.
+	const AssetScan scan = scan_project_assets(p.paths, p.doc);
+	size_t expansion_rows = 0;
+	for (const Diagnostic &d : plan_scan_findings(scan, "revx02"))
+		expansion_rows += d.code() == "build.update_name" && d.asset == wave &&
+		                  d.message.find("reads the name as \"Audio\"") != std::string::npos;
+	TEST_EXPECT(expansion_rows == 1);
+
+	// Renamed, the build goes ahead, the wave an entry of localres.pff: the name the gate refused was an
+	// archive entry's, a COPY row's.
+	std::error_code ec;
+	for (const std::string &path : { wave, video }) fs::remove(system_path(p.root + "/" + path), ec);
+	const std::string renamed_wave = "sounds/AudioTrack.wav";
+	TEST_EXPECT(test_io::write_text(p.root + "/" + renamed_wave, "RIFF"));
+	const BuildPlan renamed = p.plan();
+	for (const Diagnostic &d : renamed.blockers) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(renamed.ok && renamed.archives.size() == 3 && renamed.archives[1].slot == ArchiveSlot::Localres &&
+	            in(renamed.archives[1].entries, renamed_wave));
+	return 0;
+}
+
 // The kinds S13 D5 added, planned where their rows say: a wave and a map project in localres.pff,
 // a face in resource.pff, the score table copied loose (as a Config it was before).
 static int test_new_kinds_land_where_their_rows_say() {
@@ -2193,6 +2259,7 @@ int main() {
 	failures += test_mission_project_builds_clean();
 	failures += test_protected_build_survives_and_archives_are_refused();
 	failures += test_long_names_bind_packed_files_only();
+	failures += test_update_names_bind_shipped_files();
 	failures += test_unknown_kinds_are_left_out();
 	failures += test_project_notes_are_left_out_silently();
 	failures += test_hash_cache();

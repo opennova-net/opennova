@@ -18,6 +18,7 @@
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirement_words.h>
 #include <formats/rtxt/rtxt.h>
+#include <formats/update/command_file.h>
 
 
 namespace opennova::editor {
@@ -60,7 +61,8 @@ Placement place(const AssetEntry &asset, const BuildTarget &target) {
 // configuration, the stored credentials, what the game writes: never packed, ADR 0046 S14,
 // gameprofile/player_files.h); a NovaWorld screen of a name no archive holds, which the game never reads (left
 // out); a file an archive packs whose name no archive can store (where `target` places it: the standalone
-// game's archives, or an expansion's, ADR 0046 S16).
+// game's archives, or an expansion's, ADR 0046 S16); a file the build ships whose name a release's command
+// file cannot carry (build.update_name).
 bool own_finding(const AssetEntry &asset, const BuildTarget &target, Diagnostic &out) {
 	if (asset.kind == AssetKind::Archive) {
 		// Left out, not refused: the build can write every other file, and the game mounts only its boot
@@ -97,6 +99,23 @@ bool own_finding(const AssetEntry &asset, const BuildTarget &target, Diagnostic 
 		                   "The game cannot store " + asset.logical_name + " in an archive (the name is too long).",
 		                   asset.relative_path);
 		return true;
+	}
+	// A file the build ships is a row of its release's command file by its name: an archive's entry a COPY row
+	// under its archive's TARGET, a loose file (beside the archives, or in an expansion's folder, its product's
+	// root) an UPD row (opennova-update-tool's package_builder.cpp). Its name keeps the rule the writer refuses a
+	// row by (update::command_name_refusal), so no release of the project fails where this build went through.
+	// The archives' own names, the TARGET rows, are the boot table's or the expansion's, which its name's rule
+	// keeps to letters a row carries (expansion_name.h).
+	if (placement.slot != ArchiveSlot::None) {
+		const update::CommandRefusal refusal = update::command_name_refusal(asset.logical_name);
+		if (refusal != update::CommandRefusal::None) {
+			out = make_finding(CoreFinding::BuildUpdateName, DiagnosticSeverity::Error,
+			                   asset.logical_name + " " + update::command_refusal_words(refusal, asset.logical_name) +
+			                           ". A release names every file it ships in a row of its command file, so no release "
+			                           "can ship this one by its name: rename it.",
+			                   asset.relative_path);
+			return true;
+		}
 	}
 	return false;
 }
@@ -427,6 +446,8 @@ std::string blocker_words(const Diagnostic &d) {
 	const std::string name = slash == std::string::npos ? d.asset : d.asset.substr(slash + 1);
 	if (d.row() == &finding_code(CoreFinding::BuildNameUnstorable))
 		return name + "'s name is too long for an archive";
+	if (d.row() == &finding_code(CoreFinding::BuildUpdateName))
+		return name + "'s name holds a space, a comma or a line break, which a release's command file cannot carry";
 	return clause(d.message);
 }
 

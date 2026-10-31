@@ -119,7 +119,9 @@ std::vector<Diagnostic> plan_blockers(const ProjectPaths &paths, const AssetScan
 // The plan's own findings over the scan alone, which plan_build adds to the gate it reads (each one the gate
 // holds already it leaves): an archive the project holds (refused), a player's own file (left out), a
 // NovaWorld screen of a name no archive holds (left out: the game never reads it), a name no archive can
-// store (refused). The Problems rows hold them in the gate (project/project_findings.h), so a build
+// store (refused), a name a release's command file cannot carry (refused, build.update_name: the stock
+// updater's row rule, update::command_name_refusal). The Problems rows hold them in the gate
+// (project/project_findings.h), so a build
 // is refused only for rows Problems shows and marks, before any build.
 // `expansion` the project's own (its name, "" for a standalone project): where it builds a file, so which
 // names an archive must store (ADR 0046 S16).
