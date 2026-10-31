@@ -652,6 +652,13 @@ func _shell_death_screen_keys(pair: Dictionary, shell: MainGame) -> void:
 	view.root = PresenterFixture.root_over(self, TMP_DIR)
 	view.sim_value = pair.joiner
 	deploy_host.setup(view, shell.get_node("HUD"))
+	# The owed pick's edge (GameWorld.join_deploy_pick_required) opens nothing: DEATH's one
+	# opener is the frame loop's latched leg, and an open here stood outside the latch, so
+	# the triggers' clear ran no close leg (engine ClientState::death_menu_open_latch
+	# carries the witness).
+	shell.get_world().join_deploy_pick_required.emit()
+	assert_false(deploy_host.is_open(), "the owed pick's edge opens no DEATH screen")
+	assert_eq(shell.shell_state_name(), "world", "the edge leaves the shell over live play")
 	assert_true(deploy_host.open(), "the shell's deploy screen opens over the owed pick")
 	await _await_refresh(pair)
 	await get_tree().process_frame
@@ -1118,6 +1125,43 @@ func test_instruction_widgets_follow_retained_death_text() -> void:
 	if status.replace_instruction:
 		assert_eq(driver.get_widget_text(first), "DeployJoiner was killed.",
 				"the hidden instruction retains the expired kill message")
+
+
+# A joiner's death raises the frame loop's dead-bit trigger with its owed pick, so the
+# frame loop's latched leg (the shell's _maybe_open_death_menu: the open decision, then
+# the device open) is the screen's opener; the pick closes nothing, and the release, which
+# clears the triggers, finds the latch up and runs the close leg once (the title's
+# DEATH-screen loadout apply, a DFX2 joiner's C2S 0x2F) (engine
+# ClientState::death_menu_open_latch carries the witness).
+func test_a_joiners_death_opens_through_the_latch_and_its_release_runs_the_close_leg() -> void:
+	var pair := _join_pair_with_pending_pick()
+	var joiner: Simulation = pair.joiner
+	assert_true(joiner.is_local_player_dead(), "the death latched the joiner's dead bit")
+	var presenter := _make_presenter(joiner)
+	watch_signals(presenter)
+	assert_false(joiner.take_death_menu_open(true), "another screen holds the open off")
+	assert_true(joiner.take_death_menu_open(false), "the dead bit opens the screen once")
+	assert_true(presenter.open(), "the frame loop's device open")
+	assert_false(joiner.take_death_menu_open(true), "the open latch holds")
+	assert_false(joiner.take_death_menu_close(), "no clear yet: no close leg")
+	assert_true(joiner.send_deployment_pick(0), "the joiner picks the Default Spawn")
+	await get_tree().process_frame
+	assert_true(presenter.is_open(), "the pick closes nothing")
+	var released := false
+	for _i in range(800):
+		pair.host.step()
+		joiner.step()
+		if not joiner.is_join_deploy_pick_pending() and not joiner.is_local_player_dead():
+			released = true
+			break
+		OS.delay_msec(2)
+	assert_true(released, "the host deploys the joiner")
+	assert_false(joiner.take_death_menu_open(true), "the cleared triggers re-arm nothing")
+	assert_true(joiner.take_death_menu_close(), "the clear found the latch up: the close leg runs")
+	assert_false(joiner.take_death_menu_close(), "once")
+	await get_tree().process_frame
+	assert_false(presenter.is_open(), "the triggers' fall closes the screen")
+	assert_signal_emit_count(presenter, "closed", 1)
 
 
 # The listen host's own player holds on the same deploy map as a joiner

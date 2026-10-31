@@ -1459,16 +1459,12 @@ func _on_join_deploy_pick_required() -> void:
 	# fold queues it, the HUD presenter's drain applies it; a fresh join leaves
 	# the level alone, hud-re.md "Forced levels").
 	_finish_world_load_presentation()
-	# The frame loop's death trigger may have opened it already.
-	if _deploy_presenter.is_open() or _deploy_presenter.open():
-		return
-	# The admission watchdog has already ended at the player-paced stage (retail
-	# waits at the DEATH screen), so a failed open with the pick still owed is a
-	# dead join, not a warning: abort to the menu with a reason instead of
-	# parking the player on the loading screen forever.
-	var sim := _world.get_sim()
-	if sim != null and bool(sim.is_join_deploy_pick_pending()):
-		_on_world_load_failed("join: the deploy screen failed to open (death.mnu)")
+	# Nothing opens DEATH here: its one opener is the frame loop's latched leg
+	# (_maybe_open_death_menu), later this same frame, off the triggers this pick
+	# rides (the overlay, the local death). An open here stood outside the open
+	# latch, so the triggers' clear found it down and ran no close leg: no title's
+	# DEATH-screen loadout apply, no C2S 0x2F (engine
+	# ClientState::death_menu_open_latch carries the witness).
 
 
 ## The host's round cycle: the 2790-tick post-round linger expiry EXITS THE
@@ -1481,20 +1477,20 @@ func _on_join_deploy_pick_required() -> void:
 ## [orig: Server_TickUpdate linger drain @0x51da04..; g_MissionExitReason = 3
 ##  @0x51db63; every exit reason lands on the same teardown + nav push
 ##  @0x568654. SP mission end runs the epilog flow instead.]
-# The frame loop's death.mnu DEATH open, every frame and every role (the
-# listen host's own client included): the engine's triggers (the host-driven
-# deploy-map overlay, or the in-session local death), its once-per-arming
-# open latch with its result-blind stamp, and its clear when the triggers
-# fall all live on the engine side (inmatch::death_menu_triggered,
-# ClientState::take_death_menu_open; hud-re D-HUD-19); this leg is the device
-# call. Any state but State.WORLD stands in for retail's no-active-menu gate
-# (PAUSED / ARMORY / DEPLOY / END_ROUND all hold a screen), so the latch is
-# never burned under another screen and the open retries on the next clear
-# frame. Closing is the presenter's own affair. NOT yet modeled (hud-re
-# D-HUD-19 residuals): the spawn-success suppression gate. The latch is the
-# scene frame's, so a frame the status page stands in for neither opens the
-# screen nor clears the latch (GameWorld's scene gate; the latch's witness
-# lives on ClientState.death_menu_open_latch).
+# The frame loop's death.mnu DEATH open, the screen's one opener, every frame and
+# every role (the listen host's own client included, a joiner's owed pick too):
+# the engine's triggers (the host-driven deploy-map overlay, or the in-session
+# local death), its once-per-arming open latch with its result-blind stamp, and
+# its clear when the triggers fall all live on the engine side
+# (inmatch::death_menu_triggered, ClientState::take_death_menu_open; hud-re
+# D-HUD-19); this leg is the device call. Any state but State.WORLD stands in
+# for retail's no-active-menu gate (PAUSED / ARMORY / DEPLOY / END_ROUND all
+# hold a screen), so the latch is never burned under another screen and the
+# open retries on the next clear frame. Closing is the presenter's own affair.
+# NOT yet modeled (hud-re D-HUD-19 residuals): the spawn-success suppression
+# gate. The latch is the scene frame's, so a frame the status page stands in for
+# neither opens the screen nor clears the latch (GameWorld's scene gate; the
+# latch's witness lives on ClientState.death_menu_open_latch).
 func _maybe_open_death_menu() -> void:
 	if _state == State.MENU or _world == null:
 		return
@@ -1510,9 +1506,14 @@ func _maybe_open_death_menu() -> void:
 	# The clear's close leg, a title's own call ahead of the screens' close.
 	if bool(sim.take_death_menu_close()):
 		_deploy_presenter.on_death_menu_close()
-	if not opening:
+	if not opening or _deploy_presenter.open() or _deploy_presenter.is_open():
 		return
-	_deploy_presenter.open()
+	# A joiner's admission watchdog has already ended at the player-paced stage
+	# (retail waits at the DEATH screen), so a failed open with the pick still owed
+	# is a dead join, not a warning: abort to the menu with a reason instead of
+	# parking the player under no screen forever.
+	if bool(sim.is_join_deploy_pick_pending()):
+		_on_world_load_failed("join: the deploy screen failed to open (death.mnu)")
 
 
 ## An established session ended without the player asking: the host closed it on its own

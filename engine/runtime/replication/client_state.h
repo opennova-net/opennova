@@ -1603,6 +1603,12 @@ struct ClientState {
 	// @0x5cab5e..0x5cab8b (gate, latch test @0x5cab70, stamp @0x5cab8b);
 	// Game_CloseInGameScreens @0x54b940 zero @0x54b954, called when the
 	// triggers clear @0x5cac8e..0x5cac9c]
+	// This leg is the screen's one opener (death.mnu's one reference), a joiner's owed pick
+	// included: the pick's own deploy edge opens nothing.
+	// [orig: Render_ProcessMainSceneFrame @0x5CA0F0 - "death.mnu" @0x5CAB7E, the string's one
+	//  xref]
+	// [orig: Render_ProcessMainSceneFrame @0x5C9000 - "death.mnu" @0x5C9AF0, the string's one
+	//  xref (dfx2.exe)]
 	bool death_menu_open_latch = false;
 	// The frame loop's open decision, once per frame: true exactly once per
 	// arming while no other menu is up (UI_IsMenuScreenOpen @0x5cab67), the latch
