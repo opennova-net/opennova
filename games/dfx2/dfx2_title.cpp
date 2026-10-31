@@ -99,6 +99,9 @@ Title make() {
 	// [orig: sub_5A6D20 @0x5A6D20 (@0x5A6EDE..0x5A6EE7); sub_59B7E0 @0x59B7E0; sub_59B730 called
 	//  @0x4223C5 (dfx2.exe)]
 	t.hud_exp_points = true;
+	// DFX2-91: the lone-gunner panel [orig: sub_5BEEA0 @0x5BEFBA..0x5BEFEC; sub_5B8050 @0x5B8050
+	//  (dfx2.exe)].
+	t.hud_lone_gunner_panel = true;
 	// DFX2-41 / DFX2-38: the DEATH screen's activation fills the three category lists, its close
 	// on the triggers' clear applies them, and the serializer writes every grenade position
 	// [orig: sub_550690 @0x550690 (Armory_ResolveSelectedClass @0x550ae0,

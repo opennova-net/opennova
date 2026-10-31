@@ -30,6 +30,7 @@ Title make() {
 	t.read_defs = jo_title().read_defs;
 	// Its HUD's elements and fonts are Joint Operations', as its HUD is.
 	t.hud_exp_points = jo_title().hud_exp_points;
+	t.hud_lone_gunner_panel = jo_title().hud_lone_gunner_panel;
 	t.hud_fonts = jo_title().hud_fonts;
 	// Its mission catalog's order is Joint Operations', as its code is.
 	t.mission_list_order = jo_title().mission_list_order;

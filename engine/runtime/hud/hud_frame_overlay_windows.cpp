@@ -7,6 +7,7 @@
 // The overlay-panel pass's voice-macro menus and the SP pause text live here
 // too (HUD_DrawOverlayPanels @0x5c0060).
 
+#include <base/title/title.h> // Title::hud_lone_gunner_panel
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_medic_cross.h>
 
@@ -487,6 +488,32 @@ void HudFrameCompiler::element_paused_text(const HudFrameState &state, float w, 
 	const float ls = (have_impact || have_large) ? label_large_scale_ : label_scale_;
 	emit_text_at_virtual_pos(lf.font() != nullptr ? lf : font_, lf.font() != nullptr ? ls : 1.0f,
 			state.paused_text.c_str(), x, y, w, h, active_color(state), 1);
+	++draw_list_.elements_drawn;
+}
+
+void HudFrameCompiler::element_lone_gunner_panel(const HudFrameState &state, float w, float h) {
+	// DFX2-91: dfx2.exe's lone-gunner panel, the HUD side of DFX2-37. In the overlay panels' pass,
+	// after the input line and ahead of the kill banner, while the local player is a lone gunner:
+	// the titleless stdbox (320, 500)..(704, 600), then its two-line string centred on design
+	// (512, 528) in the large slot, in palette entry 4 half-bright. The pass tests no HUD level and
+	// no death screen around it. The string is the executable's own literal, no gametext key.
+	// Jointops.exe carries the same drawer and string with no caller.
+	// [orig: sub_5BEEA0 @0x5BEEA0 (dfx2.exe) - the gate @0x5BEFBA..0x5BEFE9, sub_5B8050 called
+	//  @0x5BEFEC between sub_5B7FE0 @0x5BEFB2 and HUD_DrawKillAnnounceBanner @0x5BEFFE;
+	//  sub_5B8050 @0x5B8050 (dfx2.exe) - palette entry 4 dword_24BADF8 @0x5B8055,
+	//  HUD_DrawLabelBox(ctx, 320, 500, 704, 600, NULL, -1) @0x5B805B..0x5B8074,
+	//  HUD_DrawTextCenteredScaled(&g_HUDLabelFontLarge, 512, 528, text, entry 4, 1)
+	//  @0x5B8079..0x5B8090, the string @0x7DA540; HUD_DrawTextCenteredScaled @0x57F000 -
+	//  Viewport_ScaleToVirtualCoords @0x57F00F, HUD_DrawTextCentered_HalfBright @0x57F032
+	//  (dfx2.exe)]
+	// [orig: @0x5B9100..0x5B9149 (no function, no xref), the string @0x7DB408]
+	if (state.title == nullptr || !state.title->hud_lone_gunner_panel || !state.lone_gunner) return;
+	emit_label_box(320.0f, 500.0f, 704.0f, 600.0f, std::string(), 0xFFFFFFFFu, w, h);
+	const int32_t x = design_to_screen_x(512, static_cast<int32_t>(w));
+	const int32_t y = design_to_screen_y(528, static_cast<int32_t>(h));
+	emit_slot_text(label_font_large_, label_large_scale_,
+			"The tank requires another player\nin order to use the cannon", static_cast<float>(x),
+			static_cast<float>(y), half_bright_argb(hud_palette(4)), kFontAlignCenter);
 	++draw_list_.elements_drawn;
 }
 

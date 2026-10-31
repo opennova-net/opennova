@@ -275,6 +275,11 @@ struct HudRoleFacts {
 	// (hud::hud_exp_points_text): the title's flag, the role's replica 0x81 score and fanfare arms
 	// and its 0x80 / 0x82 tracker (the listen host's own client's too); zero with no replica.
 	hud::HudExpPointsState exp_points;
+	// The title the session runs as (RoleView::title), its HUD's own variants
+	// (hud::HudFrameState::title), and the lone-gunner panel's fact: the local player is a lone
+	// gunner (world::local_rides_solo_turret; DFX2-91); false with no kernel.
+	const Title *title = nullptr;
+	bool lone_gunner = false;
 };
 // `voice_menus`: bit 0 asks for the emotes menu, bit 1 for the radio menu.
 inline constexpr uint32_t kHudVoiceMenuEmotes = 1u;

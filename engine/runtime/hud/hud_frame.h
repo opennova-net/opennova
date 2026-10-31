@@ -1072,6 +1072,12 @@ struct HudFrameState {
 	HudConnectStatus connect_status; // element_connect_status
 	HudStartTimer start_timer;       // element_start_timer
 	HudExpPointsState exp_points;    // element_exp_points (DFX2-36)
+	// The title the session runs as (inmatch::RoleView::title): the HUD's own variants by its
+	// hud_* fields (Title::hud_lone_gunner_panel, ...). Null draws Jointops.exe's HUD.
+	const Title *title = nullptr;
+	// The local player is a lone gunner (world::local_rides_solo_turret): the lone-gunner panel's
+	// fact (element_lone_gunner_panel, DFX2-91).
+	bool lone_gunner = false;
 	// An in-game .mnu screen is open (the in-game menu, the armory, the
 	// deploy screen, the end-round board, the command map): the preround
 	// armory line yields to it (element_service_prompt). [orig: dword_255110C,
@@ -1717,6 +1723,8 @@ private:
 	void element_voice_macro_menu(const HudFrameState &state, const HudVoiceMacroMenuState &menu,
 			int context_row, float w, float h);
 	void element_paused_text(const HudFrameState &state, float w, float h);
+	// DFX2-91's lone-gunner panel (hud_frame_overlay_windows.cpp).
+	void element_lone_gunner_panel(const HudFrameState &state, float w, float h);
 	// The tip panel (hud_frame_tip.cpp); `alternate` picks MRCLIPPYALTERNATE.
 	void element_tip(const HudFrameState &state, bool alternate, float w, float h);
 	// HUD_DrawOverlayPanels' legs, over HUD_DrawGameplayOverlays' (hud_frame.cpp).

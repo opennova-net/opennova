@@ -103,6 +103,14 @@ struct Title {
 	// [orig: HUD_ParseHudposToken @0x59F370 (@0x5A0463..0x5A04AF, no reader)] [orig: sub_5A6D20
 	//  @0x5A6EDE, sub_59B7E0 @0x59B7E0, sub_59B730 called @0x4223C5 (dfx2.exe)]
 	bool hud_exp_points = false;
+	// DFX2-91: the executable's HUD draws the lone-gunner panel, the HUD side of DFX2-37: while the
+	// local player is a lone gunner (world::local_rides_solo_turret), the overlay panels' pass
+	// boxes "The tank requires another player / in order to use the cannon" in the large slot
+	// (HudFrameCompiler::element_lone_gunner_panel). Jointops.exe carries the drawer and its string
+	// with no caller. On the Title: the executable's own HUD, no wire byte and no world.
+	// [orig: @0x5B9100 (no function, no xref)] [orig: sub_5BEEA0 @0x5BEFBA..0x5BEFEC, sub_5B8050
+	//  @0x5B8050 (dfx2.exe)]
+	bool hud_lone_gunner_panel = false;
 	// DFX2-41: the deploy screen picks the loadout. death.mnu's DEATH screen carries PRIMARY /
 	// SECONDARY / ACCESSORY lists its activation fills for the player's class, and the screen's
 	// close on its triggers' clear submits them (the loadout apply, a C2S 0x2F in session); its

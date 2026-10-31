@@ -24,6 +24,7 @@
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h> // max_health_with_difficulty
+#include <runtime/world/player_weapon.h> // local_rides_solo_turret
 #include <runtime/world/radar_contacts.h> // radar_hud_frame
 #include <runtime/world/radio_call.h> // capture_zone_max_coverage, voice_macro_text
 #include <runtime/world/user_waypoints.h>
@@ -347,6 +348,8 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 	// valid word and its two values [orig: dword_A7BA40 / dword_A7BA4C / dword_A7BA54 /
 	//  dword_A7BA58, read by sub_59B7E0 @0x59B998 / @0x59BA38..0x59BA48 (dfx2.exe)].
 	out.exp_points.element = view.title != nullptr && view.title->hud_exp_points;
+	out.title = view.title;
+	out.lone_gunner = view.kernel != nullptr && world::local_rides_solo_turret(view.kernel->world);
 	if (view.runtime != nullptr) {
 		const replication::ClientState &cs = view.runtime->state();
 		out.exp_points.score = cs.score_feedback.score;

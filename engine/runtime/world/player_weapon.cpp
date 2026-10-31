@@ -1143,13 +1143,16 @@ std::vector<WeaponTraceSample> weapon_trace_samples(const LocalPlayerWeapon &w) 
 }
 
 bool local_solo_turret_holds_fire(const World &world) {
+	return world.rules.title().emplaced_solo_holds_fire && local_rides_solo_turret(world);
+}
+
+bool local_rides_solo_turret(const World &world) {
 	const Entity *player = world.registry.get(world.cached.local_player);
 	const Entity *mount = player != nullptr && player->mounted
 			? world.registry.get(player->mount_target) : nullptr;
 	if (mount == nullptr || !mount->has_item_def ||
 			(mount->item_attrib2 & opennova::def::DEF_ITEM_ATTRIB2_ISTURRET) == 0)
 		return false;
-	if (!world.rules.title().emplaced_solo_holds_fire) return false;
 	const Entity *carrier = entity_ground_word(world, *mount);
 	return carrier != nullptr && emplaced_carrier_occupied_seats(world, *carrier) <= 1;
 }

@@ -1688,6 +1688,8 @@ void HudOverlay::set_role_facts(const Ref<Simulation> &p_sim,
 	// The EXPPOINTS element's words and its Overlays strings (engine hud/hud_exp_points.h).
 	state_.exp_points = facts.exp_points;
 	opennova::hud::hud_exp_points_text(game_text_lookup(p_gametext), state_.exp_points.text);
+	state_.title = facts.title;
+	state_.lone_gunner = facts.lone_gunner;
 	inset_target_name_ = facts.inset_target_name;
 	opennova::hud::hud_session_text(game_text_lookup(p_gametext), state_.session.text);
 	for (size_t c = 0; c < state_.slot_bar.size(); ++c) {

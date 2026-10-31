@@ -200,10 +200,13 @@ void test_a_lone_gunner_holds_fire_under_dfx2s_title() {
 	f.weapon.power_throw_start_tick = 1;
 	CHECK(local_weapon_release_fire(f.world, f.weapon));
 	CHECK(f.weapon.power_throw_released);
-	// JO's title has no such test.
+	// JO's title has no such test; the lone gunner stands whatever the rules (the HUD's panel reads
+	// it under the title's own flag, DFX2-91).
+	CHECK(!local_rides_solo_turret(f.world));
 	carrier.seats[0].occupant = EntityHandle{};
 	f.world.rules.title_rules = &title_rules("jo");
 	CHECK(!local_solo_turret_holds_fire(f.world));
+	CHECK(local_rides_solo_turret(f.world));
 }
 
 } // namespace
