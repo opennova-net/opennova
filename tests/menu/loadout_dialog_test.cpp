@@ -427,6 +427,14 @@ void test_player_info_state() {
 	state.grenade_rows = {5};
 	const PlayerInfoKitSelection partial = state.kit_selection(menu, 0, 7);
 	CHECK(partial.grenades[1].weapon_index == 0 && partial.grenades[2].weapon_index == 8);
+	CHECK(sel.primary.listed && sel.secondary.listed && sel.accessory.listed);
+	// A screen listing none of the categories (dfx2.exe's player.mnu): none is listed, the page
+	// writing no entry for any [orig: PlayerInfo_SerializeWeaponLoadout @0x55e6d7; @0x55c9a7 (dfx2.exe)].
+	const auto bare = document({"COMBO_LIST"});
+	MenuRuntime spin;
+	CHECK(spin.open_document(&bare, "player.mnu", "LOADOUT"));
+	const PlayerInfoKitSelection none = state.kit_selection(spin, 0, 8);
+	CHECK(!none.primary.listed && !none.secondary.listed && !none.accessory.listed);
 	// The weight reads the selections and the pairs (player_info_screen_weight).
 	CHECK(state.weight(menu, weapons.file) ==
 			player_info_screen_weight(menu, weapons.file, {0, -1, -1}, {5}, state.ammo_primary, state.ammo_secondary));

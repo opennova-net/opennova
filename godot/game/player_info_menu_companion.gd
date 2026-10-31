@@ -657,26 +657,24 @@ func snapshot() -> Dictionary:
 	# distinct from a loaded screen whose three selected rows are explicitly
 	# NONE, as a missing or empty weapon.def's are (D-MNU-27).
 	if _weapons != null and _weapons.is_loaded():
-		var primary := _selected_weapon("PRIMARY")
-		var secondary := _selected_weapon("SECONDARY")
-		var accessory := _selected_weapon("ACCESSORY")
 		# Clip counts are the recorded picks, -1 = untouched default — the kit
 		# tuple's serialized semantic [orig: PlayerInfo_SerializeWeaponLoadout @ 0x55e4b0
 		# writes the saved arrays; "-1" is the filler]. The type bytes are the
-		# tuple's flags field [orig: g_PlayerInfoAmmoTypePri/Sec].
-		profile.merge({
-			"primary": primary.name if primary != null else "",
-			"primary_clips": selected_clips("PRIMARY"),
-			"primary_ammo_type": selected_ammo_type("PRIMARY"),
-			"secondary": secondary.name if secondary != null else "",
-			"secondary_clips": selected_clips("SECONDARY"),
-			"secondary_ammo_type": selected_ammo_type("SECONDARY"),
-			"accessory": accessory.name if accessory != null else "",
-			"accessory_clips": selected_clips("ACCESSORY"),
-			"kit": kit_entries(),
-			# The page the populate restored, which a class pick has already left.
-			"kit_class": _loadout.page_class,
-		})
+		# tuple's flags field [orig: g_PlayerInfoAmmoTypePri/Sec]. A category the
+		# screen holds no list of is no pick, as its page entry is none (engine
+		# PlayerInfoLoadout::kit_selection): its keys stay out, staging nothing.
+		for control in PARENT_SLOTS:
+			if _id(control) < 0:
+				continue
+			var key: String = control.to_lower()
+			var weapon := _selected_weapon(control)
+			profile[key] = weapon.name if weapon != null else ""
+			profile[key + "_clips"] = selected_clips(control)
+			if control in TYPE_SLOTS:
+				profile[key + "_ammo_type"] = selected_ammo_type(control)
+		profile["kit"] = kit_entries()
+		# The page the populate restored, which a class pick has already left.
+		profile["kit_class"] = _loadout.page_class
 	return profile
 
 

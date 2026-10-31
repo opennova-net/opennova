@@ -584,11 +584,8 @@ func test_persisted_side_profiles_restore_each_team_cascade() -> void:
 
 
 # dfx2.exe's player.mnu shape: a COMBO_LIST spin list, the name edit and ACCEPT, no
-# NATIONALITY or DIVISION. The combos are the record's nationality and division's, the
-# record's combo selected, and the save keeps the record's nationality and division
-# (engine PlayerInfoAvatars::seed_record).
-# `voice` adds a PLAYERVOICE combo box, which dfx2.exe's screen lacks, so a combo handler's
-# voice refill shows.
+# NATIONALITY or DIVISION. `voice` adds a PLAYERVOICE combo box, which dfx2.exe's screen
+# lacks, so a combo handler's voice refill shows.
 func _spin_screen_doc(voice := false) -> MnuDocument:
 	return MenuDriverFixture.doc_from_xml(self, MenuDriverFixture.screen_xml("PLAYER_INFO",
 			MenuDriverFixture.wnd("spinlist", "COMBO_LIST", 10)
@@ -597,6 +594,8 @@ func _spin_screen_doc(voice := false) -> MnuDocument:
 			+ (MenuDriverFixture.wnd("combobox", "PLAYERVOICE", 100) if voice else "")))
 
 
+# The combos are the record's nationality and division's, the record's combo selected, and
+# the save keeps the record's nationality and division (engine PlayerInfoAvatars::seed_record).
 func test_a_screen_without_nationality_lists_fills_the_records_combos() -> void:
 	var db := _load_db()
 	var blue := db.resolve_character_id(0x0400, 0)
@@ -627,6 +626,27 @@ func test_a_screen_without_nationality_lists_fills_the_records_combos() -> void:
 	assert_eq(int(snap.get("nationality", -1)), blue.nationality_index, "the record's nationality kept")
 	assert_eq(int(snap.get("division", -1)), blue.division_index, "the record's division kept")
 	assert_eq(int(snap.get("combo", -1)), blue.combo_index)
+
+
+# dfx2.exe's screen lists none of the loadout categories: its save writes no entry for them
+# and stages no pick (engine PlayerInfoLoadout::kit_selection), the knife and the three
+# grenade slots alone on the page.
+func test_a_screen_without_category_lists_saves_no_category_entry() -> void:
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	var driver := MenuDriverFixture.driver_over(self, _spin_screen_doc(), "player.mnu")
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	companion.set_weapon_database(_load_weapons())
+	var snap := companion.snapshot()
+	for key in ["primary", "primary_clips", "primary_ammo_type", "secondary", "accessory"]:
+		assert_false(snap.has(key), "no %s pick staged" % key)
+	var kit: Array = snap.get("kit", [])
+	var names: Array[String] = []
+	for entry in kit:
+		names.append(String((entry as Dictionary).get("name", "")))
+	assert_eq(names.size(), 4 if names.find("WPN_MEDPACK") < 0 else 5,
+			"the knife, the medic's medpack and the three grenade slots: %s" % [names])
+	assert_true(names[0].begins_with("WPN_KNIFE"), "the knife leads the page")
 
 
 # DFX2-74: dfx2.exe's combo rows carry no text, one row per combo all the same (engine

@@ -159,6 +159,8 @@ PlayerInfoKitSelection PlayerInfoLoadout::kit_selection(const MenuRuntime &menu,
 		const char *control = kPlayerInfoCategoryControls[i];
 		*categories[i] = pick(selected_weapon(menu, control),
 				i < 2 ? selected_ammo_type(control, team) : kKitFiller);
+		// [orig: PlayerInfo_SerializeWeaponLoadout @0x55e4b0 (@0x55e6d0..0x55e6d7)]
+		categories[i]->listed = menu.widget_id(control) >= 0;
 	}
 	for (int i = 0; i < 3; ++i) {
 		const int32_t index = static_cast<size_t>(i) < grenade_rows.size()
