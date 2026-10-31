@@ -533,7 +533,7 @@ func test_hud_loads_text_for_the_mission_that_actually_started() -> void:
 	var presenter := GameHudPresenter.new()
 	autofree(presenter)
 	presenter.setup(world, null, null)
-	preload("res://game/world/hud_text_tables.gd").register(root, world.get_loaded_mission_file())
+	TextTables.register_mission_tables(root, world.get_loaded_mission_file())
 
 	assert_not_null(Strings.get_table("mission"),
 		"mnml.bin exists and must be selected from the successfully loaded BMS; medmssn.bin is absent")

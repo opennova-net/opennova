@@ -163,6 +163,7 @@
 #include "dbf/dbf_data.h"
 #include "fnt/fnt_resource.h"
 #include "rtxt/rtxt_string_file.h"
+#include "rtxt/text_tables.h"
 #include "network/novaworld_client.h"
 #include "network/novaworld_server_browser.h"
 #include "network/host_session_options.h"
@@ -183,7 +184,7 @@
 #include "audio/sbf_bank.h"
 #include "audio/music_script.h"
 #include "audio/music_director.h"
-#include "audio/music_pair_names.h"
+#include "audio/music_pair.h"
 #include "mnu/mnu_document.h"
 #include "mnu/mnu_rows.h"
 #include "mnu/mns_stylesheet.h"
@@ -197,6 +198,7 @@
 #include "mnu/controls_model.h"
 #include "player/first_person_arms_witness.h"
 #include "player/game_config_block.h"
+#include "player/player_options_state.h"
 #include "player/gameplay_camera.h"
 #include "player/key_event_queue.h"
 #include "player/special_key_outcome.h"
@@ -332,6 +334,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerInfoCharacterState);
 	GDREGISTER_CLASS(PlayerProfiles);
 	GDREGISTER_CLASS(GameConfigBlock);
+	GDREGISTER_CLASS(PlayerOptionsState);
 	GDREGISTER_CLASS(ThrowableVisualRow);
 	GDREGISTER_CLASS(VehicleTrailVisualRow);
 	GDREGISTER_CLASS(FirePresentationEvent);
@@ -402,6 +405,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MissionAudio);
 	GDREGISTER_CLASS(FntResource);
 	GDREGISTER_CLASS(RtxtStringFile);
+	GDREGISTER_ABSTRACT_CLASS(TextTables);
 	GDREGISTER_CLASS(Paths);
 	GDREGISTER_CLASS(ParticleEffect);
 	GDREGISTER_CLASS(ParticleFile);
@@ -451,7 +455,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ModListing);
 	GDREGISTER_CLASS(SbfBank);
 	GDREGISTER_CLASS(MusicScript);
-	GDREGISTER_CLASS(MusicPairNames);
+	GDREGISTER_CLASS(MusicPair);
 	GDREGISTER_CLASS(MusicDirector);
 	GDREGISTER_CLASS(MnuDocument);
 	GDREGISTER_CLASS(MnuSoundRow);

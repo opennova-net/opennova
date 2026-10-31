@@ -929,6 +929,16 @@ target_include_directories(music_stream_pump_test PRIVATE ${CMAKE_CURRENT_SOURCE
 target_compile_features(music_stream_pump_test PRIVATE cxx_std_17)
 add_test(NAME music_stream_pump COMMAND music_stream_pump_test)
 
+# The music context (runtime/audio/music_context.h): the base and expansion
+# pairs (an expansion's names unconditional, never the base pair), the open's
+# order (the teardown, the bank's file before any script read), the one context
+# at a time, the mission start's Var1..Var12 seed on either outcome.
+add_executable(music_context_test audio/music_context_test.cpp)
+target_link_libraries(music_context_test PRIVATE opennova_runtime)
+target_include_directories(music_context_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(music_context_test PRIVATE cxx_std_17)
+add_test(NAME music_context COMMAND music_context_test)
+
 # The ambient channel pool (runtime/audio/ambient_channel_pool.h): rank-order
 # binds up to the budget, incumbents keep their channel, dropouts release,
 # unresolvable entrants cached out, a pinned pool never grows.
@@ -1296,7 +1306,7 @@ target_include_directories(scr_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME scr_unit COMMAND scr_unit_test)
 
 # RTXT localized string table tests
-foreach(test roundtrip byte_equal lookup strip_hotkey empty section_lookup)
+foreach(test roundtrip byte_equal lookup strip_hotkey empty section_lookup text_tables)
     add_executable(rtxt_${test}_test rtxt/${test}_test.cpp)
     target_link_libraries(rtxt_${test}_test PRIVATE opennova_formats)
     target_include_directories(rtxt_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rtxt)
@@ -4449,6 +4459,12 @@ add_executable(npruntime_game_config_block_test npruntime/game_config_block_test
 target_link_libraries(npruntime_game_config_block_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_game_config_block_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_game_config_block COMMAND npruntime_game_config_block_test)
+# The player's options over the cfg block (inmatch/player_options.h): the defaults, the
+# boundary's clamps, the words read and written and the Options screens' word array.
+add_executable(npruntime_player_options_test npruntime/player_options_test.cpp)
+target_link_libraries(npruntime_player_options_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_player_options_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_player_options COMMAND npruntime_player_options_test)
 # The host's map rotation (D-NET-331): the list ops and cursor rules, the
 # round-end advance and its REPLAY wrap, the host screen's seed, the round end's
 # exit reason under REPLAY / LASTGAME, and the map change's router over the

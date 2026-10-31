@@ -1,5 +1,6 @@
 #include <runtime/renderer/material_texture.h>
 #include "resource_index/resource_root.h"
+#include "rtxt/text_tables.h"
 #include "util/data_format.h"
 
 #include "fnt/fnt_resource.h"
@@ -364,6 +365,8 @@ Error ResourceRoot::set_root_dir(const String &path, const String &p_game_code) 
 		mount_kind_ = MountKind::Loose;
 		return OK;
 	}();
+	// The followed root installs the override table this mount left (TextTables).
+	TextTables::follow_mount(*this);
 	emit_signal("mounted");
 	return err;
 }
@@ -406,6 +409,8 @@ Error ResourceRoot::mount_runtime(const String &path, const String &expansion, b
 					opennova::to_std(expansion_), load_point, allow_loose_override, table)) {
 		expansion_override_table_ = to_packed_bytes(table);
 	}
+	// The followed root installs the override table this mount left (TextTables).
+	TextTables::follow_mount(*this);
 	emit_signal("mounted");
 	return err;
 }

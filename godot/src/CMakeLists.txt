@@ -286,6 +286,7 @@ add_library(opennova_bindings OBJECT
     audio/audio_out.cpp
     dbf/dbf_data.cpp
     rtxt/rtxt_string_file.cpp
+    rtxt/text_tables.cpp
     util/data_format.cpp
     util/dxt_texture.cpp
     util/paths.cpp
@@ -300,7 +301,7 @@ add_library(opennova_bindings OBJECT
     audio/sbf_bank.cpp
     audio/music_script.cpp
     audio/music_director.cpp
-    audio/music_pair_names.cpp
+    audio/music_pair.cpp
     mnu/mnu_document.cpp
     mnu/mnu_rows.cpp
     mnu/mns_stylesheet.cpp
@@ -314,6 +315,7 @@ add_library(opennova_bindings OBJECT
     mnu/controls_model.cpp
     player/first_person_arms_witness.cpp
     player/game_config_block.cpp
+    player/player_options_state.cpp
     player/gameplay_camera.cpp
     player/local_player_presenter.cpp
     player/local_player_visuals.cpp
