@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <net/http/http_exchange.h>
+#include <net/novaworld/browser_cache.h> // BrowserCache, process_browser_cache
 #include <net/novaworld/http_flow.h> // HttpRequestSpec, browser_cache_bust_url, browser_request_host
 
 // The NovaWorld menu browser's HTTP transport: what carries the web flow's requests
@@ -54,6 +55,31 @@ private:
 };
 
 BrowserNames &process_browser_names();
+
+// The menu's creation as the browser's two process lists meet it: the name list freed, so the next
+// request's server is looked up afresh; then the scan of the cache directory, which files an entry
+// per file there that holds nothing until its next download ends (a fetch of its key requests it
+// and takes its callback, as one of a key with no entry does), so the cache serves nothing more
+// than it did (BrowserCache: a key with no entry). Ours runs at each of the menu's creations: the
+// first main-menu entry and the one after a mods reload.
+// [orig: Menu_InitShellResources @0x552500 - CUIManager_Create called @0x5525D8 while g_GameMenu is
+//  null; CUIManager_Create @0x64AF10 - CUICache_ScanCacheDirectory called @0x64AF68;
+//  CUICache_ScanCacheDirectory @0x64D6B0 - CUINameValueList_FreeAll called @0x64D6C5, each file's
+//  entry prepended with +0xC 0 @0x64D7DD..0x64D7ED; CUIBrowser_AsyncFetchURLContent @0x64DE80 - an
+//  entry whose +0xC is 0 takes the fetch's callback (@0x64E122) and its first requests the URL
+//  (HTTP_RequestEnqueue called @0x64E303)]
+void browser_menu_created(BrowserNames &names = process_browser_names());
+
+// The menu's teardown that destroys it (the way out, a mods reload ahead of the re-creation): the
+// name list freed, then the cache list (BrowserCache::clear: a download still in flight is dropped,
+// and the next fetch of any key requests it, as the re-creation's scanned entries do).
+// [orig: Menu_TeardownShellAndCloseBinkVideos @0x54E430 - under g_MenuDestroyOnTeardown (@0x54E4A3)
+//  the menu destroyed, sub_64AFE0 called @0x54E4BA; CGameMenu_Destructor @0x63E100 -
+//  CUIScene_DestroyAllContent called @0x63E137; CUIScene_DestroyAllContent @0x63C490 -
+//  CUICache_PruneFileCache called @0x63C4A2; CUICache_PruneFileCache @0x64D900 -
+//  CUINameValueList_FreeAll called @0x64D918, CUICache_FreeEntryList called @0x64DA90]
+void browser_menu_destroyed(BrowserNames &names = process_browser_names(),
+		BrowserCache &cache = process_browser_cache());
 
 // The platform's name lookup: the first IPv4 address `host` resolves to (net::resolve_ipv4);
 // serve's applies its destination rule first. False when it does not resolve.

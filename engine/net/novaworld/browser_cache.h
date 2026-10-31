@@ -63,7 +63,7 @@ public:
 	// The stored download of `url`'s key, the bytes its cache file holds, as the browser reads a
 	// served template back (null when the key holds none).
 	const std::vector<uint8_t> *stored(const std::string &url) const;
-	// Every entry dropped: the menu's teardown frees the list.
+	// Every entry dropped: the menu's teardown frees the list (browser_menu_destroyed).
 	// [orig: CUIScene_DestroyAllContent @0x63C490 - CUICache_PruneFileCache called @0x63C4A2,
 	//  which frees the list (CUICache_FreeEntryList called @0x64DA90)]
 	void clear() { entries_.clear(); }

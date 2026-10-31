@@ -7,13 +7,14 @@
 //    reaches; the fragment never sent (D-NET-1251, D-NET-1329);
 //  - the name list: a name resolves once and its address serves every later request, the names
 //    compared case-insensitively; a dotted quad and a refused name are never listed;
+//  - the menu's creation frees the name list, its teardown the name list and the cache list;
 //  - a 301 / 302 reaches the caller as it came;
 //  - the channel: one request off the caller's thread, its reply taken once; a cancelled or a
 //    superseded request never reports; the connect's wait is 60 s and the reply's unbounded.
 // [orig: CUIBrowser_SendHTTPRequest @0x658840; GopherWebWidget_SendHttpPost @0x658B30;
 //  CNapiWinsock_ResolveHostAsync @0x667460; CNapiWinsock_ResolveHostThread @0x666C70;
 //  CUINameValueList_FindByName @0x64FF00; CNapiWinsock_ConnectNonBlocking @0x667600 - 0xEA60
-//  @0x6677D6]
+//  @0x6677D6; CUICache_ScanCacheDirectory @0x64D6B0; CUICache_PruneFileCache @0x64D900]
 
 #include <net/novaworld/browser_transport.h>
 
@@ -163,6 +164,26 @@ void test_name_list() {
 	       "the newest entry of a name decides");
 }
 
+// The menu's creation frees the name list and leaves the cache serving nothing it did not; its
+// teardown frees both, so the next fetch of a held template requests it again.
+// [orig: CUICache_ScanCacheDirectory @0x64D6B0 - CUINameValueList_FreeAll called @0x64D6C5;
+//  CUICache_PruneFileCache @0x64D900 - @0x64D918, CUICache_FreeEntryList called @0x64DA90]
+void test_menu_lifetime() {
+	BrowserNames names;
+	opennova::BrowserCache cache;
+	const std::string url = "http://gs.opennova.test/jop_2_main.mnx";
+	names.add("gs.opennova.test", {10, 0, 0, 2});
+	expect(cache.fetch(url), "a first fetch requests the template");
+	cache.complete(url, std::vector<uint8_t>{'m', 'n', 'x'});
+	opennova::browser_menu_created(names);
+	expect(!names.find("gs.opennova.test"), "the menu's creation frees the name list");
+	expect(cache.holds(url) && !cache.fetch(url), "and the held template still serves");
+	names.add("gs.opennova.test", {10, 0, 0, 2});
+	opennova::browser_menu_destroyed(names, cache);
+	expect(!names.find("gs.opennova.test"), "the menu's teardown frees the name list");
+	expect(!cache.holds(url) && cache.fetch(url), "and the cache list: the next fetch requests");
+}
+
 void test_redirect_handed_over() {
 	LoopbackHttpPeer target(kOk);
 	LoopbackHttpPeer peer({"HTTP/1.0 302 Found\r\nLocation: http://127.0.0.1:" + port_of(target) +
@@ -256,6 +277,7 @@ int main() {
 	net::startup();
 	test_request_goldens();
 	test_name_list();
+	test_menu_lifetime();
 	test_redirect_handed_over();
 	test_channel();
 	net::shutdown();

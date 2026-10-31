@@ -108,6 +108,8 @@ void NovaWorldClient::_bind_methods() {
 			&NovaWorldClient::create_cookie_jar);
 	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("save_cookie_jar"),
 			&NovaWorldClient::save_cookie_jar);
+	ClassDB::bind_static_method("NovaWorldClient", D_METHOD("destroy_menu_browser"),
+			&NovaWorldClient::destroy_menu_browser);
 	ClassDB::bind_method(D_METHOD("get_glsvss_request"), &NovaWorldClient::get_glsvss_request);
 	ClassDB::bind_method(D_METHOD("get_session_player_name", "profile_name"),
 			&NovaWorldClient::get_session_player_name);
@@ -371,6 +373,9 @@ void NovaWorldClient::forget_gate_response() {
 // reads it (engine: read_retail_machine_inputs; off Windows it reads nothing and the key is the
 // fingerprint of an all-zero volume).
 void NovaWorldClient::create_cookie_jar(const String &p_dir) {
+	// The menu's creation frees the browser's name list ahead of the jar's load (engine
+	// browser_menu_created).
+	opennova::browser_menu_created();
 	opennova::RetailMachineInputs volume;
 	opennova::read_retail_machine_inputs(volume);
 	opennova::process_menu_browser().create(
@@ -381,6 +386,12 @@ void NovaWorldClient::save_cookie_jar() {
 	std::string error;
 	if (!opennova::process_menu_browser().save(error))
 		UtilityFunctions::push_warning(String("NovaWorldClient: ") + opennova::to_gd(error));
+}
+
+// The teardown's save, then the destroyed menu's browser lists (engine browser_menu_destroyed).
+void NovaWorldClient::destroy_menu_browser() {
+	save_cookie_jar();
+	opennova::browser_menu_destroyed();
 }
 
 namespace {

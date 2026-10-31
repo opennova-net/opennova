@@ -716,11 +716,11 @@ func _mount_expansion(name: String) -> void:
 	var dir := _root.get_root_dir()
 	var prev := _current_expansion()
 	# The menu's teardown saves its cookie jar to nw_cdata.coo (MainGame makes
-	# the menu's jar anew from it after the reload; NovaWorldClient.save_cookie_jar)
-	# and forgets the kept NovaWorld gate response: the next NovaWorld entry
-	# probes the gate again (D-NET-706; the witness is the engine's
-	# NwuLobbySession::GateMemory::forget).
-	NovaWorldClient.save_cookie_jar()
+	# the menu's jar anew from it after the reload) and frees the browser's lists
+	# (NovaWorldClient.destroy_menu_browser), and forgets the kept NovaWorld gate
+	# response: the next NovaWorld entry probes the gate again (D-NET-706; the
+	# witness is the engine's NwuLobbySession::GateMemory::forget).
+	NovaWorldClient.destroy_menu_browser()
 	NovaWorldClient.forget_gate_response()
 	# The reload closes every archive before it mounts the pick, so the pick's
 	# text-override table loads as at boot (docs/vfs/vfs-pff-mount-re.md,

@@ -1093,9 +1093,10 @@ func request_quit() -> void:
 	_quit_requested = true
 	# The main loop's exit saves game.cfg before the shutdown
 	# (docs/gamecfg/game-cfg-re.md, the save points), and the menu's teardown on the way out saves
-	# its cookie jar to nw_cdata.coo (NovaWorldClient.save_cookie_jar).
+	# its cookie jar to nw_cdata.coo and frees the browser's lists
+	# (NovaWorldClient.destroy_menu_browser).
 	GameCfgStore.save()
-	NovaWorldClient.save_cookie_jar()
+	NovaWorldClient.destroy_menu_browser()
 	# And the high scores (engine: runtime/mission/mission_catalog.h HighScoreTable).
 	MissionCatalog.save_high_scores(String(LaunchFlags.working_dir()))
 	var load_operation := begin_runtime_shutdown()
