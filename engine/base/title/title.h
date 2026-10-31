@@ -317,6 +317,10 @@ struct Title {
 	//  @0x5C86B0 - Viewport_ScreenToVirtual @0x5C8E0F / @0x5C8E23, sub_591440 @0x5C8E40; sub_591440
 	//  @0x591440, its texture 0x2724E2C read @0x59145A and written nowhere (dfx2.exe)]
 	bool inset_reticle_quad = false;
+	// DFX2-47: the side of FrameFX's two square work targets ([fx+4] / [fx+8]) and of every pass
+	// that draws into the work rect (runtime/renderer/frame_fx_effects.h frame_fx_work_side):
+	// Jointops.exe's 256, dfx2.exe's 512. 0 unwitnessed.
+	int32_t frame_fx_work_side = 0;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

@@ -21,6 +21,8 @@
 #include <functional>
 #include <vector>
 
+#include <base/title/title.h>
+
 namespace opennova::renderer {
 
 // The FBEFFECTS level every gate reads (dword_24D2068). The reimpl runs the
@@ -28,9 +30,17 @@ namespace opennova::renderer {
 // [orig: FrameFX_QualityAtLeast3 @0x581f60]
 inline constexpr int kLockedFrameEffectsLevel = 3;
 
-// The two square work targets ([fx+4] / [fx+8], 256 x 256).
-// [orig: FrameFX_CreateRenderTargets @0x583cf7..0x583d04]
-inline constexpr int kFrameFxWorkSide = 256;
+// The side of the two square work targets ([fx+4] / [fx+8]) and of the work
+// rect every pass not on the viewport rect draws into ([fx+9Ch] / [fx+0A0h]):
+// the title's (Title::frame_fx_work_side, DFX2-47), Jointops.exe's 256,
+// dfx2.exe's 512. The passes' UV constants are fractions of the target, so a
+// 512 target draws the same taps at twice the resolution.
+// [orig: FrameFX_CreateRenderTargets @0x583cf7..0x583d04; FrameFX_DrawPass
+//  @0x582b32..0x582b49] [orig: the twin of FrameFX_CreateRenderTargets
+//  @0x5820c0 - @0x582177 (dfx2.exe)]
+inline int frame_fx_work_side(const Title &title) {
+	return title.frame_fx_work_side;
+}
 
 // The capture target [fx+0] per axis: the highest power of two not above
 // (backbuffer - 1), found by clearing the lowest set bit until one remains.

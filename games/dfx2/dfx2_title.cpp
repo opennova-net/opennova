@@ -241,6 +241,10 @@ Title make() {
 	//  arms; sub_591440 @0x591440 - `test ecx, ecx; jz` @0x591460 over the never-written
 	//  0x2724E2C (dfx2.exe)].
 	t.inset_reticle_quad = true;
+	// DFX2-47: the 512-square FrameFX work targets [orig: the twin of FrameFX_CreateRenderTargets
+	//  @0x5820C0 - `mov eax, 200h` @0x582177; FrameFX_DrawPass @0x580F30 reads the same two words
+	//  (dfx2.exe)].
+	t.frame_fx_work_side = 512;
 	return t;
 }
 

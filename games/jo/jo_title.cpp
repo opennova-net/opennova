@@ -146,6 +146,10 @@ Title make() {
 	//  0x20 @0x5D000D, 0x3F0 @0x5D0015, 0x40 @0x5D001D, each pair through
 	//  Viewport_ScaleToVirtualCoords @0x5D0025 / @0x5D0039].
 	t.nvg_gain_rect = TitleRect{ 960, 32, 1008, 64 };
+	// DFX2-47: the 256-square FrameFX work targets [orig: FrameFX_CreateRenderTargets @0x583C40 -
+	//  `mov eax, 100h` @0x583CF7 into [fx+9Ch] / [fx+0A0h] @0x583CFE / @0x583D04, the sides both
+	//  targets take @0x583D36 / @0x583D85 and FrameFX_DrawPass's work rect @0x582B32..0x582B49].
+	t.frame_fx_work_side = 256;
 	return t;
 }
 

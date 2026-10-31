@@ -9,6 +9,7 @@
 #include "render/rd_uniforms.h"
 #include "render/target_projection_xr_interface.h"
 #include "render/world_environment_lookup.h"
+#include "resource_index/resource_root.h" // session_title (the work targets' side)
 #include "util/string_convert.h"
 
 #include <base/crt/crt_rng.h>
@@ -510,7 +511,8 @@ Dictionary FrameFx::get_backend_report() const {
 			terminal_effect_->get_backend_report() :
 			Dictionary();
 	result["beauty_camera_mask"] = static_cast<int64_t>(kBeautyCameraMask);
-	result["q3_working_height"] = static_cast<int64_t>(opennova::renderer::kFrameFxWorkSide);
+	result["q3_working_height"] = static_cast<int64_t>(opennova::renderer::frame_fx_work_side(
+			ResourceRoot::session_title(Ref<ResourceRoot>())));
 	result["shutdown"] = shutdown_;
 	WorldEnvironment *world_environment =
 			world_environment_from_id(world_environment_id_);

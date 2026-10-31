@@ -8,6 +8,7 @@
 #include "render/rd_uniforms.h"
 #include "render/target_projection_xr_interface.h"
 #include "render/world_environment_lookup.h"
+#include "resource_index/resource_root.h" // session_title (the work targets' side)
 #include "util/string_convert.h"
 
 #include <base/crt/crt_rng.h>
@@ -71,10 +72,6 @@ using opennova::renderer::FrameFxStep;
 using opennova::renderer::FrameFxStepKind;
 using opennova::renderer::FrameFxTaps;
 
-// FrameFX's 256-square work targets. Focused Q3 is rendered at beauty
-// resolution into the compositor's color attachment with resolved beauty
-// depth attached; this size applies from the capture's downsample on.
-constexpr std::int32_t kWorkSide = opennova::renderer::kFrameFxWorkSide;
 constexpr std::uint32_t kPushConstantBytes = 64u;
 
 // The fragment stage a draw evaluates (pc.mode_taps.x).
@@ -461,6 +458,11 @@ Ref<Compositor> godot::compositor_with_terminal(const Ref<Compositor> &previous,
 
 class FrameFxCompositorEffect::Impl {
 public:
+	// FrameFX's square work targets, the session's title's side (256, dfx2.exe's 512: DFX2-47).
+	// Focused Q3 is rendered at beauty resolution into the compositor's color attachment with
+	// resolved beauty depth attached; this size applies from the capture's downsample on.
+	const std::int32_t work_side = opennova::renderer::frame_fx_work_side(
+			ResourceRoot::session_title(Ref<ResourceRoot>()));
 	struct PipelineKey {
 		int64_t framebuffer_format = -1;
 		BlendMode blend = BlendMode::Replace;
@@ -959,7 +961,7 @@ bool FrameFxCompositorEffect::Impl::ensure_targets(
 				"render_targets_invalid");
 		return false;
 	}
-	const Vector2i work(kWorkSide, kWorkSide);
+	const Vector2i work(work_side, work_side);
 	const Vector2i nvg_scene(opennova::renderer::kNvgSceneSide,
 			opennova::renderer::kNvgSceneSide);
 	const Vector2i nvg_glow(opennova::renderer::kNvgGlowSide,
@@ -1276,11 +1278,11 @@ bool FrameFxCompositorEffect::Impl::run_pass(ViewTarget &target,
 			break;
 		case FrameFxBuffer::WorkA:
 			framebuffer = target.low_a_framebuffer;
-			target_size = Vector2i(kWorkSide, kWorkSide);
+			target_size = Vector2i(work_side, work_side);
 			break;
 		case FrameFxBuffer::WorkB:
 			framebuffer = target.low_b_framebuffer;
-			target_size = Vector2i(kWorkSide, kWorkSide);
+			target_size = Vector2i(work_side, work_side);
 			break;
 		case FrameFxBuffer::Scanlines:
 			set_failure("A FrameFX pass cannot target the scanline texture");
@@ -1299,11 +1301,11 @@ bool FrameFxCompositorEffect::Impl::run_pass(ViewTarget &target,
 			break;
 		case FrameFxBuffer::WorkA:
 			uniform = target.low_a_uniform;
-			source_size = Vector2i(kWorkSide, kWorkSide);
+			source_size = Vector2i(work_side, work_side);
 			break;
 		case FrameFxBuffer::WorkB:
 			uniform = target.low_b_uniform;
-			source_size = Vector2i(kWorkSide, kWorkSide);
+			source_size = Vector2i(work_side, work_side);
 			break;
 		case FrameFxBuffer::Scanlines:
 			if (!ensure_scanlines())
@@ -1314,7 +1316,7 @@ bool FrameFxCompositorEffect::Impl::run_pass(ViewTarget &target,
 			break;
 	}
 	// The viewport rect (CD3DDevice_GetViewportRect), else the 256 square.
-	const Vector2i rect = pass.viewport_rect ? target_size : Vector2i(kWorkSide, kWorkSide);
+	const Vector2i rect = pass.viewport_rect ? target_size : Vector2i(work_side, work_side);
 	const float base = pass.base_from_capture ?
 			0.5f / static_cast<float>(std::min(target.capture_size.x, target.capture_size.y)) :
 			pass.base;
@@ -1726,7 +1728,7 @@ Dictionary FrameFxCompositorEffect::Impl::report() const {
 	result["q3_isolated_target"] = true;
 	result["capture_filter"] = "linear_rgba8_highest_quality";
 	result["capture_power_of_two_floor"] = true;
-	result["blur_target_size"] = static_cast<int64_t>(kWorkSide);
+	result["blur_target_size"] = static_cast<int64_t>(work_side);
 	result["framebuffer_blend_domain"] = "gamma";
 	result["terminal_transfer"] = "srgb_inverse_then_display_encode";
 	// How the last frame's views ran that transfer: in Godot's tonemap through

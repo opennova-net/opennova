@@ -57,6 +57,14 @@ std::size_t count_kind(const std::vector<FrameFxStep> &steps, FrameFxStepKind ki
 	return count;
 }
 
+// DFX2-47: the work targets' side is the title's: Jointops.exe's 256, dfx2.exe's 512.
+// [orig: FrameFX_CreateRenderTargets @0x583cf7..0x583d04; @0x582177 (dfx2.exe)]
+void work_side_is_the_titles() {
+	CHECK(frame_fx_work_side(*opennova::title_by_code("jo")) == 256);
+	CHECK(frame_fx_work_side(*opennova::title_by_code("dfx2")) == 512);
+	CHECK(frame_fx_work_side(*opennova::title_by_code("acidgambit")) == 256);
+}
+
 // [orig: FrameFX_CreateRenderTargets @0x583c7f..0x583c97]
 void capture_side_is_the_power_of_two_floor_of_one_less() {
 	CHECK(frame_fx_capture_side(1024) == 512);
@@ -456,6 +464,7 @@ void nvg_tint_and_glow_follow_their_pixel_shaders() {
 } // namespace
 
 int main() {
+	work_side_is_the_titles();
 	capture_side_is_the_power_of_two_floor_of_one_less();
 	quiet_frame_plans_only_the_bloom();
 	bloom_kernel_reduces_u_on_the_first_weighted_pair();
