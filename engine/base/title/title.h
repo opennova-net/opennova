@@ -237,6 +237,11 @@ struct Title {
 	//  @0x592bf8..0x592c2d)] [orig: sub_590A80 @0x590A80 (dfx2.exe) - the projection times
 	//  flt_7C2244 (0.0) @0x590F7F, no seat swap]
 	bool hud_crosshair_fixed = false;
+	// DFX2-85: the stance icon takes the stance colour triple (hudpos stancecolor_good / _middle /
+	// _bad) by the HUD info's health band, where Jointops.exe's takes stanceicon_color.
+	// [orig: HUD_DrawStanceIndicator @0x599F10 (dword_2723AE8 @0x599FE1)] [orig: sub_5A1A50
+	//  @0x5A1A50 (dfx2.exe) - HUD_ClassifyHealthBand @0x5A1AB6, the triple @0x5A1AC2..0x5A1AD4]
+	bool hud_stance_health_tint = false;
 };
 
 // Fills the registry with `titles` (each outliving the program) and names its default: the title

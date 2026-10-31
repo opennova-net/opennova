@@ -185,6 +185,9 @@ Title make() {
 	// DFX2-84: the crosshair holds still, and no seat swaps it [orig: sub_590A80 @0x590A80 -
 	//  @0x590F7F, the arms @0x590FB0..0x591032 (dfx2.exe)].
 	t.hud_crosshair_fixed = true;
+	// DFX2-85: the stance icon tinted by the health band [orig: sub_5A1A50 @0x5A1A50 -
+	//  @0x5A1AB0..0x5A1AD4 (dfx2.exe)].
+	t.hud_stance_health_tint = true;
 	return t;
 }
 

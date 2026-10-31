@@ -3327,6 +3327,35 @@ void test_bordered_image_sites(const fnt_font_t *font) {
 			if (q.texture == kHudTexStance0 + 6 || q.texture == kHudTexStance0 + 7) ++n;
 		return n;
 	};
+	// dfx2.exe tints the frame by the HUD info's health band, the stance triple, where
+	// Jointops.exe takes stanceicon_color (DFX2-85) [orig: sub_5A1A50 @0x5A1A50 -
+	// @0x5A1AB0..0x5A1AD4 (dfx2.exe)] [orig: HUD_DrawStanceIndicator @0x599FE1].
+	{
+		const opennova::Title *dfx2 = opennova::title_by_code("dfx2");
+		const opennova::Title *jo = opennova::title_by_code("jo");
+		CHECK(dfx2 != nullptr && dfx2->hud_stance_health_tint, "dfx2.exe tints by health");
+		CHECK(jo != nullptr && !jo->hud_stance_health_tint, "Jointops.exe takes stanceicon_color");
+		HudLayout tinted = layout;
+		tinted.stance_good = 0xFF00FF01u;
+		tinted.stance_middle = 0xFF00FF02u;
+		tinted.stance_bad = 0xFF00FF03u;
+		compiler.update_layout(tinted);
+		auto stance_rgb = [&](const opennova::Title *title, float health) {
+			HudFrameState s = state;
+			s.session = {};
+			s.title = title;
+			s.health_fraction = health;
+			for (const auto &q : compiler.compile(s, 1024, 768).quads)
+				if (q.texture == kHudTexStance0 + 2) return q.color & 0x00FFFFFFu;
+			return 0xFFFFFFFFu;
+		};
+		CHECK(stance_rgb(jo, 0.2f) == 0x00FF8020u, "JO's stance keeps stanceicon_color");
+		CHECK(stance_rgb(dfx2, 1.0f) == 0x0000FF01u, "dfx2's healthy stance is good");
+		CHECK(stance_rgb(dfx2, 0.75f) == 0x0000FF02u, "0xC000 itself is middle");
+		CHECK(stance_rgb(dfx2, 0.4375f) == 0x0000FF02u, "0x7000 is still middle");
+		CHECK(stance_rgb(dfx2, 0.4f) == 0x0000FF03u, "a low health is bad");
+		compiler.update_layout(layout);
+	}
 	CHECK(tile_count(0x10000u, true, 1) == 1, "team 1 draws its tile");
 	CHECK(tile_count(0x30000u, true, 1) == 0, "a game type with 0x20000 draws none");
 	CHECK(tile_count(0x00000u, true, 1) == 0, "a game type without 0x10000 draws none");

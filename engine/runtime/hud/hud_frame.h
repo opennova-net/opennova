@@ -1278,6 +1278,10 @@ struct HudFrameState {
 	HudNetQualityState net_quality;
 };
 
+// The HUD info's 16.16 health ratio, the health bar's fill and colour band (and dfx2.exe's stance
+// tint, DFX2-85): the local player's, or on the death screen the spectate target's, capped at 1.0.
+int32_t hud_info_health_ratio_fp16(const HudFrameState &state);
+
 struct HudDrawList {
 	std::vector<HudQuad> quads;
 	std::vector<HudTri> tris;
