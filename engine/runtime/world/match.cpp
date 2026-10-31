@@ -583,15 +583,21 @@ void Match::record_flag_pickup(World &world, EntityHandle player_handle,
     Entity *carrier = world.registry.get(player_handle);
     Entity *flag = world.registry.get(flag_handle);
     if (scorer == nullptr || carrier == nullptr || flag == nullptr ||
-        carrier->mounted_child.valid() || flag->primary_occupant.valid())
+        carrier->mounted_child.valid())
         return;
-    // The attach, then the pickup's scorer event 10.
+    // The attach's own gate (a def, no occupant), then the pickup's scorer
+    // event 10 and the toucher's damage-disabled word cleared, whether or not
+    // the attach took the flag.
     // [orig: Entity_ProcessWaypointInteraction - Entity_TryAttachCarriedObject
-    //  @0x4AD944, Server_DispatchScoringEvent @0x4AD94B (@0x50C910:
-    //  GameEvent_ProcessScoring event 10 @0x50C938)]
-    attach_carried_object(world, *carrier, *flag);
+    //  @0x4AD944 (@0x43C1F0: the def @0x43C1F4, +0x170 @0x43C20C),
+    //  Server_DispatchScoringEvent @0x4AD94B (@0x50C910: GameEvent_ProcessScoring
+    //  event 10 @0x50C938), `mov [esi+124h], 0` @0x4AD955; @0x4AD9A4..0x4AD9B5
+    //  (dfx2.exe)]
+    if (flag->has_item_def && !flag->primary_occupant.valid())
+        attach_carried_object(world, *carrier, *flag);
     add_event(world, *scorer, MatchStats::kFlagPickups, score_value(11));
     add_team_event(carrier->team, MatchStats::kFlagPickups, score_value(11));
+    carrier->damage_state = 0;
 }
 
 // The carry attach of any def: the link both ways, the carried (hidden) bit and
@@ -1925,7 +1931,7 @@ void Match::update_flag_objectives(World &world) {
             continue;
         }
 
-        if (!is_flag(target->item_id) || target->primary_occupant.valid())
+        if (!is_flag(target->item_id))
             continue;
         // An enemy or neutral flag is picked up when the toucher carries
         // nothing. [orig: Entity_ProcessWaypointInteraction @0x4AD820 — the

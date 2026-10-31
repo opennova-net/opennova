@@ -1586,6 +1586,26 @@ void test_own_flag_touch_syncs_its_definition_pose() {
     CHECK(world->match.player(blue)->stats[MatchStats::kFlagSaves] == 1);
 }
 
+// The pickup leg scores and clears the toucher's damage-disabled word (+0x124)
+// whether or not the attach takes the flag: an occupied flag stays where it is.
+// [orig: Entity_ProcessWaypointInteraction @0x4AD936..0x4AD955;
+//  Entity_TryAttachCarriedObject @0x43C20C]
+void test_pickup_leg_scores_even_when_the_attach_refuses() {
+    for (const bool occupied : {false, true}) {
+        TakeableRig rig(4095);
+        rig.object_entity().item_attrib = kItemAttribMoveCallback;
+        rig.carrier_entity().damage_state = 620;
+        const EntityHandle other = player(*rig.world, 1, 2, "Other");
+        if (occupied)
+            rig.object_entity().primary_occupant = other;
+        rig.touch_and_run();
+        CHECK((rig.carrier_entity().mounted_child == rig.object) == !occupied);
+        CHECK(rig.object_entity().primary_occupant == (occupied ? other : rig.carrier));
+        CHECK(rig.world->match.player(rig.carrier)->stats[MatchStats::kFlagPickups] == 1);
+        CHECK(rig.carrier_entity().damage_state == 0);
+    }
+}
+
 // The entity update's own tail consumes the flag and bay touches its bodies'
 // movement resolves recorded, so the pickup lands in the frame that touched,
 // ahead of the next server tick. The handler returns at once off the
@@ -2154,6 +2174,7 @@ int main() {
     test_a_solid_neighbour_does_not_shadow_a_takeable_touch();
     test_a_carrier_still_saves_its_own_flag();
     test_own_flag_touch_syncs_its_definition_pose();
+    test_pickup_leg_scores_even_when_the_attach_refuses();
     test_entity_update_consumes_its_movement_contacts();
     test_aas_capture_scoring_and_outcomes();
     test_flagball_four_team_bays_consume_exact_contacts();
